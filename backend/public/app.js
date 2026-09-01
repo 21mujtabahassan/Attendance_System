@@ -1002,10 +1002,34 @@ async function loadRecordsData() {
 
 // -------------------------------------------------------------
 // TAB 7: WHATSAPP GATEWAY CONTROL
-// -------------------------------------------------------------
+// ------------------let resolvedWaApiBase = null;
+
+async function getWaApiBase() {
+  if (resolvedWaApiBase) return resolvedWaApiBase;
+  if (!window.location.hostname.includes('vercel.app')) {
+    resolvedWaApiBase = API_BASE;
+    return API_BASE;
+  }
+
+  try {
+    const controller = new AbortController();
+    const id = setTimeout(() => controller.abort(), 1200);
+    const res = await fetch('http://localhost:3000/api/whatsapp/status?schoolId=unique_scholars', { signal: controller.signal });
+    clearTimeout(id);
+    if (res.ok) {
+      resolvedWaApiBase = 'http://localhost:3000/api';
+      return resolvedWaApiBase;
+    }
+  } catch (e) {}
+
+  resolvedWaApiBase = API_BASE;
+  return API_BASE;
+}
+
 async function fetchWaStatus() {
   try {
-    const res = await fetch(`${API_BASE}/whatsapp/status?schoolId=${CURRENT_SCHOOL_ID}`);
+    const baseUrl = await getWaApiBase();
+    const res = await fetch(`${baseUrl}/whatsapp/status?schoolId=${CURRENT_SCHOOL_ID}`);
     const data = await res.json();
     currentWaStatus = data;
     updateWaStatusUI(data);
@@ -1021,6 +1045,28 @@ function updateWaStatusUI(data) {
 
   const status = data.status || 'disconnected';
   const qr = data.qr || '';
+  const message = data.message || '';
+
+  if (message && message.includes('persistent local/VPS backend node')) {
+    if (sidebarPill) sidebarPill.className = 'wa-status-pill disconnected';
+    if (sidebarText) sidebarText.innerText = 'WA Server Offline';
+    if (qrBox) {
+      qrBox.innerHTML = `
+        <div style="background: rgba(245, 158, 11, 0.15); border: 2px dashed #f59e0b; padding: 24px; border-radius: 16px; max-width: 550px; margin: 0 auto; text-align: center;">
+          <i class="fa-solid fa-server" style="font-size: 44px; color: #f59e0b; margin-bottom: 12px;"></i>
+          <h3 style="color: #fff; margin-bottom: 8px;">Local Backend Server Required</h3>
+          <p style="color: #cbd5e1; font-size: 13px; line-height: 1.5; margin-bottom: 18px;">
+            Vercel serverless hosting cannot keep persistent WhatsApp WebSocket sessions alive.<br>
+            Please start your local school backend server (<code>npm start</code>) and open:
+          </p>
+          <a href="http://localhost:3000/admin" target="_blank" class="btn btn-accent" style="text-decoration: none; display: inline-block;">
+            🖥️ Open Local Admin Portal (http://localhost:3000/admin)
+          </a>
+        </div>
+      `;
+    }
+    return;
+  }
 
   if (status === 'connected') {
     if (sidebarPill) sidebarPill.className = 'wa-status-pill connected';
@@ -1040,7 +1086,7 @@ function updateWaStatusUI(data) {
     if (qrBox) {
       qrBox.innerHTML = `
         <p style="color: #f59e0b; font-weight: bold; margin-bottom: 14px;">⚡ Scan QR Code with School WhatsApp Phone:</p>
-        <img src="${qr}" alt="WhatsApp QR Code">
+        <img src="${qr}" alt="WhatsApp QR Code" style="width: 220px; height: 220px; border-radius: 12px; border: 4px solid #fff;">
         <p style="color: #94a3b8; font-size: 12px; margin-top: 12px;">Open WhatsApp > Linked Devices > Link a Device</p>
       `;
     }
@@ -1082,7 +1128,8 @@ function startWaStatusPolling() {
 async function triggerWhatsAppConnect() {
   try {
     showToast('Initializing WhatsApp connection...');
-    const res = await fetch(`${API_BASE}/whatsapp/connect`, {
+    const baseUrl = await getWaApiBase();
+    const res = await fetch(`${baseUrl}/whatsapp/connect`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ schoolId: CURRENT_SCHOOL_ID })
@@ -1098,7 +1145,8 @@ async function triggerWhatsAppConnect() {
 async function triggerWhatsAppReconnect() {
   try {
     showToast('Reconnecting WhatsApp socket...');
-    const res = await fetch(`${API_BASE}/whatsapp/reconnect`, {
+    const baseUrl = await getWaApiBase();
+    const res = await fetch(`${baseUrl}/whatsapp/reconnect`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ schoolId: CURRENT_SCHOOL_ID })
@@ -1111,12 +1159,12 @@ async function triggerWhatsAppReconnect() {
   }
 }
 
-
 async function triggerWhatsAppDisconnect() {
   if (!confirm('Are you sure you want to disconnect WhatsApp and clear active session keys?')) return;
   try {
     showToast('Disconnecting WhatsApp session...');
-    const res = await fetch(`${API_BASE}/whatsapp/disconnect`, {
+    const baseUrl = await getWaApiBase();
+    const res = await fetch(`${baseUrl}/whatsapp/disconnect`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ schoolId: CURRENT_SCHOOL_ID })
@@ -1128,6 +1176,7 @@ async function triggerWhatsAppDisconnect() {
     showToast('Error disconnecting WhatsApp.');
   }
 }
+
 
 // -------------------------------------------------------------
 // MODALS & TOAST HELPERS
