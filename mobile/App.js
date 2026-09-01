@@ -457,9 +457,12 @@ export default function App() {
               onPress={handleSubmitFinal}
               disabled={submitting}
             >
+              <Text style={styles.btnFinalText}>🚀 Final Submit & Alert</Text>
+            </TouchableOpacity>
           </View>
         </View>
       )}
+
 
       {activeTab === 'whatsapp' && (
 
