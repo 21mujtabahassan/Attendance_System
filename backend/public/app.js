@@ -1064,6 +1064,21 @@ function updateWaStatusUI(data) {
   }
 }
 
+let waPollTimer = null;
+
+function startWaStatusPolling() {
+  if (waPollTimer) clearInterval(waPollTimer);
+  let pollAttempts = 0;
+  waPollTimer = setInterval(async () => {
+    pollAttempts += 1;
+    await fetchWaStatus();
+    if (currentWaStatus.status === 'connected' || currentWaStatus.status === 'qr_ready' || pollAttempts > 30) {
+      clearInterval(waPollTimer);
+      waPollTimer = null;
+    }
+  }, 1500);
+}
+
 async function triggerWhatsAppConnect() {
   try {
     showToast('Initializing WhatsApp connection...');
@@ -1074,6 +1089,7 @@ async function triggerWhatsAppConnect() {
     });
     const data = await res.json();
     updateWaStatusUI(data);
+    startWaStatusPolling();
   } catch (e) {
     showToast('Error connecting WhatsApp socket.');
   }
@@ -1089,10 +1105,12 @@ async function triggerWhatsAppReconnect() {
     });
     const data = await res.json();
     updateWaStatusUI(data);
+    startWaStatusPolling();
   } catch (e) {
     showToast('Error triggering reconnect.');
   }
 }
+
 
 async function triggerWhatsAppDisconnect() {
   if (!confirm('Are you sure you want to disconnect WhatsApp and clear active session keys?')) return;

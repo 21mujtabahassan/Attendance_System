@@ -300,13 +300,12 @@ export default function App() {
             </TouchableOpacity>
           )}
 
-          {/* WA BADGE */}
-          <TouchableOpacity 
+          {/* WA BADGE - READ ONLY STATUS FOR MOBILE APP */}
+          <View 
             style={[
               styles.waBadge, 
               { backgroundColor: waStatus.status === 'connected' ? '#064e3b' : '#7f1d1d' }
             ]}
-            onPress={() => setActiveTab('whatsapp')}
           >
             <View style={[
               styles.statusDot, 
@@ -315,7 +314,7 @@ export default function App() {
             <Text style={styles.waBadgeText}>
               {waStatus.status === 'connected' ? 'WA Online' : 'WA Offline'}
             </Text>
-          </TouchableOpacity>
+          </View>
         </View>
       </View>
 
@@ -327,15 +326,6 @@ export default function App() {
         >
           <Text style={[styles.tabText, activeTab === 'attendance' && styles.tabTextActive]}>
             Attendance
-          </Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity 
-          style={[styles.tabButton, activeTab === 'whatsapp' && styles.tabActive]}
-          onPress={() => setActiveTab('whatsapp')}
-        >
-          <Text style={[styles.tabText, activeTab === 'whatsapp' && styles.tabTextActive]}>
-            WhatsApp Setup
           </Text>
         </TouchableOpacity>
 
@@ -363,6 +353,7 @@ export default function App() {
           </Text>
         </TouchableOpacity>
       </View>
+
 
       {/* MAIN CONTENT */}
       {activeTab === 'attendance' && (
@@ -459,41 +450,7 @@ export default function App() {
         </View>
       )}
 
-      {activeTab === 'whatsapp' && (
-        <ScrollView style={styles.panelPadding}>
-          <View style={styles.card}>
-            <Text style={styles.cardTitle}>📱 WhatsApp Web Connection</Text>
-            <Text style={styles.cardDesc}>
-              Scan this QR code from Unique Scholars' official phone to enable free parent WhatsApp dispatches.
-            </Text>
 
-            {waStatus.qr ? (
-              <View style={styles.qrContainer}>
-                <Image source={{ uri: waStatus.qr }} style={{ width: 220, height: 220 }} />
-                <Text style={styles.qrHint}>Point your WhatsApp phone camera at this QR code</Text>
-              </View>
-            ) : waStatus.status === 'connected' ? (
-              <View style={styles.connectedBox}>
-                <Text style={styles.connectedTitle}>✅ WhatsApp Connected!</Text>
-                <Text style={styles.connectedText}>Session is active and ready to send parent alerts.</Text>
-              </View>
-            ) : (
-              <View style={{ alignItems: 'center', marginVertical: 20 }}>
-                <ActivityIndicator size="large" color="#3b82f6" style={{ marginVertical: 15 }} />
-                {waStatus.error ? (
-                  <Text style={{ color: '#ef4444', textAlign: 'center', fontSize: 13, paddingHorizontal: 10 }}>
-                    ⚠️ Network Error: Unable to reach backend server.{'\n'}{waStatus.error}
-                  </Text>
-                ) : (
-                  <Text style={{ color: '#94a3b8', textAlign: 'center', fontSize: 13 }}>
-                    Connecting to WhatsApp Gateway...
-                  </Text>
-                )}
-              </View>
-            )}
-          </View>
-        </ScrollView>
-      )}
 
       {activeTab === 'logs' && (
         <ScrollView style={styles.panelPadding}>
