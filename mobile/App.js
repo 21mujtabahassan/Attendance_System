@@ -114,10 +114,16 @@ export default function App() {
     setWaStatus(statusData);
   };
 
+  const getSelectedClassName = () => {
+    const found = classes.find(c => c.id === selectedClass);
+    return found ? found.name : (selectedClass || 'class');
+  };
+
   const loadLogs = async () => {
     const logList = await getAttendanceLogs('unique_scholars');
-    setLogs(logList);
+    setLogs(Array.isArray(logList) ? [...logList].reverse() : []);
   };
+
 
   const loadAdminDashboard = async () => {
     setLoadingAdmin(true);
@@ -205,6 +211,7 @@ export default function App() {
     setSubmitting(false);
 
     if (res.success) {
+      await loadLogs();
       Alert.alert('Draft Saved 📝', `Attendance draft saved at ${formattedTime}! Late students can be updated until final submission.`);
     } else {
       Alert.alert('Error', res.error || 'Failed to save draft.');
@@ -245,6 +252,7 @@ export default function App() {
             setSubmitting(false);
 
             if (res.success) {
+              await loadLogs();
               Alert.alert(
                 'Attendance Finalized 🎉',
                 `Attendance Locked at ${formattedTime}!\nTotal: ${res.summary.total}\nPresent: ${res.summary.present}\nAbsent: ${res.summary.absent}\nWhatsApp Alerts Sent: ${res.summary.whatsappAlertsSent}`
@@ -252,6 +260,7 @@ export default function App() {
             } else {
               Alert.alert('Submission Error', res.error || 'Failed to submit attendance.');
             }
+
           }
         }
       ]
@@ -414,7 +423,8 @@ export default function App() {
               <Text style={styles.emptyText}>
                 {classes.length === 0 
                   ? "⚠️ Unable to load classes. Ensure backend is running."
-                  : `No students found for ${classes.find(c => c.id === selectedClass)?.name || selectedClass}.`}
+                  : `No students found for ${getSelectedClassName()}.`}
+
               </Text>
               <TouchableOpacity style={styles.refreshBtn} onPress={handleRefresh}>
                 <Text style={styles.refreshBtnText}>🔄 Tap to Refresh Data</Text>
