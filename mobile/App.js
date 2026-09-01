@@ -502,6 +502,13 @@ export default function App() {
               </TouchableOpacity>
             </View>
 
+            {waStatus.message ? (
+              <View style={{ padding: 14, backgroundColor: 'rgba(245, 158, 11, 0.15)', borderRadius: 12, borderLeftWidth: 4, borderLeftColor: '#f59e0b', marginBottom: 15 }}>
+                <Text style={{ color: '#f59e0b', fontWeight: 'bold', fontSize: 13, marginBottom: 4 }}>⚠️ Notice:</Text>
+                <Text style={{ color: '#cbd5e1', fontSize: 12, lineHeight: 18 }}>{waStatus.message}</Text>
+              </View>
+            ) : null}
+
             {waStatus.qr ? (
               <View style={styles.qrContainer}>
                 <Image source={{ uri: waStatus.qr }} style={{ width: 230, height: 230, borderRadius: 12, borderWidth: 4, borderColor: '#ffffff' }} />
@@ -523,6 +530,7 @@ export default function App() {
           </View>
         </ScrollView>
       )}
+
 
       {activeTab === 'logs' && (
 
