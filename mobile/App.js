@@ -457,11 +457,12 @@ export default function App() {
               onPress={handleSubmitFinal}
               disabled={submitting}
             >
-              <Text style={styles.btnFinalText}>🚀 Final Submit & Alert</Text>
-            </TouchableOpacity>
           </View>
         </View>
+      )}
+
       {activeTab === 'whatsapp' && (
+
         <ScrollView style={styles.panelPadding}>
           <View style={styles.card}>
             <Text style={styles.cardTitle}>📱 WhatsApp Gateway Connection</Text>
