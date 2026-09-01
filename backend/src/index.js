@@ -96,9 +96,10 @@ app.get('/api/whatsapp/status', (req, res) => {
 
 app.post('/api/whatsapp/connect', async (req, res) => {
   const { schoolId = 'unique_scholars' } = req.body;
-  const result = await initWhatsApp(schoolId, io);
+  const result = await initWhatsApp(schoolId, io, true);
   res.json(result);
 });
+
 
 app.post('/api/whatsapp/reconnect', async (req, res) => {
   const { schoolId = 'unique_scholars' } = req.body;
