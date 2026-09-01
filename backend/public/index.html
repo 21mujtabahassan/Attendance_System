@@ -1,0 +1,748 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Unique Scholars Academy - Unified Admin Portal</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link
+    href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Outfit:wght@500;600;700;800&display=swap"
+    rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+
+  <!-- APP SHELL -->
+  <div class="app-container">
+
+    <!-- SIDEBAR -->
+    <aside class="sidebar" id="sidebar">
+      <div class="brand">
+        <div class="brand-icon">
+          <i class="fa-solid fa-graduation-cap"></i>
+        </div>
+        <div>
+          <h2>Unique Scholars</h2>
+          <p>Admin Control Web Portal</p>
+        </div>
+      </div>
+
+      <nav class="nav-menu">
+        <button class="nav-item active" data-tab="overview">
+          <i class="fa-solid fa-chart-pie"></i> <span>Executive Overview</span>
+        </button>
+        <button class="nav-item" data-tab="results">
+          <i class="fa-solid fa-award"></i> <span>Academic Results</span>
+        </button>
+        <button class="nav-item" data-tab="broadcast">
+          <i class="fa-solid fa-bullhorn"></i> <span>WhatsApp Broadcast</span>
+        </button>
+        <button class="nav-item" data-tab="classes">
+          <i class="fa-solid fa-school"></i> <span>Classes & Sections</span>
+        </button>
+        <button class="nav-item" data-tab="students">
+          <i class="fa-solid fa-user-graduate"></i> <span>Student Roster</span>
+        </button>
+        <button class="nav-item" data-tab="records">
+          <i class="fa-solid fa-clipboard-list"></i> <span>Attendance History</span>
+        </button>
+        <button class="nav-item" data-tab="whatsapp">
+          <i class="fa-brands fa-whatsapp"></i> <span>WhatsApp Gateway</span>
+        </button>
+      </nav>
+
+      <div class="sidebar-footer">
+        <div class="wa-status-pill" id="sidebarWaStatus">
+          <span class="status-dot"></span> <span id="waStatusText">Connecting WA...</span>
+        </div>
+      </div>
+    </aside>
+
+    <!-- MAIN CONTENT AREA -->
+    <main class="main-content">
+
+      <!-- TOPBAR -->
+      <header class="topbar">
+        <div class="topbar-title">
+          <h1 id="pageTitle">Executive Overview</h1>
+          <p id="pageSubtitle">Real-time attendance ratios, class breakdown & quick actions</p>
+        </div>
+
+        <div class="topbar-actions">
+          <div class="live-clock" id="liveClock">📅 Loading...</div>
+          <button class="btn btn-primary" onclick="openModal('addStudentModal')">
+            <i class="fa-solid fa-plus"></i> Add Student
+          </button>
+          <button class="btn btn-accent" onclick="openModal('addClassModal')">
+            <i class="fa-solid fa-folder-plus"></i> Add Class
+          </button>
+        </div>
+      </header>
+
+      <!-- TAB 1: EXECUTIVE OVERVIEW -->
+      <section class="tab-content active" id="tab-overview">
+        <div class="metrics-grid">
+          <div class="card metric-card">
+            <div class="metric-icon blue"><i class="fa-solid fa-user-check"></i></div>
+            <div>
+              <p class="metric-label">Today's Attendance Rate</p>
+              <h3 class="metric-value" id="statTodayRate">0%</h3>
+              <p class="metric-sub" id="statTodayMeta">0 Present / 0 Absent</p>
+            </div>
+          </div>
+
+          <div class="card metric-card">
+            <div class="metric-icon purple"><i class="fa-solid fa-award"></i></div>
+            <div>
+              <p class="metric-label">Finalized Results</p>
+              <h3 class="metric-value" id="statFinalizedResults">0</h3>
+              <p class="metric-sub">Academic Marksheets Dispatched</p>
+            </div>
+          </div>
+
+          <div class="card metric-card">
+            <div class="metric-icon green"><i class="fa-solid fa-users"></i></div>
+            <div>
+              <p class="metric-label">Total Active Students</p>
+              <h3 class="metric-value" id="statTotalStudents">0</h3>
+              <p class="metric-sub" id="statTotalClasses">0 Classes</p>
+            </div>
+          </div>
+
+          <div class="card metric-card">
+            <div class="metric-icon orange"><i class="fa-brands fa-whatsapp"></i></div>
+            <div>
+              <p class="metric-label">WhatsApp Dispatches</p>
+              <h3 class="metric-value" id="statAlertsSent">0</h3>
+              <p class="metric-sub">Parent Alerts Delivered</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="grid-2-col">
+          <!-- CLASS RATIOS BREAKDOWN -->
+          <div class="card">
+            <div class="card-header">
+              <h3><i class="fa-solid fa-chart-bar"></i> Class-by-Class Attendance Ratios</h3>
+              <span class="badge" id="currentMonthBadge">Current Month</span>
+            </div>
+            <div id="classRatioList" class="class-ratio-container">
+              <p class="text-muted">Loading class ratios...</p>
+            </div>
+          </div>
+
+          <!-- FREQUENT ABSENTEES ALERT -->
+          <div class="card">
+            <div class="card-header">
+              <h3><i class="fa-solid fa-triangle-exclamation"></i> Principal Alert: Frequent Absentees</h3>
+              <span class="badge badge-danger">Attention Required</span>
+            </div>
+            <div id="frequentAbsenteesList" class="absentees-container">
+              <p class="text-muted">Loading frequent absentees...</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- TAB 2: ACADEMIC RESULTS MODULE -->
+      <section class="tab-content" id="tab-results">
+        <div class="card" style="margin-bottom: 25px;">
+          <div class="card-header-flex">
+            <div>
+              <h2><i class="fa-solid fa-award"></i> Academic Results & Digital Marksheet Generator</h2>
+              <p>Configure exam terms, assign custom subjects, enter student marks, and dispatch branded WhatsApp report
+                cards.</p>
+            </div>
+            <div class="search-filter-group">
+              <button class="btn btn-accent" onclick="openModal('addTermModal')">
+                <i class="fa-solid fa-calendar-plus"></i> New Exam Term
+              </button>
+            </div>
+          </div>
+
+          <!-- RESULTS CONTROL SUB-NAV -->
+          <div class="subnav-pills">
+            <button class="subnav-btn active" onclick="switchResultsSubTab('marks-entry')">📝 Marks Entry Sheet</button>
+            <button class="subnav-btn" onclick="switchResultsSubTab('terms-config')">⚙️ Terms & Subjects Setup</button>
+            <button class="subnav-btn" onclick="switchResultsSubTab('results-history')">📜 Finalized Results &
+              Marksheets</button>
+          </div>
+        </div>
+
+        <!-- SUB-TAB: MARKS ENTRY SHEET -->
+        <div class="results-subtab active" id="res-subtab-marks-entry">
+          <div class="card">
+            <div class="card-header-flex">
+              <div class="form-row" style="flex: 1; gap: 15px; margin: 0;">
+                <div class="form-group" style="flex: 1; margin: 0;">
+                  <label style="font-weight: 600;">Select Exam Term *</label>
+                  <select id="marksTermSelect" onchange="loadMarksEntryGrid()"></select>
+                </div>
+                <div class="form-group" style="flex: 1; margin: 0;">
+                  <label style="font-weight: 600;">Select Class *</label>
+                  <select id="marksClassSelect" onchange="loadMarksEntryGrid()"></select>
+                </div>
+              </div>
+              <div style="display: flex; gap: 10px; align-items: flex-end;">
+                <button class="btn btn-secondary" onclick="handleSaveDraftResults()">
+                  <i class="fa-solid fa-floppy-disk"></i> Save Draft
+                </button>
+                <button class="btn btn-success" onclick="handleSubmitFinalResults()">
+                  <i class="fa-solid fa-paper-plane"></i> Finalize & Dispatch WhatsApp Marksheets
+                </button>
+              </div>
+            </div>
+
+            <div id="marksGridContainer" style="margin-top: 20px;">
+              <p class="text-muted text-center">Select an Exam Term and Class to load the interactive marks sheet.</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- SUB-TAB: TERMS & SUBJECTS SETUP -->
+        <div class="results-subtab" id="res-subtab-terms-config">
+          <div class="grid-2-col">
+            <!-- EXAM TERMS -->
+            <div class="card">
+              <div class="card-header">
+                <h3><i class="fa-solid fa-calendar-check"></i> Examination Terms / Categories</h3>
+                <button class="btn btn-primary btn-sm" onclick="openModal('addTermModal')"><i
+                    class="fa-solid fa-plus"></i> Add Term</button>
+              </div>
+              <div id="termsListContainer">
+                <p class="text-muted">Loading exam terms...</p>
+              </div>
+            </div>
+
+            <!-- CLASS SUBJECTS CONFIGURATION -->
+            <div class="card">
+              <div class="card-header">
+                <h3><i class="fa-solid fa-book-open"></i> Subject Set per Class</h3>
+              </div>
+              <form id="classSubjectsForm" onsubmit="handleSaveSubjects(event)">
+                <div class="form-row">
+                  <div class="form-group">
+                    <label>Select Term</label>
+                    <select id="subjectTermSelect" onchange="loadClassSubjectsForConfig()"></select>
+                  </div>
+                  <div class="form-group">
+                    <label>Select Class</label>
+                    <select id="subjectClassSelect" onchange="loadClassSubjectsForConfig()"></select>
+                  </div>
+                </div>
+                <div class="form-group">
+                  <label>Subject List (comma-separated)</label>
+                  <textarea id="subjectListInput" rows="4"
+                    placeholder="e.g. Mathematics, English, Urdu, Physics, Chemistry" required></textarea>
+                  <small class="text-muted">Enter subjects separated by commas. Different classes can have different
+                    subjects.</small>
+                </div>
+                <button type="submit" class="btn btn-primary"><i class="fa-solid fa-save"></i> Save Subject
+                  Configuration</button>
+              </form>
+            </div>
+          </div>
+        </div>
+
+        <!-- SUB-TAB: FINALIZED RESULTS HISTORY -->
+        <div class="results-subtab" id="res-subtab-results-history">
+          <div class="card">
+            <div class="card-header-flex">
+              <h3><i class="fa-solid fa-file-invoice"></i> Finalized Academic Records</h3>
+              <div class="search-filter-group">
+                <select id="historyTermSelect" onchange="loadFinalizedResultsHistory()">
+                  <option value="">All Terms</option>
+                </select>
+                <select id="historyClassSelect" onchange="loadFinalizedResultsHistory()">
+                  <option value="">All Classes</option>
+                </select>
+              </div>
+            </div>
+            <div class="table-responsive">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>Student ID</th>
+                    <th>Student Name</th>
+                    <th>Class</th>
+                    <th>Term</th>
+                    <th>Obtained / Max</th>
+                    <th>Percentage</th>
+                    <th>Grade</th>
+                    <th>Position</th>
+                    <th>Status</th>
+                    <th>Report Card PDF</th>
+                  </tr>
+                </thead>
+                <tbody id="finalizedResultsTableBody">
+                  <tr>
+                    <td colspan="10" class="text-center text-muted">Loading finalized academic records...</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- TAB 3: WHATSAPP BROADCAST CENTER -->
+      <section class="tab-content" id="tab-broadcast">
+        <div class="grid-2-col">
+          <!-- BROADCAST COMPOSER -->
+          <div class="card">
+            <div class="card-header">
+              <h3><i class="fa-solid fa-paper-plane"></i> Dispatch Targeted WhatsApp Broadcast</h3>
+            </div>
+            <form id="broadcastForm" onsubmit="handleSendBroadcast(event)">
+              <div class="form-group">
+                <label>Select Target Audience *</label>
+                <select id="broadcastTargetGroup" onchange="toggleBroadcastClassSelector()">
+                  <option value="all">🌐 All School Parents (Whole School)</option>
+                  <option value="class">🏫 Specific Class Only</option>
+                </select>
+              </div>
+
+              <div class="form-group" id="broadcastClassGroup" style="display: none;">
+                <label>Select Target Class *</label>
+                <select id="broadcastClassSelect"></select>
+              </div>
+
+              <div class="form-group">
+                <label>Quick Message Template (Optional)</label>
+                <select id="broadcastTemplateSelect" onchange="applyBroadcastTemplate()">
+                  <option value="">-- Choose a pre-configured template --</option>
+                </select>
+              </div>
+
+              <div class="form-group">
+                <label>WhatsApp Message Content *</label>
+                <textarea id="broadcastMessageInput" rows="7" placeholder="Type your WhatsApp broadcast message here..."
+                  required></textarea>
+                <small class="text-muted">Placeholders available: <code>{student_name}</code>,
+                  <code>{class_id}</code></small>
+              </div>
+
+              <button type="submit" class="btn btn-primary" style="width: 100%;">
+                <i class="fa-brands fa-whatsapp"></i> Send WhatsApp Broadcast Now
+              </button>
+            </form>
+          </div>
+
+          <!-- TEMPLATE LIBRARY -->
+          <div class="card">
+            <div class="card-header">
+              <h3><i class="fa-solid fa-box-archive"></i> Message Template Library</h3>
+              <button class="btn btn-secondary btn-sm" onclick="openModal('addTemplateModal')"><i
+                  class="fa-solid fa-plus"></i> New Template</button>
+            </div>
+            <div id="templatesListContainer">
+              <p class="text-muted">Loading message templates...</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- TAB 4: CLASSES & SECTIONS MANAGER -->
+      <section class="tab-content" id="tab-classes">
+        <div class="section-banner">
+          <div>
+            <h2><i class="fa-solid fa-school"></i> Class & Section Architecture</h2>
+            <p>Add new classes (e.g., Class 10th) and configure custom sections (Section A, Section B)</p>
+          </div>
+          <button class="btn btn-primary" onclick="openModal('addClassModal')">
+            <i class="fa-solid fa-plus"></i> Create New Class
+          </button>
+        </div>
+
+        <div class="classes-grid" id="classesGrid">
+          <p class="text-muted">Loading classes and sections...</p>
+        </div>
+      </section>
+
+      <!-- TAB 5: STUDENT ROSTER & PHONES -->
+      <section class="tab-content" id="tab-students">
+        <div class="card">
+          <div class="card-header-flex">
+            <div>
+              <h2><i class="fa-solid fa-users"></i> Student Roster & Parent Contact Numbers</h2>
+              <p>Manage student profiles, update parent phone numbers, or reassign sections</p>
+            </div>
+            <div class="search-filter-group">
+              <input type="text" id="studentSearchInput" placeholder="🔍 Search student name, ID or phone..."
+                oninput="filterStudentTable()">
+              <select id="studentClassFilter" onchange="filterStudentTable()">
+                <option value="">All Classes</option>
+              </select>
+              <button class="btn btn-primary" onclick="openModal('addStudentModal')">
+                <i class="fa-solid fa-user-plus"></i> Add Student
+              </button>
+            </div>
+          </div>
+
+          <div class="table-responsive">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Student ID</th>
+                  <th>Student Name</th>
+                  <th>Class</th>
+                  <th>Section</th>
+                  <th>Parent Phone Number</th>
+                  <th>Parent Email</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="studentTableBody">
+                <tr>
+                  <td colspan="7" class="text-center text-muted">Loading student directory...</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- TAB 6: ATTENDANCE LOGS & HISTORY -->
+      <section class="tab-content" id="tab-records">
+        <div class="card">
+          <div class="card-header-flex">
+            <div>
+              <h2><i class="fa-solid fa-clipboard-list"></i> Complete Attendance History & Logs</h2>
+              <p>Search and filter all daily attendance logs recorded via the Mobile App</p>
+            </div>
+            <div class="search-filter-group">
+              <input type="text" id="recordSearchInput" placeholder="🔍 Search student name or ID..."
+                oninput="loadRecordsData()">
+              <select id="recordClassFilter" onchange="loadRecordsData()">
+                <option value="">All Classes</option>
+              </select>
+              <select id="recordStatusFilter" onchange="loadRecordsData()">
+                <option value="">All Statuses</option>
+                <option value="Present">Present</option>
+                <option value="Absent">Absent</option>
+                <option value="Late">Late</option>
+              </select>
+              <button class="btn btn-secondary" onclick="loadRecordsData()">
+                <i class="fa-solid fa-rotate"></i> Refresh
+              </button>
+            </div>
+          </div>
+
+          <div class="table-responsive">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Date & Time</th>
+                  <th>Student ID</th>
+                  <th>Student Name</th>
+                  <th>Class</th>
+                  <th>Status</th>
+                  <th>State</th>
+                  <th>WhatsApp Alert</th>
+                </tr>
+              </thead>
+              <tbody id="recordsTableBody">
+                <tr>
+                  <td colspan="7" class="text-center text-muted">Loading attendance logs...</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- TAB 7: WHATSAPP GATEWAY CONTROL -->
+      <section class="tab-content" id="tab-whatsapp">
+        <div class="card wa-portal-card">
+          <div class="wa-portal-header">
+            <i class="fa-brands fa-whatsapp wa-big-logo"></i>
+            <div>
+              <h2>WhatsApp Gateway Engine (Multi-Tenant)</h2>
+              <p>Scan QR code with the official school WhatsApp phone to enable parent dispatches and keep session
+                connected 24/7.</p>
+            </div>
+          </div>
+
+          <div style="display: flex; justify-content: center; gap: 15px; margin-bottom: 25px; flex-wrap: wrap;">
+            <button class="btn btn-primary" onclick="triggerWhatsAppConnect()">
+              <i class="fa-solid fa-qrcode"></i> Connect / View QR Code
+            </button>
+            <button class="btn btn-secondary" onclick="triggerWhatsAppReconnect()">
+              <i class="fa-solid fa-rotate-right"></i> Reconnect Socket
+            </button>
+            <button class="btn btn-danger" onclick="triggerWhatsAppDisconnect()">
+              <i class="fa-solid fa-power-off"></i> Disconnect / Clear Session
+            </button>
+          </div>
+
+          <div class="wa-qr-box" id="waQrBox">
+            <p class="text-muted">Loading WhatsApp connection status...</p>
+          </div>
+        </div>
+      </section>
+
+    </main>
+  </div>
+
+  <!-- MODAL: ADD EXAM TERM -->
+  <div class="modal" id="addTermModal">
+    <div class="modal-dialog">
+      <div class="modal-header">
+        <h3><i class="fa-solid fa-calendar-plus"></i> Create Examination Term</h3>
+        <button class="modal-close" onclick="closeModal('addTermModal')">&times;</button>
+      </div>
+      <form id="addTermForm" onsubmit="handleCreateTerm(event)">
+        <div class="form-group">
+          <label>Exam Term Name *</label>
+          <input type="text" id="newTermName" placeholder="e.g. Mid Term 2026, 1st Term 2026" required>
+        </div>
+        <div class="form-group">
+          <label>Exam Date</label>
+          <input type="date" id="newTermDate">
+        </div>
+        <div class="form-group">
+          <label>Description (Optional)</label>
+          <input type="text" id="newTermDesc" placeholder="e.g. Mid Year Academic Assessment">
+        </div>
+        <div class="modal-actions">
+          <button type="button" class="btn btn-secondary" onclick="closeModal('addTermModal')">Cancel</button>
+          <button type="submit" class="btn btn-primary">Create Term</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- MODAL: ADD MESSAGE TEMPLATE -->
+  <div class="modal" id="addTemplateModal">
+    <div class="modal-dialog">
+      <div class="modal-header">
+        <h3><i class="fa-solid fa-plus"></i> Create Message Template</h3>
+        <button class="modal-close" onclick="closeModal('addTemplateModal')">&times;</button>
+      </div>
+      <form id="addTemplateForm" onsubmit="handleCreateTemplate(event)">
+        <div class="form-group">
+          <label>Template Title *</label>
+          <input type="text" id="newTplTitle" placeholder="e.g. Fee Due Notice" required>
+        </div>
+        <div class="form-group">
+          <label>Category</label>
+          <select id="newTplCategory">
+            <option value="General">General</option>
+            <option value="Attendance">Attendance</option>
+            <option value="Results">Results</option>
+            <option value="Fees">Fees</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Template Message Body *</label>
+          <textarea id="newTplBody" rows="5" placeholder="Type template message..." required></textarea>
+        </div>
+        <div class="modal-actions">
+          <button type="button" class="btn btn-secondary" onclick="closeModal('addTemplateModal')">Cancel</button>
+          <button type="submit" class="btn btn-primary">Save Template</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- MODAL: CLASS DETAILS & ROSTER -->
+  <div class="modal" id="classDetailsModal">
+    <div class="modal-dialog" style="max-width: 900px; width: 95%;">
+      <div class="modal-header">
+        <div>
+          <h3 id="classDetailsTitle"><i class="fa-solid fa-graduation-cap"></i> Class Details</h3>
+          <p id="classDetailsSubtitle" class="text-muted" style="font-size: 13px; margin-top: 4px;">Enrolled student
+            roster and phone contact list</p>
+        </div>
+        <button class="modal-close" onclick="closeModal('classDetailsModal')">&times;</button>
+      </div>
+
+      <div
+        style="padding: 16px 24px; border-bottom: 1px solid var(--border-color); display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; background: rgba(30, 41, 59, 0.4);">
+        <div id="classDetailsSections" class="section-tag-list" style="margin: 0;"></div>
+        <div style="display: flex; gap: 10px;">
+          <button class="btn btn-primary btn-sm" id="classDetailsAddStudentBtn">
+            <i class="fa-solid fa-user-plus"></i> Add Student to Class
+          </button>
+          <button class="btn btn-secondary btn-sm" id="classDetailsAddSectionBtn">
+            <i class="fa-solid fa-plus"></i> Add Section
+          </button>
+        </div>
+      </div>
+
+      <div style="padding: 20px 24px; max-height: 60vh; overflow-y: auto;">
+        <div class="table-responsive">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Student ID</th>
+                <th>Student Name</th>
+                <th>Section</th>
+                <th>Parent WhatsApp Phone</th>
+                <th>Parent Email</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="classRosterTableBody">
+              <tr>
+                <td colspan="6" class="text-center text-muted">Loading class roster...</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="modal-actions" style="padding: 16px 24px;">
+        <button type="button" class="btn btn-secondary" onclick="closeModal('classDetailsModal')">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: ADD CLASS -->
+  <div class="modal" id="addClassModal">
+    <div class="modal-dialog">
+      <div class="modal-header">
+        <h3><i class="fa-solid fa-folder-plus"></i> Add New Class</h3>
+        <button class="modal-close" onclick="closeModal('addClassModal')">&times;</button>
+      </div>
+      <form id="addClassForm" onsubmit="handleCreateClass(event)">
+        <div class="form-group">
+          <label>Class Name *</label>
+          <input type="text" id="newClassName" placeholder="e.g. Class 10th" required>
+        </div>
+        <div class="form-group">
+          <label>Default Section(s)</label>
+          <input type="text" id="newClassSections" placeholder="e.g. Section A, Section B" value="Section A">
+          <small class="text-muted">Separate multiple sections with commas</small>
+        </div>
+        <div class="modal-actions">
+          <button type="button" class="btn btn-secondary" onclick="closeModal('addClassModal')">Cancel</button>
+          <button type="submit" class="btn btn-primary">Create Class</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- MODAL: ADD SECTION TO CLASS -->
+  <div class="modal" id="addSectionModal">
+    <div class="modal-dialog">
+      <div class="modal-header">
+        <h3><i class="fa-solid fa-plus-square"></i> Add Section to Class</h3>
+        <button class="modal-close" onclick="closeModal('addSectionModal')">&times;</button>
+      </div>
+      <form id="addSectionForm" onsubmit="handleAddSectionSubmit(event)">
+        <input type="hidden" id="targetClassId">
+        <div class="form-group">
+          <label>Class Name</label>
+          <input type="text" id="targetClassName" readonly class="input-readonly">
+        </div>
+        <div class="form-group">
+          <label>Section Name *</label>
+          <input type="text" id="newSectionName" placeholder="e.g. Section B" required>
+        </div>
+        <div class="modal-actions">
+          <button type="button" class="btn btn-secondary" onclick="closeModal('addSectionModal')">Cancel</button>
+          <button type="submit" class="btn btn-primary">Add Section</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- MODAL: ADD STUDENT -->
+  <div class="modal" id="addStudentModal">
+    <div class="modal-dialog">
+      <div class="modal-header">
+        <h3><i class="fa-solid fa-user-plus"></i> Add New Student</h3>
+        <button class="modal-close" onclick="closeModal('addStudentModal')">&times;</button>
+      </div>
+      <form id="addStudentForm" onsubmit="handleCreateStudent(event)">
+        <div class="form-group">
+          <label>Full Student Name *</label>
+          <input type="text" id="studentNameInput" placeholder="e.g. Ali Ahmed" required>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label>Select Class *</label>
+            <select id="studentClassSelect" required
+              onchange="populateSectionDropdown('studentClassSelect', 'studentSectionSelect')">
+              <option value="">Choose Class</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Select Section *</label>
+            <select id="studentSectionSelect" required>
+              <option value="Section A">Section A</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-group">
+          <label>Parent WhatsApp Phone Number *</label>
+          <input type="tel" id="parentPhoneInput" placeholder="e.g. 03001234567" required>
+          <small class="text-muted">Must be active on WhatsApp for parent dispatches</small>
+        </div>
+        <div class="form-group">
+          <label>Parent Email (Optional)</label>
+          <input type="email" id="parentEmailInput" placeholder="e.g. parent@gmail.com">
+        </div>
+        <div class="modal-actions">
+          <button type="button" class="btn btn-secondary" onclick="closeModal('addStudentModal')">Cancel</button>
+          <button type="submit" class="btn btn-primary">Add Student</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- MODAL: EDIT STUDENT / PHONE -->
+  <div class="modal" id="editStudentModal">
+    <div class="modal-dialog">
+      <div class="modal-header">
+        <h3><i class="fa-solid fa-user-pen"></i> Edit Student & Parent Contact</h3>
+        <button class="modal-close" onclick="closeModal('editStudentModal')">&times;</button>
+      </div>
+      <form id="editStudentForm" onsubmit="handleEditStudentSubmit(event)">
+        <input type="hidden" id="editStudentId">
+        <div class="form-group">
+          <label>Full Student Name *</label>
+          <input type="text" id="editStudentName" required>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label>Class *</label>
+            <select id="editStudentClass" required
+              onchange="populateSectionDropdown('editStudentClass', 'editStudentSection')">
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Section *</label>
+            <select id="editStudentSection" required>
+            </select>
+          </div>
+        </div>
+        <div class="form-group">
+          <label>Parent WhatsApp Phone Number *</label>
+          <input type="tel" id="editParentPhone" required>
+        </div>
+        <div class="form-group">
+          <label>Parent Email</label>
+          <input type="email" id="editParentEmail">
+        </div>
+        <div class="modal-actions">
+          <button type="button" class="btn btn-secondary" onclick="closeModal('editStudentModal')">Cancel</button>
+          <button type="submit" class="btn btn-primary">Save Changes</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- NOTIFICATION TOAST -->
+  <div id="toast" class="toast">Action completed successfully</div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="app.js"></script>
+</body>
+
+</html>

@@ -1,0 +1,21 @@
+{
+  "name": "unique-scholars-attendance-system",
+  "version": "1.0.0",
+  "description": "Unique Scholars Academy - Attendance Bot & Admin Portal",
+  "main": "backend/src/index.js",
+  "scripts": {
+    "start": "node backend/src/index.js",
+    "backend": "cd backend && npm start",
+    "mobile": "cd mobile && npx expo start"
+  },
+  "dependencies": {
+    "@whiskeysockets/baileys": "^6.7.12",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "pino": "^9.6.0",
+    "pino-pretty": "^13.0.0",
+    "qrcode": "^1.5.4",
+    "socket.io": "^4.8.1"
+  }
+}

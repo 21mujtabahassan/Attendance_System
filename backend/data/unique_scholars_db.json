@@ -1,0 +1,292 @@
+{
+  "schools": [
+    {
+      "id": "unique_scholars",
+      "name": "Unique Scholars Academy",
+      "code": "USA",
+      "phone": "03001234567",
+      "address": "Main Campus"
+    }
+  ],
+  "classes": [
+    {
+      "id": "Class-Play",
+      "name": "Class Play",
+      "schoolId": "unique_scholars",
+      "sections": [
+        "Section A"
+      ]
+    },
+    {
+      "id": "Class-9",
+      "name": "Class 9",
+      "schoolId": "unique_scholars",
+      "sections": [
+        "Section A",
+        "Section B"
+      ]
+    },
+    {
+      "id": "Class-10",
+      "name": "Class 10",
+      "schoolId": "unique_scholars",
+      "sections": [
+        "Section A",
+        "Section B"
+      ]
+    },
+    {
+      "id": "Class-11",
+      "name": "Class 11 (FSc 1)",
+      "schoolId": "unique_scholars",
+      "sections": [
+        "Section A"
+      ]
+    },
+    {
+      "id": "Class-12",
+      "name": "Class 12 (FSc 2)",
+      "schoolId": "unique_scholars",
+      "sections": [
+        "Section A"
+      ]
+    },
+    {
+      "id": "Class-Class10th",
+      "name": "Class 10th",
+      "schoolId": "unique_scholars",
+      "sections": [
+        "Section A",
+        "Section B"
+      ]
+    }
+  ],
+  "students": [
+    {
+      "id": "STU-101",
+      "name": "Muhammad Ali",
+      "classId": "Class-9",
+      "section": "Section A",
+      "schoolId": "unique_scholars",
+      "parentPhone": "03009876543",
+      "parentEmail": "parent.ali@gmail.com"
+    },
+    {
+      "id": "STU-102",
+      "name": "Fatima Zahra",
+      "classId": "Class-9",
+      "section": "Section A",
+      "schoolId": "unique_scholars",
+      "parentPhone": "03314751995",
+      "parentEmail": "parent.fatima@gmail.com"
+    },
+    {
+      "id": "STU-103",
+      "name": "Usman Ahmed",
+      "classId": "Class-9",
+      "section": "Section B",
+      "schoolId": "unique_scholars",
+      "parentPhone": "03314751995",
+      "parentEmail": "parent.usman@gmail.com"
+    },
+    {
+      "id": "STU-104",
+      "name": "Zainab Bibi",
+      "classId": "Class-10",
+      "section": "Section A",
+      "schoolId": "unique_scholars",
+      "parentPhone": "03314751998",
+      "parentEmail": "parent.zainab@gmail.com"
+    },
+    {
+      "id": "STU-105",
+      "name": "Hamza Khan",
+      "classId": "Class-10",
+      "section": "Section B",
+      "schoolId": "unique_scholars",
+      "parentPhone": "03314751998",
+      "parentEmail": "parent.hamza@gmail.com"
+    },
+    {
+      "id": "STU-106",
+      "name": "Muhammad Ameer Hadi",
+      "classId": "Class-Play",
+      "section": "Section A",
+      "schoolId": "unique_scholars",
+      "parentPhone": "03155889902",
+      "parentEmail": "parent.hadi@gmail.com"
+    }
+  ],
+  "attendanceLogs": [
+    {
+      "logId": "2026-08-27_STU-101",
+      "date": "2026-08-27",
+      "studentId": "STU-101",
+      "name": "Muhammad Ali",
+      "classId": "Class-9",
+      "schoolId": "unique_scholars",
+      "status": "Absent",
+      "state": "DRAFT",
+      "updatedAt": "2026-08-27T22:12:48.193Z"
+    },
+    {
+      "logId": "2026-08-27_STU-102",
+      "date": "2026-08-27",
+      "studentId": "STU-102",
+      "name": "Fatima Zahra",
+      "classId": "Class-9",
+      "schoolId": "unique_scholars",
+      "status": "Present",
+      "state": "DRAFT",
+      "updatedAt": "2026-08-27T22:12:48.193Z"
+    },
+    {
+      "logId": "2026-08-27_STU-103",
+      "date": "2026-08-27",
+      "studentId": "STU-103",
+      "name": "Usman Ahmed",
+      "classId": "Class-9",
+      "schoolId": "unique_scholars",
+      "status": "Present",
+      "state": "DRAFT",
+      "updatedAt": "2026-08-27T22:12:48.193Z"
+    },
+    {
+      "logId": "2026-08-28_STU-101",
+      "date": "2026-08-28",
+      "studentId": "STU-101",
+      "name": "Muhammad Ali",
+      "classId": "Class-9",
+      "schoolId": "unique_scholars",
+      "status": "Present",
+      "state": "SUBMITTED",
+      "submittedAt": "2026-08-28T07:00:08.197Z"
+    },
+    {
+      "logId": "2026-08-28_STU-102",
+      "date": "2026-08-28",
+      "studentId": "STU-102",
+      "name": "Fatima Zahra",
+      "classId": "Class-9",
+      "schoolId": "unique_scholars",
+      "status": "Absent",
+      "state": "SUBMITTED",
+      "submittedAt": "2026-08-28T07:00:08.197Z"
+    },
+    {
+      "logId": "2026-08-28_STU-103",
+      "date": "2026-08-28",
+      "studentId": "STU-103",
+      "name": "Usman Ahmed",
+      "classId": "Class-9",
+      "schoolId": "unique_scholars",
+      "status": "Absent",
+      "state": "SUBMITTED",
+      "submittedAt": "2026-08-28T07:00:08.197Z"
+    },
+    {
+      "logId": "2026-08-28_STU-104",
+      "date": "2026-08-28",
+      "studentId": "STU-104",
+      "name": "Zainab Bibi",
+      "classId": "Class-10",
+      "schoolId": "unique_scholars",
+      "status": "Absent",
+      "state": "SUBMITTED",
+      "submittedAt": "2026-08-28T06:55:03.496Z"
+    },
+    {
+      "logId": "2026-08-28_STU-105",
+      "date": "2026-08-28",
+      "studentId": "STU-105",
+      "name": "Hamza Khan",
+      "classId": "Class-10",
+      "schoolId": "unique_scholars",
+      "status": "Absent",
+      "state": "SUBMITTED",
+      "submittedAt": "2026-08-28T06:55:03.496Z"
+    },
+    {
+      "logId": "2026-08-28_STU-106",
+      "date": "2026-08-28",
+      "studentId": "STU-106",
+      "name": "Muhammad Ameer Hadi",
+      "classId": "Class-Play",
+      "schoolId": "unique_scholars",
+      "status": "Absent",
+      "state": "SUBMITTED",
+      "submittedAt": "2026-08-28T06:55:45.467Z"
+    },
+    {
+      "logId": "2026-08-29_STU-104",
+      "date": "2026-08-29",
+      "studentId": "STU-104",
+      "name": "Zainab Bibi",
+      "classId": "Class-10",
+      "schoolId": "unique_scholars",
+      "status": "Present",
+      "state": "SUBMITTED",
+      "updatedAt": "2026-08-29T05:42:07.149Z",
+      "submittedAt": "2026-08-29T05:42:22.868Z"
+    },
+    {
+      "logId": "2026-08-29_STU-105",
+      "date": "2026-08-29",
+      "studentId": "STU-105",
+      "name": "Hamza Khan",
+      "classId": "Class-10",
+      "schoolId": "unique_scholars",
+      "status": "Present",
+      "state": "SUBMITTED",
+      "updatedAt": "2026-08-29T05:42:07.149Z",
+      "submittedAt": "2026-08-29T05:42:22.868Z"
+    },
+    {
+      "logId": "2026-08-29_STU-101",
+      "date": "2026-08-29",
+      "studentId": "STU-101",
+      "name": "Muhammad Ali",
+      "classId": "Class-9",
+      "schoolId": "unique_scholars",
+      "status": "Present",
+      "state": "SUBMITTED",
+      "updatedAt": "2026-08-29T05:42:02.339Z",
+      "submittedAt": "2026-08-29T05:42:18.538Z"
+    },
+    {
+      "logId": "2026-08-29_STU-102",
+      "date": "2026-08-29",
+      "studentId": "STU-102",
+      "name": "Fatima Zahra",
+      "classId": "Class-9",
+      "schoolId": "unique_scholars",
+      "status": "Present",
+      "state": "SUBMITTED",
+      "updatedAt": "2026-08-29T05:42:02.339Z",
+      "submittedAt": "2026-08-29T05:42:18.538Z"
+    },
+    {
+      "logId": "2026-08-29_STU-103",
+      "date": "2026-08-29",
+      "studentId": "STU-103",
+      "name": "Usman Ahmed",
+      "classId": "Class-9",
+      "schoolId": "unique_scholars",
+      "status": "Present",
+      "state": "SUBMITTED",
+      "updatedAt": "2026-08-29T05:42:02.339Z",
+      "submittedAt": "2026-08-29T05:42:18.538Z"
+    },
+    {
+      "logId": "2026-08-29_STU-106",
+      "date": "2026-08-29",
+      "studentId": "STU-106",
+      "name": "Muhammad Ameer Hadi",
+      "classId": "Class-Play",
+      "schoolId": "unique_scholars",
+      "status": "Absent",
+      "state": "SUBMITTED",
+      "submittedAt": "2026-08-29T08:34:53.197Z"
+    }
+  ]
+}

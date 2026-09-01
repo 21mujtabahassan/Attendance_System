@@ -1,0 +1,19 @@
+# Dependencies
+node_modules/
+backend/node_modules/
+mobile/node_modules/
+
+# WhatsApp Auth Sessions
+whatsapp_session/
+backend/whatsapp_session/
+
+# Expo & Vercel
+.expo/
+mobile/.expo/
+.vercel/
+
+# Environment Variables & Logs
+.env
+*.log
+scratch/
+.qodo/

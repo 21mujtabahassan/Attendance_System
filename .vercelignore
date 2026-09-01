@@ -1,0 +1,6 @@
+node_modules
+.git
+.expo
+mobile
+whatsapp_session
+.vercel
