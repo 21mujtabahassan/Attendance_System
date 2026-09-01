@@ -7,8 +7,10 @@ import {
 import { 
   getClasses, getStudents, saveAttendanceDraft, 
   submitFinalAttendance, getWhatsAppStatus, getAttendanceLogs,
-  loginAdmin, getAdminInsights, getAdminRecords 
+  loginAdmin, getAdminInsights, getAdminRecords,
+  connectWhatsApp, reconnectWhatsApp, disconnectWhatsApp
 } from './src/services/api';
+
 
 export default function App() {
   const [activeTab, setActiveTab] = useState('attendance');
@@ -300,12 +302,13 @@ export default function App() {
             </TouchableOpacity>
           )}
 
-          {/* WA BADGE - READ ONLY STATUS FOR MOBILE APP */}
-          <View 
+          {/* WA BADGE - CLICKABLE TO OPEN WHATSAPP INTERFACE */}
+          <TouchableOpacity 
             style={[
               styles.waBadge, 
               { backgroundColor: waStatus.status === 'connected' ? '#064e3b' : '#7f1d1d' }
             ]}
+            onPress={() => setActiveTab('whatsapp')}
           >
             <View style={[
               styles.statusDot, 
@@ -314,7 +317,7 @@ export default function App() {
             <Text style={styles.waBadgeText}>
               {waStatus.status === 'connected' ? 'WA Online' : 'WA Offline'}
             </Text>
-          </View>
+          </TouchableOpacity>
         </View>
       </View>
 
@@ -326,6 +329,15 @@ export default function App() {
         >
           <Text style={[styles.tabText, activeTab === 'attendance' && styles.tabTextActive]}>
             Attendance
+          </Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity 
+          style={[styles.tabButton, activeTab === 'whatsapp' && styles.tabActive]}
+          onPress={() => setActiveTab('whatsapp')}
+        >
+          <Text style={[styles.tabText, activeTab === 'whatsapp' && styles.tabTextActive]}>
+            WhatsApp
           </Text>
         </TouchableOpacity>
 
@@ -353,6 +365,7 @@ export default function App() {
           </Text>
         </TouchableOpacity>
       </View>
+
 
 
       {/* MAIN CONTENT */}
@@ -448,11 +461,67 @@ export default function App() {
             </TouchableOpacity>
           </View>
         </View>
+      {activeTab === 'whatsapp' && (
+        <ScrollView style={styles.panelPadding}>
+          <View style={styles.card}>
+            <Text style={styles.cardTitle}>📱 WhatsApp Gateway Connection</Text>
+            <Text style={styles.cardDesc}>
+              Pair school WhatsApp phone to enable parent dispatches. Connected once, saved for both App & Admin Portal!
+            </Text>
+
+            <View style={{ flexDirection: 'row', justifyContent: 'center', gap: 10, marginBottom: 20 }}>
+              <TouchableOpacity 
+                style={[styles.refreshBtn, { backgroundColor: '#3b82f6', paddingHorizontal: 15 }]} 
+                onPress={async () => {
+                  const res = await connectWhatsApp('unique_scholars');
+                  setWaStatus(res);
+                  let attempts = 0;
+                  const timer = setInterval(async () => {
+                    attempts += 1;
+                    const st = await getWhatsAppStatus();
+                    setWaStatus(st);
+                    if (st.status === 'connected' || st.qr || attempts > 15) clearInterval(timer);
+                  }, 1500);
+                }}
+              >
+                <Text style={styles.refreshBtnText}>⚡ Connect / View QR</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity 
+                style={[styles.refreshBtn, { backgroundColor: '#334155', paddingHorizontal: 15 }]} 
+                onPress={async () => {
+                  const res = await reconnectWhatsApp('unique_scholars');
+                  setWaStatus(res);
+                }}
+              >
+                <Text style={styles.refreshBtnText}>🔄 Reconnect</Text>
+              </TouchableOpacity>
+            </View>
+
+            {waStatus.qr ? (
+              <View style={styles.qrContainer}>
+                <Image source={{ uri: waStatus.qr }} style={{ width: 230, height: 230, borderRadius: 12, borderWidth: 4, borderColor: '#ffffff' }} />
+                <Text style={styles.qrHint}>Point your WhatsApp phone camera at this QR code</Text>
+              </View>
+            ) : waStatus.status === 'connected' ? (
+              <View style={styles.connectedBox}>
+                <Text style={styles.connectedTitle}>✅ WhatsApp Connected & Synced!</Text>
+                <Text style={styles.connectedText}>Session is active. Parent alerts & report cards will be sent automatically.</Text>
+              </View>
+            ) : (
+              <View style={{ alignItems: 'center', marginVertical: 20 }}>
+                <ActivityIndicator size="large" color="#3b82f6" style={{ marginVertical: 15 }} />
+                <Text style={{ color: '#94a3b8', textAlign: 'center', fontSize: 13 }}>
+                  {waStatus.status === 'connecting' ? 'Connecting to WhatsApp Gateway...' : 'Tap "Connect / View QR" to generate pairing QR code.'}
+                </Text>
+              </View>
+            )}
+          </View>
+        </ScrollView>
       )}
 
-
-
       {activeTab === 'logs' && (
+
         <ScrollView style={styles.panelPadding}>
           <Text style={styles.cardTitle}>📊 Attendance History & Logs</Text>
           {logs.map((log, i) => (

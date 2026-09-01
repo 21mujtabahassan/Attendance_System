@@ -101,6 +101,46 @@ export const getWhatsAppStatus = async () => {
   }
 };
 
+export const connectWhatsApp = async (schoolId = 'unique_scholars') => {
+  try {
+    const res = await safeFetch('/whatsapp/connect', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ schoolId })
+    });
+    return await res.json();
+  } catch (error) {
+    return { status: 'disconnected', error: error.message };
+  }
+};
+
+export const reconnectWhatsApp = async (schoolId = 'unique_scholars') => {
+  try {
+    const res = await safeFetch('/whatsapp/reconnect', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ schoolId })
+    });
+    return await res.json();
+  } catch (error) {
+    return { status: 'disconnected', error: error.message };
+  }
+};
+
+export const disconnectWhatsApp = async (schoolId = 'unique_scholars') => {
+  try {
+    const res = await safeFetch('/whatsapp/disconnect', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ schoolId })
+    });
+    return await res.json();
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+};
+
+
 export const getAttendanceLogs = async (schoolId = 'unique_scholars', classId = '', date = '') => {
   try {
     const res = await safeFetch(`/attendance/logs?schoolId=${schoolId}&classId=${classId}&date=${date}`);
