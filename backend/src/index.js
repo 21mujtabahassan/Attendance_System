@@ -170,16 +170,16 @@ app.get('/api/whatsapp/gateway-info', (req, res) => {
   res.json(getGatewayInfo(schoolId));
 });
 
-app.get('/api/admin/pending-dispatches', (req, res) => {
+app.get('/api/admin/pending-dispatches', async (req, res) => {
   const { schoolId = 'unique_scholars' } = req.query;
-  const batches = getPendingDispatches(schoolId);
+  const batches = await getPendingDispatches(schoolId);
   res.json({ success: true, batches });
 });
 
-app.post('/api/admin/pending-dispatches/complete', (req, res) => {
+app.post('/api/admin/pending-dispatches/complete', async (req, res) => {
   const { schoolId = 'unique_scholars', batchId, results = [] } = req.body;
   if (!batchId) return res.status(400).json({ success: false, error: 'batchId is required' });
-  const ok = markPendingDispatchComplete(schoolId, batchId, results);
+  const ok = await markPendingDispatchComplete(schoolId, batchId, results);
   res.json({ success: ok });
 });
 
@@ -252,71 +252,71 @@ app.post('/api/whatsapp/disconnect', async (req, res) => {
 // SCHOOLS, CLASSES, STUDENTS ENDPOINTS
 // -------------------------------------------------------------
 
-app.get('/api/schools', (req, res) => {
-  res.json({ schools: getSchools() });
+app.get('/api/schools', async (req, res) => {
+  res.json({ schools: await getSchools() });
 });
 
-app.get('/api/schools/:schoolId/classes', (req, res) => {
+app.get('/api/schools/:schoolId/classes', async (req, res) => {
   const { schoolId } = req.params;
-  res.json({ classes: getClasses(schoolId) });
+  res.json({ classes: await getClasses(schoolId) });
 });
 
-app.post('/api/admin/classes', (req, res) => {
+app.post('/api/admin/classes', async (req, res) => {
   const { schoolId = 'unique_scholars', name, sections } = req.body;
   if (!name) {
     return res.status(400).json({ success: false, error: 'Class name is required.' });
   }
-  const newClass = addClass(schoolId, { name, sections });
+  const newClass = await addClass(schoolId, { name, sections });
   res.json({ success: true, class: newClass });
 });
 
-app.post('/api/admin/classes/:classId/sections', (req, res) => {
+app.post('/api/admin/classes/:classId/sections', async (req, res) => {
   const { schoolId = 'unique_scholars', sectionName } = req.body;
   const { classId } = req.params;
   if (!sectionName) {
     return res.status(400).json({ success: false, error: 'Section name is required.' });
   }
-  const result = addSectionToClass(schoolId, classId, sectionName);
-  res.status(result.success ? 200 : 400).json(result);
+  const updatedClass = await addSectionToClass(schoolId, classId, sectionName);
+  res.status(updatedClass ? 200 : 400).json({ success: !!updatedClass, class: updatedClass });
 });
 
-app.delete('/api/admin/classes/:classId', (req, res) => {
+app.delete('/api/admin/classes/:classId', async (req, res) => {
   const { schoolId = 'unique_scholars' } = req.query;
   const { classId } = req.params;
-  deleteClass(schoolId, classId);
+  await deleteClass(schoolId, classId);
   res.json({ success: true, message: 'Class deleted successfully.' });
 });
 
-app.get('/api/schools/:schoolId/students', (req, res) => {
+app.get('/api/schools/:schoolId/students', async (req, res) => {
   const { schoolId } = req.params;
   const classId = req.query.class;
-  const students = getStudents(schoolId, classId);
+  const students = await getStudents(schoolId, classId);
   res.json({ students });
 });
 
-app.post('/api/schools/:schoolId/students', (req, res) => {
+app.post('/api/schools/:schoolId/students', async (req, res) => {
   const { schoolId } = req.params;
   const { name, classId, section, parentPhone, parentEmail } = req.body;
   if (!name || !classId) {
     return res.status(400).json({ error: 'Student name and classId are required.' });
   }
-  const student = addStudent(schoolId, { name, classId, section, parentPhone, parentEmail });
+  const student = await addStudent(schoolId, { name, classId, section, parentPhone, parentEmail });
   if (io) io.emit('students_updated', { action: 'create', schoolId, student });
   res.json({ success: true, student });
 });
 
-app.put('/api/admin/students/:studentId', (req, res) => {
+app.put('/api/admin/students/:studentId', async (req, res) => {
   const { schoolId = 'unique_scholars' } = req.query;
   const { studentId } = req.params;
-  const result = updateStudent(schoolId, studentId, req.body);
-  if (result.success && io) io.emit('students_updated', { action: 'update', schoolId, student: result.student });
-  res.status(result.success ? 200 : 400).json(result);
+  const updated = await updateStudent(schoolId, studentId, req.body);
+  if (updated && io) io.emit('students_updated', { action: 'update', schoolId, student: updated });
+  res.status(updated ? 200 : 400).json({ success: !!updated, student: updated });
 });
 
-app.delete('/api/admin/students/:studentId', (req, res) => {
+app.delete('/api/admin/students/:studentId', async (req, res) => {
   const { schoolId = 'unique_scholars' } = req.query;
   const { studentId } = req.params;
-  deleteStudent(schoolId, studentId);
+  await deleteStudent(schoolId, studentId);
   if (io) io.emit('students_updated', { action: 'delete', schoolId, studentId });
   res.json({ success: true, message: 'Student deleted successfully.' });
 });
@@ -325,7 +325,7 @@ app.delete('/api/admin/students/:studentId', (req, res) => {
 // ATTENDANCE ENDPOINTS
 // -------------------------------------------------------------
 
-app.post('/api/attendance/draft', (req, res) => {
+app.post('/api/attendance/draft', async (req, res) => {
   const { schoolId = 'unique_scholars', classId, date: attendanceDate, time: attendanceTime, attendance } = req.body;
   if (!classId || !attendance || !Array.isArray(attendance)) {
     return res.status(400).json({ error: 'Invalid attendance draft payload.' });
@@ -334,7 +334,7 @@ app.post('/api/attendance/draft', (req, res) => {
   const dateStr = attendanceDate || new Date().toISOString().split('T')[0];
   const timeStr = attendanceTime || new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true });
 
-  saveDraftAttendance(schoolId, classId, dateStr, attendance, timeStr);
+  await saveDraftAttendance(schoolId, classId, dateStr, attendance, timeStr);
   res.json({
     success: true,
     message: `Draft attendance saved for ${classId} at ${timeStr}.`,
@@ -406,9 +406,9 @@ ${school.name}`;
   }
 });
 
-app.get('/api/attendance/logs', (req, res) => {
+app.get('/api/attendance/logs', async (req, res) => {
   const { schoolId, classId, date } = req.query;
-  const logs = getAttendanceLogs(schoolId, classId, date);
+  const logs = await getAttendanceLogs(schoolId, classId, date);
   res.json({ logs });
 });
 
@@ -416,52 +416,52 @@ app.get('/api/attendance/logs', (req, res) => {
 // ACADEMIC RESULTS MODULE ENDPOINTS
 // -------------------------------------------------------------
 
-app.get('/api/admin/results/terms', (req, res) => {
+app.get('/api/admin/results/terms', async (req, res) => {
   const { schoolId = 'unique_scholars' } = req.query;
-  res.json({ success: true, terms: getResultTerms(schoolId) });
+  res.json({ success: true, terms: await getResultTerms(schoolId) });
 });
 
-app.post('/api/admin/results/terms', (req, res) => {
+app.post('/api/admin/results/terms', async (req, res) => {
   const { schoolId = 'unique_scholars', name, date, description, status } = req.body;
   if (!name) return res.status(400).json({ success: false, error: 'Term name is required.' });
-  const term = addResultTerm(schoolId, { name, date, description, status });
+  const term = await addResultTerm(schoolId, { name, date, description, status });
   res.json({ success: true, term });
 });
 
-app.delete('/api/admin/results/terms/:termId', (req, res) => {
+app.delete('/api/admin/results/terms/:termId', async (req, res) => {
   const { schoolId = 'unique_scholars' } = req.query;
   const { termId } = req.params;
-  deleteResultTerm(schoolId, termId);
+  await deleteResultTerm(schoolId, termId);
   res.json({ success: true, message: 'Term deleted successfully.' });
 });
 
-app.get('/api/admin/results/subjects', (req, res) => {
+app.get('/api/admin/results/subjects', async (req, res) => {
   const { schoolId = 'unique_scholars', classId, termId } = req.query;
-  const subjects = getClassSubjects(schoolId, classId, termId);
+  const subjects = await getClassSubjects(schoolId, classId, termId);
   res.json({ success: true, subjects });
 });
 
-app.post('/api/admin/results/subjects', (req, res) => {
+app.post('/api/admin/results/subjects', async (req, res) => {
   const { schoolId = 'unique_scholars', classId, termId, subjects } = req.body;
   if (!classId || !termId || !Array.isArray(subjects)) {
     return res.status(400).json({ success: false, error: 'classId, termId, and subjects array are required.' });
   }
-  const result = saveClassSubjects(schoolId, classId, termId, subjects);
+  const result = await saveClassSubjects(schoolId, classId, termId, subjects);
   res.json({ success: true, record: result });
 });
 
-app.get('/api/admin/results/marks', (req, res) => {
+app.get('/api/admin/results/marks', async (req, res) => {
   const { schoolId = 'unique_scholars', termId, classId, studentId, resultId } = req.query;
-  const results = getStudentResults(schoolId, { termId, classId, studentId, resultId });
+  const results = await getStudentResults(schoolId, { termId, classId, studentId, resultId });
   res.json({ success: true, results });
 });
 
-app.post('/api/admin/results/draft', (req, res) => {
+app.post('/api/admin/results/draft', async (req, res) => {
   const { schoolId = 'unique_scholars', termId, classId, results } = req.body;
   if (!termId || !classId || !Array.isArray(results)) {
     return res.status(400).json({ success: false, error: 'termId, classId, and results list are required.' });
   }
-  const saved = saveDraftResults(schoolId, { termId, classId, results });
+  const saved = await saveDraftResults(schoolId, { termId, classId, results });
   res.json({ success: true, message: 'Draft result marks saved successfully!', results: saved });
 });
 
@@ -474,15 +474,15 @@ app.post('/api/admin/results/submit', async (req, res) => {
 
     const gatewayUrl = req.headers['x-whatsapp-gateway-url'] || req.body.gatewayUrl || process.env.WHATSAPP_GATEWAY_URL || process.env.PERSISTENT_BACKEND_URL;
 
-    const schools = getSchools();
+    const schools = await getSchools();
     const school = schools.find(s => s.id === schoolId) || { name: 'Unique Scholars Academy' };
-    const terms = getResultTerms(schoolId);
+    const terms = await getResultTerms(schoolId);
     const term = terms.find(t => t.id === termId) || { name: termId };
-    const classes = getClasses(schoolId);
+    const classes = await getClasses(schoolId);
     const targetClass = classes.find(c => c.id === classId) || { name: classId };
 
     // Submit & Lock Final Results (Calculates Grade, Pass/Fail, and Ranks)
-    const finalizedResults = submitFinalResults(schoolId, { termId, classId, results });
+    const finalizedResults = await submitFinalResults(schoolId, { termId, classId, results });
     const whatsappDetails = [];
     const pendingBatch = [];
 
@@ -541,7 +541,7 @@ ${school.name}`;
     // If serverless could not dispatch directly, queue the batch for the persistent worker to telecast!
     let queuedRecord = null;
     if (dispatchedCount === 0 && pendingBatch.length > 0) {
-      queuedRecord = addPendingDispatches(schoolId, pendingBatch);
+      queuedRecord = await addPendingDispatches(schoolId, pendingBatch);
       console.log(`Queued ${pendingBatch.length} marksheets for persistent WhatsApp gateway telecast (Batch: ${queuedRecord?.id})`);
     }
 
@@ -567,20 +567,20 @@ ${school.name}`;
 // -------------------------------------------------------------
 // BRANDED PDF / PRINT REPORT CARD VIEW
 // -------------------------------------------------------------
-app.get('/api/admin/results/pdf/:resultId', (req, res) => {
+app.get('/api/admin/results/pdf/:resultId', async (req, res) => {
   const { resultId } = req.params;
-  const results = getStudentResults('unique_scholars', { resultId });
+  const results = await getStudentResults('unique_scholars', { resultId });
 
   if (results.length === 0) {
     return res.status(404).send('<h2>Report Card Not Found</h2><p>Invalid or expired report card link.</p>');
   }
 
   const r = results[0];
-  const schools = getSchools();
+  const schools = await getSchools();
   const school = schools.find(s => s.id === r.schoolId) || { name: 'Unique Scholars Academy', address: 'Main Campus', phone: '03001234567' };
-  const terms = getResultTerms(r.schoolId);
+  const terms = await getResultTerms(r.schoolId);
   const term = terms.find(t => t.id === r.termId) || { name: r.termId };
-  const classes = getClasses(r.schoolId);
+  const classes = await getClasses(r.schoolId);
   const targetClass = classes.find(c => c.id === r.classId) || { name: r.classId };
 
   let rowsHtml = '';
@@ -715,15 +715,15 @@ app.get('/api/admin/results/pdf/:resultId', (req, res) => {
 // BROADCAST & TEMPLATES ENDPOINTS
 // -------------------------------------------------------------
 
-app.get('/api/admin/broadcast/templates', (req, res) => {
+app.get('/api/admin/broadcast/templates', async (req, res) => {
   const { schoolId = 'unique_scholars' } = req.query;
-  res.json({ success: true, templates: getMessageTemplates(schoolId) });
+  res.json({ success: true, templates: await getMessageTemplates(schoolId) });
 });
 
-app.post('/api/admin/broadcast/templates', (req, res) => {
+app.post('/api/admin/broadcast/templates', async (req, res) => {
   const { schoolId = 'unique_scholars', title, category, body } = req.body;
   if (!title || !body) return res.status(400).json({ success: false, error: 'Title and body are required.' });
-  const tpl = saveMessageTemplate(schoolId, { title, category, body });
+  const tpl = await saveMessageTemplate(schoolId, { title, category, body });
   res.json({ success: true, template: tpl });
 });
 
@@ -734,7 +734,7 @@ app.post('/api/admin/broadcast/send', async (req, res) => {
 
     const gatewayUrl = req.headers['x-whatsapp-gateway-url'] || req.body.gatewayUrl || process.env.WHATSAPP_GATEWAY_URL || process.env.PERSISTENT_BACKEND_URL;
 
-    const students = getStudents(schoolId);
+    const students = await getStudents(schoolId);
     let targetStudents = [];
 
     if (targetGroup === 'all') {
@@ -780,10 +780,10 @@ app.post('/api/admin/broadcast/send', async (req, res) => {
 // PRINCIPAL AUTH & INSIGHTS
 // -------------------------------------------------------------
 
-app.post('/api/admin/login', (req, res) => {
-  const { pin } = req.body;
+app.post('/api/admin/login', async (req, res) => {
+  const { pin, schoolId = 'unique_scholars' } = req.body;
   if (!pin) return res.status(400).json({ success: false, error: 'PIN is required' });
-  const isValid = verifyAdminPin(pin);
+  const isValid = await verifyAdminPin(pin, schoolId);
   if (isValid) {
     return res.json({ success: true, message: 'Principal Authentication Successful!' });
   } else {
@@ -791,15 +791,15 @@ app.post('/api/admin/login', (req, res) => {
   }
 });
 
-app.get('/api/admin/insights', (req, res) => {
+app.get('/api/admin/insights', async (req, res) => {
   const { schoolId } = req.query;
-  const insights = getAdminInsights(schoolId || 'unique_scholars');
+  const insights = await getAdminInsights(schoolId || 'unique_scholars');
   res.json({ success: true, insights });
 });
 
-app.get('/api/admin/records', (req, res) => {
+app.get('/api/admin/records', async (req, res) => {
   const { schoolId, classId, status, date, search } = req.query;
-  const records = getAdminRecords(schoolId || 'unique_scholars', { classId, status, date, search });
+  const records = await getAdminRecords(schoolId || 'unique_scholars', { classId, status, date, search });
   res.json({ success: true, total: records.length, records });
 });
 
