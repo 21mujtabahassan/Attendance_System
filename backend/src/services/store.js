@@ -574,6 +574,45 @@ function submitFinalResults(schoolId = 'unique_scholars', payload) {
 }
 
 // -------------------------------------------------------------
+// PENDING DISPATCHES CLOUD QUEUE
+// -------------------------------------------------------------
+function addPendingDispatches(schoolId = 'unique_scholars', batch = []) {
+  if (!Array.isArray(batch) || batch.length === 0) return null;
+  const db = readDatabase();
+  if (!db.pendingDispatches) db.pendingDispatches = [];
+  const batchId = `BATCH-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
+  const record = {
+    id: batchId,
+    schoolId,
+    createdAt: new Date().toISOString(),
+    status: 'pending',
+    messages: batch
+  };
+  db.pendingDispatches.push(record);
+  writeDatabase(db);
+  return record;
+}
+
+function getPendingDispatches(schoolId = 'unique_scholars') {
+  const db = readDatabase();
+  return (db.pendingDispatches || []).filter(d => (!schoolId || d.schoolId === schoolId) && d.status === 'pending');
+}
+
+function markPendingDispatchComplete(schoolId = 'unique_scholars', batchId, deliveryResults = []) {
+  const db = readDatabase();
+  if (!db.pendingDispatches) return false;
+  const item = db.pendingDispatches.find(d => d.id === batchId);
+  if (item) {
+    item.status = 'completed';
+    item.completedAt = new Date().toISOString();
+    item.deliveryResults = deliveryResults;
+    writeDatabase(db);
+    return true;
+  }
+  return false;
+}
+
+// -------------------------------------------------------------
 // MESSAGE TEMPLATES MODULE LOGIC
 // -------------------------------------------------------------
 function getMessageTemplates(schoolId = 'unique_scholars') {
@@ -691,5 +730,8 @@ module.exports = {
   saveMessageTemplate,
   verifyAdminPin,
   getAdminInsights,
-  getAdminRecords
+  getAdminRecords,
+  addPendingDispatches,
+  getPendingDispatches,
+  markPendingDispatchComplete
 };

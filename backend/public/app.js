@@ -539,22 +539,17 @@ async function handleSubmitFinalResults() {
           loadMarksEntryGrid();
           initGatewayBadge();
           return;
-        } else {
-          const reason = gwData.details?.[0]?.error || data.whatsappError || 'WhatsApp not connected';
-          showToast(`⚠️ Results locked, but WhatsApp dispatch failed: ${reason}`);
-          loadMarksEntryGrid();
-          initGatewayBadge();
-          return;
         }
       } catch (gwErr) {
-        showToast(`⚠️ Results locked, but WhatsApp gateway (${gatewayUrl}) unreachable. Ensure local node server is running.`);
-        loadMarksEntryGrid();
-        initGatewayBadge();
-        return;
+        console.log('Client gateway direct dispatch skipped (waiting for background sync worker):', gwErr.message);
       }
     }
 
-    showToast(`Results locked. (${data.whatsappDispatched} WhatsApp messages dispatched)`);
+    if (data.whatsappQueued > 0) {
+      showToast(`🎉 Results finalized! Queued ${data.whatsappQueued} WhatsApp report cards — auto-telecasting via WhatsApp Gateway now...`);
+    } else {
+      showToast(`Results locked. (${data.whatsappDispatched} WhatsApp messages dispatched)`);
+    }
     loadMarksEntryGrid();
     initGatewayBadge();
   } catch (e) {
