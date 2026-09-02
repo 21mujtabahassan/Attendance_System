@@ -74,6 +74,14 @@
 
         <div class="topbar-actions">
           <div class="live-clock" id="liveClock">📅 Loading...</div>
+          <div class="server-badge" id="serverBadge" style="display: flex; align-items: center; gap: 6px; padding: 6px 12px; background: var(--bg-card); border: 1px solid var(--border-color); border-radius: var(--radius-md); font-size: 12px; color: var(--text-muted);">
+            <span class="status-dot" id="serverStatusDot" style="width: 8px; height: 8px; border-radius: 50%; background: #10b981; display: inline-block;"></span>
+            <span id="serverBadgeText">Detecting Server...</span>
+          </div>
+          <div class="server-badge" id="waGatewayBadge" style="display: flex; align-items: center; gap: 6px; padding: 6px 12px; background: var(--bg-card); border: 1px solid var(--border-color); border-radius: var(--radius-md); font-size: 12px; color: var(--text-muted); cursor: pointer;" onclick="switchTab('whatsapp')" title="Click to view WhatsApp Gateway status & settings">
+            <span class="status-dot" id="waGatewayDot" style="width: 8px; height: 8px; border-radius: 50%; background: #f59e0b; display: inline-block;"></span>
+            <span id="waGatewayBadgeText">WA Gateway: Auto</span>
+          </div>
           <button class="btn btn-primary" onclick="openModal('addStudentModal')">
             <i class="fa-solid fa-plus"></i> Add Student
           </button>
@@ -465,6 +473,26 @@
               <p>Scan QR code with the official school WhatsApp phone to enable parent dispatches and keep session
                 connected 24/7.</p>
             </div>
+          </div>
+
+          <!-- SHARED WHATSAPP DISPATCH GATEWAY CONFIG -->
+          <div style="margin: 0 0 25px 0; padding: 18px; background: rgba(15, 23, 42, 0.6); border-radius: 12px; border: 1px solid var(--border-color);">
+            <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 14px;">
+              <div>
+                <strong style="color: #fff; font-size: 14px; display: flex; align-items: center; gap: 8px;">
+                  <i class="fa-solid fa-satellite-dish" style="color: #38bdf8;"></i> Shared WhatsApp Dispatch Gateway
+                </strong>
+                <p style="color: #94a3b8; font-size: 12px; margin: 4px 0 0 0;">
+                  Routes marksheet & attendance dispatches from Vercel to your active, authenticated Baileys Node session.
+                </p>
+              </div>
+              <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+                <input type="text" id="waGatewayUrlInput" placeholder="http://192.168.100.63:3000" style="padding: 8px 12px; border-radius: 8px; background: #1e293b; border: 1px solid #334155; color: #fff; font-size: 13px; width: 260px;">
+                <button class="btn btn-secondary btn-sm" onclick="handlePingGateway()"><i class="fa-solid fa-bolt"></i> Ping</button>
+                <button class="btn btn-primary btn-sm" onclick="handleSaveGatewayUrl()"><i class="fa-solid fa-floppy-disk"></i> Save</button>
+              </div>
+            </div>
+            <div id="waGatewayStatusMsg" style="margin-top: 12px; padding: 10px 14px; border-radius: 8px; font-size: 12px; display: none;"></div>
           </div>
 
           <div style="display: flex; justify-content: center; gap: 15px; margin-bottom: 25px; flex-wrap: wrap;">

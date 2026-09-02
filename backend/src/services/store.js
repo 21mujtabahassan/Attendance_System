@@ -1,7 +1,8 @@
 const fs = require('fs');
 const path = require('path');
 
-const DATA_DIR = path.join(__dirname, '..', '..', 'data');
+const isVercel = !!process.env.VERCEL;
+const DATA_DIR = isVercel ? path.join('/tmp', 'attendance_data') : path.join(__dirname, '..', '..', 'data');
 const DB_FILE = path.join(DATA_DIR, 'unique_scholars_db.json');
 
 const INITIAL_DB = {
@@ -27,7 +28,7 @@ const INITIAL_DB = {
     { id: 'STU-103', name: 'Usman Ahmed', classId: 'Class-9', section: 'Section B', schoolId: 'unique_scholars', parentPhone: '03314751995', parentEmail: 'parent.usman@gmail.com' },
     { id: 'STU-104', name: 'Zainab Bibi', classId: 'Class-10', section: 'Section A', schoolId: 'unique_scholars', parentPhone: '03314751998', parentEmail: 'parent.zainab@gmail.com' },
     { id: 'STU-105', name: 'Hamza Khan', classId: 'Class-10', section: 'Section B', schoolId: 'unique_scholars', parentPhone: '03314751998', parentEmail: 'parent.hamza@gmail.com' },
-    { id: 'STU-106', name: 'Muhammad Ameer Hadi', classId: 'Class-Play', section: 'Section A', schoolId: 'unique_scholars', parentPhone: '03155889902', parentEmail: 'parent.hadi@gmail.com' }
+    { id: 'STU-106', name: 'Muhammad Ameer Hadi', classId: 'Class-Play', section: 'Section A', schoolId: 'unique_scholars', parentPhone: '03334751998', parentEmail: 'parent.hadi@gmail.com' }
   ],
   attendanceLogs: [
     { logId: '2026-08-27_STU-101', date: '2026-08-27', studentId: 'STU-101', name: 'Muhammad Ali', classId: 'Class-9', schoolId: 'unique_scholars', status: 'Absent', state: 'DRAFT', updatedAt: '2026-08-27T22:12:48.193Z' },
@@ -170,13 +171,16 @@ function initDatabase() {
       fs.mkdirSync(DATA_DIR, { recursive: true });
     }
     if (!fs.existsSync(DB_FILE)) {
-      fs.writeFileSync(DB_FILE, JSON.stringify(BUNDLED_DB || INITIAL_DB, null, 2), 'utf-8');
+      const seedData = BUNDLED_DB || INITIAL_DB;
+      fs.writeFileSync(DB_FILE, JSON.stringify(seedData, null, 2), 'utf-8');
     }
-  } catch (err) {}
+  } catch (err) {
+    console.error('Database init error:', err);
+  }
 }
 
-function readDatabase() {
-  if (inMemoryDb) return inMemoryDb;
+function readDatabase(forceReload = false) {
+  if (inMemoryDb && !forceReload && isVercel) return inMemoryDb;
   initDatabase();
   try {
     if (fs.existsSync(DB_FILE)) {
@@ -189,7 +193,9 @@ function readDatabase() {
       if (!inMemoryDb.messageTemplates) inMemoryDb.messageTemplates = INITIAL_DB.messageTemplates;
       return inMemoryDb;
     }
-  } catch (e) {}
+  } catch (e) {
+    console.error('Error reading DB_FILE:', e);
+  }
   inMemoryDb = JSON.parse(JSON.stringify(BUNDLED_DB || INITIAL_DB));
   return inMemoryDb;
 }
@@ -199,7 +205,9 @@ function writeDatabase(data) {
   try {
     initDatabase();
     fs.writeFileSync(DB_FILE, JSON.stringify(data, null, 2), 'utf-8');
-  } catch (e) {}
+  } catch (e) {
+    console.error('Error writing to DB_FILE:', e);
+  }
 }
 
 // -------------------------------------------------------------

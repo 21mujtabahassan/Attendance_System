@@ -2,13 +2,14 @@ import React, { useState, useEffect } from 'react';
 import { 
   StyleSheet, Text, View, TouchableOpacity, ScrollView, 
   SafeAreaView, StatusBar, Image, Alert, ActivityIndicator,
-  Modal, TextInput 
+  Modal, TextInput, RefreshControl 
 } from 'react-native';
 import { 
   getClasses, getStudents, saveAttendanceDraft, 
   submitFinalAttendance, getWhatsAppStatus, getAttendanceLogs,
   loginAdmin, getAdminInsights, getAdminRecords,
-  connectWhatsApp, reconnectWhatsApp, disconnectWhatsApp
+  connectWhatsApp, reconnectWhatsApp, disconnectWhatsApp,
+  subscribeBackendStatus
 } from './src/services/api';
 
 
@@ -23,6 +24,8 @@ export default function App() {
   const [logs, setLogs] = useState([]);
   const [submitting, setSubmitting] = useState(false);
   const [currentTime, setCurrentTime] = useState(new Date());
+  const [refreshing, setRefreshing] = useState(false);
+  const [backendStatus, setBackendStatus] = useState({ mode: 'detecting', url: '' });
 
   // Principal / Admin Authentication State
   const [isAdminLoggedIn, setIsAdminLoggedIn] = useState(false);
@@ -39,6 +42,7 @@ export default function App() {
   const [filterStatus, setFilterStatus] = useState('');
 
   useEffect(() => {
+    const unsub = subscribeBackendStatus(status => setBackendStatus(status));
     loadClasses();
     checkWhatsAppStatus();
     const interval = setInterval(() => {
@@ -50,6 +54,7 @@ export default function App() {
     }, 1000);
 
     return () => {
+      unsub();
       clearInterval(interval);
       clearInterval(clockInterval);
     };
@@ -92,21 +97,26 @@ export default function App() {
   };
 
   const handleRefresh = async () => {
-    setLoading(true);
-    const classList = await getClasses('unique_scholars');
-    setClasses(classList);
-    if (classList.length > 0) {
-      const targetClass = (selectedClass && classList.some(c => c.id === selectedClass))
-        ? selectedClass
-        : classList[0].id;
-      setSelectedClass(targetClass);
-      await loadStudents(targetClass);
+    setRefreshing(true);
+    try {
+      const classList = await getClasses('unique_scholars');
+      setClasses(classList);
+      if (classList.length > 0) {
+        const targetClass = (selectedClass && classList.some(c => c.id === selectedClass))
+          ? selectedClass
+          : classList[0].id;
+        setSelectedClass(targetClass);
+        await loadStudents(targetClass);
+      }
+      await checkWhatsAppStatus();
+      if (isAdminLoggedIn) {
+        await loadAdminDashboard();
+      }
+    } catch (err) {
+      console.error('Refresh error:', err);
+    } finally {
+      setRefreshing(false);
     }
-    await checkWhatsAppStatus();
-    if (isAdminLoggedIn) {
-      await loadAdminDashboard();
-    }
-    setLoading(false);
   };
 
   const checkWhatsAppStatus = async () => {
@@ -380,11 +390,20 @@ export default function App() {
       {/* MAIN CONTENT */}
       {activeTab === 'attendance' && (
         <View style={{ flex: 1 }}>
-          {/* LIVE DIGITAL CLOCK BAR */}
+          {/* LIVE DIGITAL CLOCK & BACKEND STATUS BAR */}
           <View style={styles.clockBar}>
             <Text style={styles.clockText}>
               📅 {currentTime.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })}  |  🕒 {formattedTime}
             </Text>
+            <View style={styles.backendRow}>
+              <View style={[styles.backendDot, { backgroundColor: backendStatus.mode === 'local' ? '#10b981' : '#38bdf8' }]} />
+              <Text style={styles.backendText}>
+                {backendStatus.mode === 'local' ? 'Local Server (192.168.100.63)' : 'Cloud Server (Vercel)'}
+              </Text>
+              <TouchableOpacity style={styles.quickSyncBtn} onPress={handleRefresh} disabled={refreshing}>
+                <Text style={styles.quickSyncText}>{refreshing ? '⏳ Syncing...' : '🔄 Pull to Sync'}</Text>
+              </TouchableOpacity>
+            </View>
           </View>
 
           {/* CLASS SELECTOR */}
@@ -431,7 +450,17 @@ export default function App() {
               </TouchableOpacity>
             </View>
           ) : (
-            <ScrollView style={styles.studentList}>
+            <ScrollView 
+              style={styles.studentList}
+              refreshControl={
+                <RefreshControl 
+                  refreshing={refreshing} 
+                  onRefresh={handleRefresh} 
+                  colors={['#3b82f6']} 
+                  tintColor="#3b82f6" 
+                />
+              }
+            >
               {students.map(item => {
                 const status = attendance[item.id] || 'Present';
                 return (
@@ -791,6 +820,35 @@ const styles = StyleSheet.create({
   clockText: {
     color: '#38bdf8',
     fontSize: 13,
+    fontWeight: '600'
+  },
+  backendRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 4
+  },
+  backendDot: {
+    width: 7,
+    height: 7,
+    borderRadius: 3.5,
+    marginRight: 6
+  },
+  backendText: {
+    color: '#94a3b8',
+    fontSize: 11,
+    fontWeight: '500',
+    marginRight: 10
+  },
+  quickSyncBtn: {
+    backgroundColor: '#334155',
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 6
+  },
+  quickSyncText: {
+    color: '#f8fafc',
+    fontSize: 11,
     fontWeight: '600'
   },
   brandTitle: { fontSize: 18, fontWeight: 'bold', color: '#f8fafc' },

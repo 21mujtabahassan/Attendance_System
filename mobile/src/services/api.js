@@ -1,33 +1,69 @@
 import Constants from 'expo-constants';
 
 const VERCEL_API_BASE = 'https://unique-scholars-attendance.vercel.app/api';
+const FALLBACK_LOCAL_IP = '192.168.100.63';
 
-const getLocalApiBase = () => {
+let currentBackendStatus = {
+  mode: 'detecting', // 'local' | 'cloud'
+  url: '',
+  lastChecked: null
+};
+
+let backendListeners = [];
+
+export const subscribeBackendStatus = (cb) => {
+  backendListeners.push(cb);
+  cb(currentBackendStatus);
+  return () => {
+    backendListeners = backendListeners.filter(fn => fn !== cb);
+  };
+};
+
+const notifyBackendStatus = (mode, url) => {
+  currentBackendStatus = { mode, url, lastChecked: new Date() };
+  backendListeners.forEach(fn => {
+    try { fn(currentBackendStatus); } catch (e) {}
+  });
+};
+
+export const getActiveBackendInfo = () => currentBackendStatus;
+
+export const getLocalApiBase = () => {
   const hostUri = Constants?.expoConfig?.hostUri || Constants?.manifest2?.extra?.expoGo?.debuggerHost || Constants?.manifest?.debuggerHost;
   if (hostUri) {
     const ip = hostUri.split(':')[0];
     if (ip) return `http://${ip}:3000/api`;
   }
-  return 'http://192.168.8.100:3000/api';
+  return `http://${FALLBACK_LOCAL_IP}:3000/api`;
 };
 
 const safeFetch = async (path, options = {}) => {
-  const localUrl = `${getLocalApiBase()}${path}`;
+  const localBase = getLocalApiBase();
+  const localUrl = `${localBase}${path}`;
   const vercelUrl = `${VERCEL_API_BASE}${path}`;
+
+  const headers = {
+    'Cache-Control': 'no-cache, no-store, must-revalidate',
+    'Pragma': 'no-cache',
+    'Expires': '0',
+    ...(options.headers || {})
+  };
 
   try {
     const controller = new AbortController();
-    const id = setTimeout(() => controller.abort(), 2500);
-    const res = await fetch(localUrl, { ...options, signal: controller.signal });
+    const id = setTimeout(() => controller.abort(), 2000);
+    const res = await fetch(localUrl, { ...options, headers, signal: controller.signal });
     clearTimeout(id);
     if (res.ok || res.status < 500) {
+      notifyBackendStatus('local', localBase);
       return res;
     }
   } catch (err) {
     // Local server unreachable, fallback to Vercel production API
   }
 
-  return await fetch(vercelUrl, options);
+  notifyBackendStatus('cloud', VERCEL_API_BASE);
+  return await fetch(vercelUrl, { ...options, headers });
 };
 
 export const getSchools = async () => {
@@ -43,7 +79,8 @@ export const getSchools = async () => {
 
 export const getClasses = async (schoolId = 'unique_scholars') => {
   try {
-    const res = await safeFetch(`/schools/${schoolId}/classes`);
+    const timestamp = Date.now();
+    const res = await safeFetch(`/schools/${schoolId}/classes?_t=${timestamp}`);
     const data = await res.json();
     return data.classes || [];
   } catch (error) {
@@ -54,9 +91,10 @@ export const getClasses = async (schoolId = 'unique_scholars') => {
 
 export const getStudents = async (schoolId = 'unique_scholars', classId = '') => {
   try {
+    const timestamp = Date.now();
     const url = classId 
-      ? `/schools/${schoolId}/students?class=${encodeURIComponent(classId)}`
-      : `/schools/${schoolId}/students`;
+      ? `/schools/${schoolId}/students?class=${encodeURIComponent(classId)}&_t=${timestamp}`
+      : `/schools/${schoolId}/students?_t=${timestamp}`;
     const res = await safeFetch(url);
     const data = await res.json();
     return data.students || [];

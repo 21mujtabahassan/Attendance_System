@@ -12,10 +12,54 @@ let socket = null;
 
 document.addEventListener('DOMContentLoaded', () => {
   initClock();
+  initServerBadge();
+  initGatewayBadge();
   initSocketIO();
   setupTabNavigation();
   loadInitialData();
 });
+
+function initServerBadge() {
+  const badge = document.getElementById('serverBadgeText');
+  const dot = document.getElementById('serverStatusDot');
+  if (!badge) return;
+  const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' || window.location.hostname.startsWith('192.168.');
+  if (isLocal) {
+    badge.innerText = `Local Server (${window.location.host})`;
+    if (dot) dot.style.background = '#10b981';
+  } else {
+    badge.innerText = `Cloud Server (${window.location.host})`;
+    if (dot) dot.style.background = '#38bdf8';
+  }
+}
+
+async function initGatewayBadge() {
+  const badgeText = document.getElementById('waGatewayBadgeText');
+  const dot = document.getElementById('waGatewayDot');
+  if (!badgeText) return;
+
+  try {
+    const gwBase = await getWaGatewayBase();
+    const cleanGw = gwBase.replace(/\/api\/?$/, '');
+    const res = await fetch(`${cleanGw}/api/whatsapp/gateway-info?schoolId=${CURRENT_SCHOOL_ID}`, {
+      signal: AbortSignal.timeout(2000)
+    });
+    const info = await res.json();
+    if (info.isConnected) {
+      badgeText.innerText = `WA Gateway: Connected ✅`;
+      if (dot) dot.style.background = '#10b981';
+    } else if (info.status === 'qr_ready') {
+      badgeText.innerText = `WA Gateway: Pair QR ⚡`;
+      if (dot) dot.style.background = '#f59e0b';
+    } else {
+      badgeText.innerText = `WA Gateway: Standby 🟡`;
+      if (dot) dot.style.background = '#f59e0b';
+    }
+  } catch (e) {
+    badgeText.innerText = `WA Gateway: Offline 🔴`;
+    if (dot) dot.style.background = '#ef4444';
+  }
+}
 
 // -------------------------------------------------------------
 // CLOCK & SOCKET.IO INITIALIZATION
@@ -39,6 +83,13 @@ function initSocketIO() {
         currentWaStatus = data;
         updateWaStatusUI(data);
       }
+    });
+
+    socket.on('students_updated', () => {
+      fetchStudents().then(() => {
+        filterStudentTable();
+        loadInitialData();
+      });
     });
   }
 }
@@ -435,20 +486,79 @@ async function handleSubmitFinalResults() {
   });
 
   try {
-    showToast('Finalizing results & dispatching WhatsApp report cards...');
+    showToast('Finalizing results & preparing dispatch...');
+    const gwBase = await getWaGatewayBase();
+    const gatewayUrl = gwBase.replace(/\/api\/?$/, '');
+
+    // Step 1: Finalize results on API backend
     const res = await fetch(`${API_BASE}/admin/results/submit`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ schoolId: CURRENT_SCHOOL_ID, termId, classId, results: currentMarksGridData })
+      headers: { 
+        'Content-Type': 'application/json',
+        'x-whatsapp-gateway-url': gatewayUrl
+      },
+      body: JSON.stringify({ 
+        schoolId: CURRENT_SCHOOL_ID, 
+        termId, 
+        classId, 
+        results: currentMarksGridData,
+        gatewayUrl 
+      })
     });
     const data = await res.json();
-    if (data.success) {
-      showToast(`🎉 Results finalized! Sent ${data.whatsappDispatched} WhatsApp report cards.`);
-      loadMarksEntryGrid();
-    } else {
-      showToast(data.error || 'Failed to submit final results.');
+
+    if (!data.success) {
+      return showToast(data.error || 'Failed to submit final results.');
     }
+
+    // Step 2: Check if backend server dispatched messages directly
+    if (data.whatsappDispatched > 0) {
+      showToast(`🎉 Results finalized! Dispatched ${data.whatsappDispatched} WhatsApp report cards.`);
+      loadMarksEntryGrid();
+      initGatewayBadge();
+      return;
+    }
+
+    // Step 3: Serverless node could not reach private LAN gateway directly (e.g. Vercel in AWS -> 192.168.x.x)
+    // The browser client IS on the local LAN! Forward the pending batch directly to the active gateway!
+    if (Array.isArray(data.pendingBatch) && data.pendingBatch.length > 0) {
+      showToast(`📡 Routing ${data.pendingBatch.length} marksheets through WhatsApp Gateway (${gatewayUrl})...`);
+      try {
+        const gwRes = await fetch(`${gatewayUrl}/api/whatsapp/dispatch-batch`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            schoolId: CURRENT_SCHOOL_ID,
+            messages: data.pendingBatch
+          }),
+          signal: AbortSignal.timeout(20000)
+        });
+        const gwData = await gwRes.json();
+        if (gwData.sent > 0) {
+          showToast(`🎉 Results finalized & Sent ${gwData.sent} WhatsApp report cards via Gateway!`);
+          loadMarksEntryGrid();
+          initGatewayBadge();
+          return;
+        } else {
+          const reason = gwData.details?.[0]?.error || data.whatsappError || 'WhatsApp not connected';
+          showToast(`⚠️ Results locked, but WhatsApp dispatch failed: ${reason}`);
+          loadMarksEntryGrid();
+          initGatewayBadge();
+          return;
+        }
+      } catch (gwErr) {
+        showToast(`⚠️ Results locked, but WhatsApp gateway (${gatewayUrl}) unreachable. Ensure local node server is running.`);
+        loadMarksEntryGrid();
+        initGatewayBadge();
+        return;
+      }
+    }
+
+    showToast(`Results locked. (${data.whatsappDispatched} WhatsApp messages dispatched)`);
+    loadMarksEntryGrid();
+    initGatewayBadge();
   } catch (e) {
+    console.error('Error finalizing academic results:', e);
     showToast('Error finalizing academic results.');
   }
 }
@@ -663,15 +773,53 @@ async function handleSendBroadcast(e) {
 
   try {
     showToast('Dispatching WhatsApp broadcast...');
+    const gwBase = await getWaGatewayBase();
+    const gatewayUrl = gwBase.replace(/\/api\/?$/, '');
+
     const res = await fetch(`${API_BASE}/admin/broadcast/send`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ schoolId: CURRENT_SCHOOL_ID, targetGroup, classId, message })
+      headers: { 
+        'Content-Type': 'application/json',
+        'x-whatsapp-gateway-url': gatewayUrl
+      },
+      body: JSON.stringify({ schoolId: CURRENT_SCHOOL_ID, targetGroup, classId, message, gatewayUrl })
     });
     const data = await res.json();
-    if (data.success) {
+    if (data.success && data.sentCount > 0) {
       showToast(`🎉 Broadcast delivered to ${data.sentCount} recipients!`);
       document.getElementById('broadcastForm').reset();
+      initGatewayBadge();
+    } else if (data.success && data.sentCount === 0) {
+      // Client fallback route to local gateway
+      const targetStudents = globalStudents.filter(s => targetGroup === 'all' || s.classId === classId);
+      const batch = targetStudents.filter(s => s.parentPhone).map(s => ({
+        studentId: s.id,
+        studentName: s.name,
+        phone: s.parentPhone,
+        message: message.replace(/{student_name}/g, s.name).replace(/{class_id}/g, s.classId)
+      }));
+
+      if (batch.length > 0) {
+        showToast(`📡 Routing broadcast through WhatsApp Gateway (${gatewayUrl})...`);
+        try {
+          const gwRes = await fetch(`${gatewayUrl}/api/whatsapp/dispatch-batch`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ schoolId: CURRENT_SCHOOL_ID, messages: batch }),
+            signal: AbortSignal.timeout(20000)
+          });
+          const gwData = await gwRes.json();
+          if (gwData.sent > 0) {
+            showToast(`🎉 Broadcast delivered to ${gwData.sent} recipients via Gateway!`);
+            document.getElementById('broadcastForm').reset();
+            initGatewayBadge();
+            return;
+          }
+        } catch (gwErr) {
+          console.error('Gateway broadcast error:', gwErr);
+        }
+      }
+      showToast(`⚠️ Broadcast failed: WhatsApp session not active on server or gateway.`);
     } else {
       showToast(data.error || 'Broadcast failed.');
     }
@@ -1001,34 +1149,149 @@ async function loadRecordsData() {
 }
 
 // -------------------------------------------------------------
-// TAB 7: WHATSAPP GATEWAY CONTROL
-// ------------------let resolvedWaApiBase = null;
+// TAB 7: WHATSAPP GATEWAY CONTROL & ROUTING
+// -------------------------------------------------------------
+let resolvedWaApiBase = null;
 
-async function getWaApiBase() {
+function getSavedGatewayUrl() {
+  return localStorage.getItem('whatsapp_gateway_url') || '';
+}
+
+function setSavedGatewayUrl(url) {
+  if (url) {
+    localStorage.setItem('whatsapp_gateway_url', url.trim().replace(/\/+$/, ''));
+  } else {
+    localStorage.removeItem('whatsapp_gateway_url');
+  }
+  resolvedWaApiBase = null;
+}
+
+async function getWaGatewayBase() {
   if (resolvedWaApiBase) return resolvedWaApiBase;
-  if (!window.location.hostname.includes('vercel.app')) {
-    resolvedWaApiBase = API_BASE;
-    return API_BASE;
+
+  // 1. Check user-configured URL from localStorage
+  const userConfigured = getSavedGatewayUrl();
+  if (userConfigured) {
+    try {
+      const controller = new AbortController();
+      const id = setTimeout(() => controller.abort(), 1500);
+      const res = await fetch(`${userConfigured}/api/whatsapp/gateway-info?schoolId=${CURRENT_SCHOOL_ID}`, { signal: controller.signal });
+      clearTimeout(id);
+      if (res.ok) {
+        resolvedWaApiBase = `${userConfigured}/api`;
+        return resolvedWaApiBase;
+      }
+    } catch (e) {}
   }
 
-  try {
-    const controller = new AbortController();
-    const id = setTimeout(() => controller.abort(), 1200);
-    const res = await fetch('http://localhost:3000/api/whatsapp/status?schoolId=unique_scholars', { signal: controller.signal });
-    clearTimeout(id);
-    if (res.ok) {
-      resolvedWaApiBase = 'http://localhost:3000/api';
-      return resolvedWaApiBase;
-    }
-  } catch (e) {}
+  // 2. If running locally or on local IP, use local origin
+  const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' || window.location.hostname.startsWith('192.168.');
+  if (isLocal) {
+    resolvedWaApiBase = `${window.location.origin}/api`;
+    return resolvedWaApiBase;
+  }
 
+  // 3. If running on Vercel or cloud, try candidate local/LAN URLs
+  const candidateUrls = [
+    'http://localhost:3000',
+    'http://192.168.100.63:3000'
+  ];
+
+  for (const candidate of candidateUrls) {
+    try {
+      const controller = new AbortController();
+      const id = setTimeout(() => controller.abort(), 1200);
+      const res = await fetch(`${candidate}/api/whatsapp/gateway-info?schoolId=${CURRENT_SCHOOL_ID}`, { signal: controller.signal });
+      clearTimeout(id);
+      if (res.ok) {
+        resolvedWaApiBase = `${candidate}/api`;
+        console.log(`Discovered active WhatsApp Gateway at: ${resolvedWaApiBase}`);
+        return resolvedWaApiBase;
+      }
+    } catch (e) {}
+  }
+
+  // 4. Fallback to API_BASE
   resolvedWaApiBase = API_BASE;
   return API_BASE;
+}
+
+async function getWaApiBase() {
+  return await getWaGatewayBase();
+}
+
+async function pingGateway(url) {
+  const base = url ? url.trim().replace(/\/+$/, '') : (await getWaGatewayBase()).replace(/\/api\/?$/, '');
+  try {
+    const res = await fetch(`${base}/api/whatsapp/gateway-info?schoolId=${CURRENT_SCHOOL_ID}`, {
+      signal: AbortSignal.timeout(3000)
+    });
+    const data = await res.json();
+    return { ok: true, data, url: base };
+  } catch (e) {
+    return { ok: false, error: e.message, url: base };
+  }
+}
+
+async function handlePingGateway() {
+  const input = document.getElementById('waGatewayUrlInput');
+  const msgBox = document.getElementById('waGatewayStatusMsg');
+  const targetUrl = input && input.value.trim() ? input.value.trim() : (await getWaGatewayBase()).replace(/\/api\/?$/, '');
+
+  if (msgBox) {
+    msgBox.style.display = 'block';
+    msgBox.style.background = 'rgba(59, 130, 246, 0.15)';
+    msgBox.style.color = '#60a5fa';
+    msgBox.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Testing WhatsApp Gateway connectivity at <strong>${targetUrl}</strong>...`;
+  }
+
+  const result = await pingGateway(targetUrl);
+  if (msgBox) {
+    if (result.ok) {
+      const isConn = result.data.isConnected;
+      const status = result.data.status;
+      msgBox.style.background = isConn ? 'rgba(16, 185, 129, 0.15)' : 'rgba(245, 158, 11, 0.15)';
+      msgBox.style.color = isConn ? '#10b981' : '#f59e0b';
+      msgBox.innerHTML = `
+        <strong><i class="fa-solid ${isConn ? 'fa-circle-check' : 'fa-triangle-exclamation'}"></i> Gateway Online!</strong>
+        Status: <strong>${status}</strong> ${isConn ? '(Baileys WebSocket Connected ✅)' : '(Session waiting for QR pairing)'}
+        <br><small style="color: #cbd5e1;">Target Node: ${result.url}</small>
+      `;
+      showToast(`Gateway connected (${status})`);
+      resolvedWaApiBase = null;
+      initGatewayBadge();
+      fetchWaStatus();
+    } else {
+      msgBox.style.background = 'rgba(239, 68, 68, 0.15)';
+      msgBox.style.color = '#ef4444';
+      msgBox.innerHTML = `
+        <strong><i class="fa-solid fa-circle-xmark"></i> Gateway Unreachable:</strong> ${result.error}.
+        <br><small style="color: #cbd5e1;">Make sure your local backend (<code>npm run backend</code>) is running on <code>${targetUrl}</code> or configure a tunnel URL.</small>
+      `;
+      showToast('Gateway unreachable');
+      initGatewayBadge();
+    }
+  }
+}
+
+function handleSaveGatewayUrl() {
+  const input = document.getElementById('waGatewayUrlInput');
+  if (!input) return;
+  const val = input.value.trim();
+  setSavedGatewayUrl(val);
+  showToast(`Gateway URL saved: ${val || 'Auto-detect'}`);
+  resolvedWaApiBase = null;
+  handlePingGateway();
 }
 
 async function fetchWaStatus() {
   try {
     const baseUrl = await getWaApiBase();
+    const input = document.getElementById('waGatewayUrlInput');
+    if (input && !input.value) {
+      input.value = baseUrl.replace(/\/api\/?$/, '');
+    }
+
     const res = await fetch(`${baseUrl}/whatsapp/status?schoolId=${CURRENT_SCHOOL_ID}`);
     const data = await res.json();
     currentWaStatus = data;
@@ -1047,27 +1310,6 @@ function updateWaStatusUI(data) {
   const qr = data.qr || '';
   const message = data.message || '';
 
-  if (message && message.includes('persistent local/VPS backend node')) {
-    if (sidebarPill) sidebarPill.className = 'wa-status-pill disconnected';
-    if (sidebarText) sidebarText.innerText = 'WA Server Offline';
-    if (qrBox) {
-      qrBox.innerHTML = `
-        <div style="background: rgba(245, 158, 11, 0.15); border: 2px dashed #f59e0b; padding: 24px; border-radius: 16px; max-width: 550px; margin: 0 auto; text-align: center;">
-          <i class="fa-solid fa-server" style="font-size: 44px; color: #f59e0b; margin-bottom: 12px;"></i>
-          <h3 style="color: #fff; margin-bottom: 8px;">Local Backend Server Required</h3>
-          <p style="color: #cbd5e1; font-size: 13px; line-height: 1.5; margin-bottom: 18px;">
-            Vercel serverless hosting cannot keep persistent WhatsApp WebSocket sessions alive.<br>
-            Please start your local school backend server (<code>npm start</code>) and open:
-          </p>
-          <a href="http://localhost:3000/admin" target="_blank" class="btn btn-accent" style="text-decoration: none; display: inline-block;">
-            🖥️ Open Local Admin Portal (http://localhost:3000/admin)
-          </a>
-        </div>
-      `;
-    }
-    return;
-  }
-
   if (status === 'connected') {
     if (sidebarPill) sidebarPill.className = 'wa-status-pill connected';
     if (sidebarText) sidebarText.innerText = 'WhatsApp Connected ✅';
@@ -1076,7 +1318,7 @@ function updateWaStatusUI(data) {
         <div style="text-align: center; padding: 20px;">
           <i class="fa-solid fa-circle-check" style="font-size: 64px; color: #10b981; margin-bottom: 12px;"></i>
           <h3 style="color: #fff; margin-bottom: 6px;">WhatsApp Connected & Synced!</h3>
-          <p style="color: #94a3b8; font-size: 13px;">School WhatsApp Gateway is online. Automatic parent alerts and marksheets are active.</p>
+          <p style="color: #94a3b8; font-size: 13px;">School WhatsApp Gateway is online. Parent alerts and marksheet report cards will dispatch automatically.</p>
         </div>
       `;
     }
@@ -1104,7 +1346,7 @@ function updateWaStatusUI(data) {
     if (qrBox) {
       qrBox.innerHTML = `
         <p style="color: #ef4444; font-weight: bold; margin-bottom: 10px;">🔴 WhatsApp Disconnected</p>
-        <p class="text-muted" style="font-size: 13px; margin-bottom: 15px;">Click "Connect / View QR Code" or "Reconnect Socket" to pair.</p>
+        <p class="text-muted" style="font-size: 13px; margin-bottom: 15px;">Click "Connect / View QR Code" to pair, or verify the Shared Gateway URL above.</p>
       `;
     }
   }

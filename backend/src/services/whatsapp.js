@@ -271,38 +271,79 @@ function formatPhoneToJid(phone) {
   return `${cleaned}@s.whatsapp.net`;
 }
 
-async function sendWhatsAppMessage(phone, message, schoolId = 'unique_scholars') {
+async function sendWhatsAppMessage(phone, message, schoolId = 'unique_scholars', gatewayUrlOverride = null) {
   const sess = getSessionState(schoolId);
-  if (sess.status !== 'connected' || !sess.sock) {
+
+  // 1. If local session is active, send directly via Baileys socket
+  if (sess.status === 'connected' && sess.sock) {
+    const jid = formatPhoneToJid(phone);
+    if (!jid) {
+      return {
+        success: false,
+        error: `Invalid phone number format: "${phone}". Use format 03001234567.`
+      };
+    }
+
+    try {
+      const result = await sess.sock.sendMessage(jid, { text: message });
+      console.log(`📩 [${schoolId}] WhatsApp message sent to parent at ${phone} (JID: ${jid})`);
+      return {
+        success: true,
+        messageId: result?.key?.id || `MSG-${Date.now()}`,
+        recipient: jid,
+        routedVia: 'local_socket'
+      };
+    } catch (error) {
+      console.error(`[${schoolId}] Failed to send WhatsApp message to ${phone}:`, error);
+      return {
+        success: false,
+        error: error.message || 'Failed to send WhatsApp message'
+      };
+    }
+  }
+
+  // 2. If running on Vercel or local socket not active, check for a persistent WhatsApp Gateway URL
+  const gatewayUrl = gatewayUrlOverride || process.env.WHATSAPP_GATEWAY_URL || process.env.PERSISTENT_BACKEND_URL;
+  if (gatewayUrl) {
+    try {
+      const cleanUrl = gatewayUrl.replace(/\/+$/, '');
+      const targetUrl = `${cleanUrl}/api/whatsapp/send`;
+      console.log(`Forwarding WhatsApp dispatch to remote gateway: ${targetUrl}`);
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 10000);
+      const res = await fetch(targetUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phone, message, schoolId }),
+        signal: controller.signal
+      });
+      clearTimeout(timer);
+      const data = await res.json();
+      if (data) {
+        data.routedVia = 'gateway_forward';
+        return data;
+      }
+    } catch (fwdErr) {
+      console.error(`Failed to forward WhatsApp message via ${gatewayUrl}:`, fwdErr.message);
+      return {
+        success: false,
+        error: `Failed to reach WhatsApp Gateway (${gatewayUrl}): ${fwdErr.message}`
+      };
+    }
+  }
+
+  // 3. Fallback explanation if neither is available
+  if (process.env.VERCEL) {
     return {
       success: false,
-      error: `WhatsApp is not connected for school "${schoolId}". Please scan the QR code in the portal.`
+      error: `WhatsApp Web requires an active persistent socket (cannot run standalone on Vercel serverless). Connect your persistent Node gateway or set WHATSAPP_GATEWAY_URL in Vercel settings.`
     };
   }
 
-  const jid = formatPhoneToJid(phone);
-  if (!jid) {
-    return {
-      success: false,
-      error: `Invalid phone number format: "${phone}". Use format 03001234567.`
-    };
-  }
-
-  try {
-    const result = await sess.sock.sendMessage(jid, { text: message });
-    console.log(`📩 [${schoolId}] WhatsApp message sent to parent at ${phone} (JID: ${jid})`);
-    return {
-      success: true,
-      messageId: result.key.id,
-      recipient: jid
-    };
-  } catch (error) {
-    console.error(`[${schoolId}] Failed to send WhatsApp message to ${phone}:`, error);
-    return {
-      success: false,
-      error: error.message || 'Failed to send WhatsApp message'
-    };
-  }
+  return {
+    success: false,
+    error: `WhatsApp is not connected for school "${schoolId}". Please scan the QR code in the app to pair.`
+  };
 }
 
 function getWhatsAppStatus(schoolId = 'unique_scholars') {
@@ -315,25 +356,37 @@ function getWhatsAppStatus(schoolId = 'unique_scholars') {
   };
 }
 
+function getGatewayInfo(schoolId = 'unique_scholars') {
+  const sess = getSessionState(schoolId);
+  const sessionDir = path.join(BASE_SESSION_DIR, schoolId);
+  return {
+    schoolId,
+    status: sess.status,
+    isConnected: sess.status === 'connected' && !!sess.sock,
+    isVercel: !!process.env.VERCEL,
+    gatewayUrlConfigured: process.env.WHATSAPP_GATEWAY_URL || process.env.PERSISTENT_BACKEND_URL || null,
+    hasSessionFiles: fs.existsSync(path.join(sessionDir, 'creds.json')),
+    uptime: process.uptime()
+  };
+}
+
 async function initAllSessions(io = null) {
   if (io) ioInstance = io;
   if (process.env.VERCEL) return;
 
   try {
-    if (!fs.existsSync(BASE_SESSION_DIR)) {
-      fs.mkdirSync(BASE_SESSION_DIR, { recursive: true });
-    }
-
-    const items = fs.readdirSync(BASE_SESSION_DIR, { withFileTypes: true });
-    const schoolFolders = items.filter(i => i.isDirectory()).map(i => i.name);
-
-    if (schoolFolders.length === 0) {
-      console.log('⚡ Initializing default school WhatsApp session (unique_scholars)...');
-      await initWhatsApp('unique_scholars', io);
-    } else {
-      for (const schoolId of schoolFolders) {
-        console.log(`⚡ Auto-restoring saved WhatsApp session for school: ${schoolId}`);
-        await initWhatsApp(schoolId, io);
+    if (!fs.existsSync(BASE_SESSION_DIR)) return;
+    const entries = fs.readdirSync(BASE_SESSION_DIR, { withFileTypes: true });
+    for (const entry of entries) {
+      if (entry.isDirectory()) {
+        const schoolId = entry.name;
+        const credsPath = path.join(BASE_SESSION_DIR, schoolId, 'creds.json');
+        if (fs.existsSync(credsPath)) {
+          console.log(`[${schoolId}] Found existing session creds. Auto-initializing WhatsApp connection...`);
+          initWhatsApp(schoolId, ioInstance, false).catch(err => {
+            console.error(`[${schoolId}] Auto-init session error:`, err.message);
+          });
+        }
       }
     }
   } catch (e) {
@@ -345,6 +398,7 @@ module.exports = {
   initWhatsApp,
   reconnectWhatsApp,
   getWhatsAppStatus,
+  getGatewayInfo,
   sendWhatsAppMessage,
   disconnectWhatsApp,
   formatPhoneToJid,

@@ -9,6 +9,7 @@ const {
   initWhatsApp,
   reconnectWhatsApp,
   getWhatsAppStatus,
+  getGatewayInfo,
   sendWhatsAppMessage,
   disconnectWhatsApp,
   initAllSessions
@@ -94,12 +95,63 @@ app.get('/api/whatsapp/status', (req, res) => {
   res.json(getWhatsAppStatus(schoolId));
 });
 
+app.get('/api/whatsapp/gateway-info', (req, res) => {
+  const { schoolId = 'unique_scholars' } = req.query;
+  res.json(getGatewayInfo(schoolId));
+});
+
+app.post('/api/whatsapp/send', async (req, res) => {
+  try {
+    const { phone, message, schoolId = 'unique_scholars', gatewayUrl } = req.body;
+    if (!phone || !message) {
+      return res.status(400).json({ success: false, error: 'phone and message are required' });
+    }
+    const result = await sendWhatsAppMessage(phone, message, schoolId, gatewayUrl);
+    res.json(result);
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+app.post('/api/whatsapp/dispatch-batch', async (req, res) => {
+  try {
+    const { messages, schoolId = 'unique_scholars', gatewayUrl } = req.body;
+    if (!Array.isArray(messages) || messages.length === 0) {
+      return res.status(400).json({ success: false, error: 'messages array is required' });
+    }
+
+    const results = [];
+    for (const item of messages) {
+      if (!item.phone || !item.message) continue;
+      const waRes = await sendWhatsAppMessage(item.phone, item.message, schoolId, gatewayUrl);
+      results.push({
+        studentId: item.studentId || null,
+        studentName: item.studentName || null,
+        phone: item.phone,
+        success: waRes.success,
+        error: waRes.error || null,
+        messageId: waRes.messageId || null,
+        routedVia: waRes.routedVia || 'unknown'
+      });
+    }
+
+    res.json({
+      success: true,
+      total: results.length,
+      sent: results.filter(r => r.success).length,
+      failed: results.filter(r => !r.success).length,
+      details: results
+    });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
 app.post('/api/whatsapp/connect', async (req, res) => {
   const { schoolId = 'unique_scholars' } = req.body;
   const result = await initWhatsApp(schoolId, io, true);
   res.json(result);
 });
-
 
 app.post('/api/whatsapp/reconnect', async (req, res) => {
   const { schoolId = 'unique_scholars' } = req.body;
@@ -166,6 +218,7 @@ app.post('/api/schools/:schoolId/students', (req, res) => {
     return res.status(400).json({ error: 'Student name and classId are required.' });
   }
   const student = addStudent(schoolId, { name, classId, section, parentPhone, parentEmail });
+  if (io) io.emit('students_updated', { action: 'create', schoolId, student });
   res.json({ success: true, student });
 });
 
@@ -173,6 +226,7 @@ app.put('/api/admin/students/:studentId', (req, res) => {
   const { schoolId = 'unique_scholars' } = req.query;
   const { studentId } = req.params;
   const result = updateStudent(schoolId, studentId, req.body);
+  if (result.success && io) io.emit('students_updated', { action: 'update', schoolId, student: result.student });
   res.status(result.success ? 200 : 400).json(result);
 });
 
@@ -180,6 +234,7 @@ app.delete('/api/admin/students/:studentId', (req, res) => {
   const { schoolId = 'unique_scholars' } = req.query;
   const { studentId } = req.params;
   deleteStudent(schoolId, studentId);
+  if (io) io.emit('students_updated', { action: 'delete', schoolId, studentId });
   res.json({ success: true, message: 'Student deleted successfully.' });
 });
 
@@ -216,6 +271,7 @@ app.post('/api/attendance/submit', async (req, res) => {
     const school = schools.find(s => s.id === schoolId) || { name: 'Unique Scholars Academy' };
     const dateStr = attendanceDate || new Date().toISOString().split('T')[0];
     const timeStr = attendanceTime || new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true });
+    const gatewayUrl = req.headers['x-whatsapp-gateway-url'] || req.body.gatewayUrl || process.env.WHATSAPP_GATEWAY_URL || process.env.PERSISTENT_BACKEND_URL;
 
     const { absentStudentsToAlert } = submitFinalAttendance(schoolId, classId, dateStr, attendance, timeStr);
     const whatsappResults = [];
@@ -237,13 +293,14 @@ Yeh inform kiya jata hai ke aapka bacha aaj ${school.name} mein absent raha. Cle
 Thank you,
 ${school.name}`;
 
-      const result = await sendWhatsAppMessage(item.parentPhone, message, schoolId);
+      const result = await sendWhatsAppMessage(item.parentPhone, message, schoolId, gatewayUrl);
       whatsappResults.push({
         studentId: item.studentId,
         name: item.name,
         parentPhone: item.parentPhone,
         success: result.success,
-        error: result.error || null
+        error: result.error || null,
+        routedVia: result.routedVia || 'unknown'
       });
     }
 
@@ -332,6 +389,8 @@ app.post('/api/admin/results/submit', async (req, res) => {
       return res.status(400).json({ success: false, error: 'termId, classId, and results list are required.' });
     }
 
+    const gatewayUrl = req.headers['x-whatsapp-gateway-url'] || req.body.gatewayUrl || process.env.WHATSAPP_GATEWAY_URL || process.env.PERSISTENT_BACKEND_URL;
+
     const schools = getSchools();
     const school = schools.find(s => s.id === schoolId) || { name: 'Unique Scholars Academy' };
     const terms = getResultTerms(schoolId);
@@ -342,6 +401,7 @@ app.post('/api/admin/results/submit', async (req, res) => {
     // Submit & Lock Final Results (Calculates Grade, Pass/Fail, and Ranks)
     const finalizedResults = submitFinalResults(schoolId, { termId, classId, results });
     const whatsappDetails = [];
+    const pendingBatch = [];
 
     // Host protocol & domain for PDF link
     const hostHeader = req.get('host') || `localhost:${PORT}`;
@@ -374,24 +434,39 @@ ${reportLink}
 Congratulations & Best Regards,
 ${school.name}`;
 
-      const waRes = await sendWhatsAppMessage(item.parentPhone, message, schoolId);
+      pendingBatch.push({
+        studentId: item.studentId,
+        studentName: item.studentName,
+        phone: item.parentPhone,
+        message
+      });
+
+      const waRes = await sendWhatsAppMessage(item.parentPhone, message, schoolId, gatewayUrl);
       whatsappDetails.push({
         studentId: item.studentId,
         studentName: item.studentName,
         parentPhone: item.parentPhone,
         success: waRes.success,
-        error: waRes.error || null
+        error: waRes.error || null,
+        routedVia: waRes.routedVia || 'unknown'
       });
     }
 
+    const dispatchedCount = whatsappDetails.filter(w => w.success).length;
+    const failedCount = whatsappDetails.filter(w => !w.success).length;
+
     res.json({
       success: true,
-      message: `Final Academic Results locked and WhatsApp Report Cards dispatched!`,
+      message: dispatchedCount > 0
+        ? `Final Academic Results locked and ${dispatchedCount} WhatsApp Report Cards dispatched!`
+        : `Final Academic Results locked! (${failedCount} WhatsApp dispatches pending gateway connection)`,
       state: 'FINALIZED',
       totalFinalized: finalizedResults.length,
-      whatsappDispatched: whatsappDetails.filter(w => w.success).length,
-      whatsappFailed: whatsappDetails.filter(w => !w.success).length,
-      whatsappDetails
+      whatsappDispatched: dispatchedCount,
+      whatsappFailed: failedCount,
+      whatsappError: failedCount > 0 ? (whatsappDetails[0]?.error || 'WhatsApp session not active') : null,
+      whatsappDetails,
+      pendingBatch
     });
   } catch (error) {
     console.error('Error submitting final results:', error);
@@ -567,6 +642,8 @@ app.post('/api/admin/broadcast/send', async (req, res) => {
     const { schoolId = 'unique_scholars', targetGroup, classId, message } = req.body;
     if (!message) return res.status(400).json({ success: false, error: 'Message content is required.' });
 
+    const gatewayUrl = req.headers['x-whatsapp-gateway-url'] || req.body.gatewayUrl || process.env.WHATSAPP_GATEWAY_URL || process.env.PERSISTENT_BACKEND_URL;
+
     const students = getStudents(schoolId);
     let targetStudents = [];
 
@@ -585,13 +662,14 @@ app.post('/api/admin/broadcast/send', async (req, res) => {
         .replace(/{student_name}/g, student.name)
         .replace(/{class_id}/g, student.classId);
 
-      const waRes = await sendWhatsAppMessage(student.parentPhone, formattedMessage, schoolId);
+      const waRes = await sendWhatsAppMessage(student.parentPhone, formattedMessage, schoolId, gatewayUrl);
       results.push({
         studentId: student.id,
         name: student.name,
         phone: student.parentPhone,
         success: waRes.success,
-        error: waRes.error || null
+        error: waRes.error || null,
+        routedVia: waRes.routedVia || 'unknown'
       });
     }
 
