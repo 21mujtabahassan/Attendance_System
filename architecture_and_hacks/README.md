@@ -30,6 +30,12 @@ This folder documents all the architectural decisions, bypasses, and engineering
    - How parent phone numbers are formatted (`formatPhoneToJid`).
    - Troubleshooting common network and session issues.
 
+4. [**04_POSTGRESQL_MIGRATION_GUIDE.md**](./04_POSTGRESQL_MIGRATION_GUIDE.md)
+   *Neon Serverless PostgreSQL Architecture, Schema & Setup.*
+   - Full DDL schema (soft deletes, normalized marks, student fee dues for Pay Later).
+   - How all historical data was migrated from JSON to PostgreSQL.
+   - Setting `DATABASE_URL` in Vercel project settings for live production sync.
+
 ---
 
 ## 🏛️ High-Level System Architecture

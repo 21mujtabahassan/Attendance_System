@@ -14,6 +14,9 @@ mobile/.expo/
 
 # Environment Variables & Logs
 .env
+.env*
+backend/.env
+backend/.env*
 *.log
 scratch/
 .qodo/

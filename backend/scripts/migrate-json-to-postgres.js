@@ -160,17 +160,26 @@ async function migrate() {
 
     // 9. Migrate Class Subjects
     console.log('📖 Migrating class subjects...');
+    let subCount = 0;
     for (const cs of (jsonData.classSubjects || [])) {
-      await db('class_term_subjects').insert({
-        id: cs.id,
-        school_id: cs.schoolId || 'unique_scholars',
-        class_id: cs.classId,
-        term_id: cs.termId,
-        subject_name: cs.name,
-        max_marks: cs.totalMarks || 100,
-        display_order: cs.displayOrder || 0
-      }).onConflict('id').merge();
+      const subjectList = Array.isArray(cs.subjects) ? cs.subjects : (cs.name ? [cs.name] : []);
+      for (let i = 0; i < subjectList.length; i++) {
+        const sName = typeof subjectList[i] === 'string' ? subjectList[i] : (subjectList[i].name || `Subject ${i+1}`);
+        const maxMarks = typeof subjectList[i] === 'object' ? (subjectList[i].totalMarks || 100) : 100;
+        const subId = `SUB-${cs.classId}-${cs.termId}-${encodeURIComponent(sName)}`;
+        await db('class_term_subjects').insert({
+          id: subId,
+          school_id: cs.schoolId || 'unique_scholars',
+          class_id: cs.classId,
+          term_id: cs.termId,
+          subject_name: sName,
+          max_marks: maxMarks,
+          display_order: i + 1
+        }).onConflict('id').merge();
+        subCount++;
+      }
     }
+    console.log(`   Migrated ${subCount} class subjects.`);
 
     // 10. Migrate Student Results & Normalized Marks
     console.log('🏆 Migrating student results & subject marks...');
