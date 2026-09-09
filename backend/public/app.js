@@ -407,7 +407,10 @@ async function loadMarksEntryGrid() {
 
       rowsHtml += `
         <tr id="marksRow_${sIdx}">
-          <td><strong>${stu.id}</strong></td>
+          <td>
+            <span class="badge badge-primary" style="font-size:0.8rem; font-weight:700;">#${stu.rollNumber != null ? stu.rollNumber : '-'}</span>
+            <br><small class="text-muted" style="font-size:10px;">${stu.id}</small>
+          </td>
           <td>${stu.name} <br><small class="text-muted">📞 ${stu.parentPhone || 'No Phone'}</small></td>
           ${subjectInputsHtml}
           <td style="text-align: center; font-weight: bold; color: #38bdf8;" id="rowTotal_${sIdx}">${totalObt} / ${maxTotal}</td>
@@ -1056,12 +1059,13 @@ function filterStudentTable() {
   }
 
   if (list.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted">No students matching criteria.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="8" class="text-center text-muted">No students matching criteria.</td></tr>';
     return;
   }
 
   tbody.innerHTML = list.map(s => `
     <tr>
+      <td><span class="badge badge-primary" style="font-weight:700; font-size: 0.85rem;">#${s.rollNumber != null ? s.rollNumber : '-'}</span></td>
       <td><strong>${s.id}</strong></td>
       <td>${s.name}</td>
       <td>${s.classId}</td>
@@ -1107,7 +1111,7 @@ async function handleCreateStudent(e) {
     });
     const data = await res.json();
     if (data.success && data.student) {
-      showToast(`Student "${name}" added successfully to database! 🎓`);
+      showToast(`Student "${name}" added successfully! (Roll #${data.student.rollNumber || '-'}, ${data.student.id}) 🎓`);
       closeModal('addStudentModal');
       document.getElementById('addStudentForm').reset();
       await fetchStudents();
@@ -1125,6 +1129,11 @@ async function handleCreateStudent(e) {
 function openEditStudentModal(studentId) {
   const stu = globalStudents.find(s => s.id === studentId);
   if (!stu) return;
+
+  const idDisplay = document.getElementById('editStudentIdDisplay');
+  const rollDisplay = document.getElementById('editStudentRollDisplay');
+  if (idDisplay) idDisplay.textContent = stu.id;
+  if (rollDisplay) rollDisplay.textContent = stu.rollNumber != null ? `#${stu.rollNumber}` : 'Unassigned';
 
   document.getElementById('editStudentId').value = stu.id;
   document.getElementById('editStudentName').value = stu.name;
@@ -1154,7 +1163,8 @@ async function handleEditStudentSubmit(e) {
     });
     const data = await res.json();
     if (data.success) {
-      showToast('Student profile updated!');
+      const updatedRoll = data.student && data.student.rollNumber ? ` (Roll #${data.student.rollNumber})` : '';
+      showToast(`Student profile updated${updatedRoll}!`);
       closeModal('editStudentModal');
       await fetchStudents();
       filterStudentTable();
@@ -1198,14 +1208,15 @@ function viewClassRoster(classId, className) {
   const tbody = document.getElementById('classRosterTableBody');
 
   if (classStudents.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted">No students enrolled in this class yet.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted">No students enrolled in this class yet.</td></tr>';
   } else {
     tbody.innerHTML = classStudents.map(s => `
       <tr>
+        <td><span class="badge badge-primary" style="font-weight:700; font-size: 0.85rem;">#${s.rollNumber != null ? s.rollNumber : '-'}</span></td>
         <td><strong>${s.id}</strong></td>
         <td>${s.name}</td>
         <td><span class="section-tag">${s.section || 'Section A'}</span></td>
-        <td><span class="phone-badge">📞 ${s.parentPhone}</span></td>
+        <td><span class="phone-badge">📞 ${s.parentPhone || 'Not Provided'}</span></td>
         <td>${s.parentEmail || '-'}</td>
         <td>
           <button class="btn btn-secondary btn-sm" onclick="openEditStudentModal('${s.id}')"><i class="fa-solid fa-pen"></i></button>

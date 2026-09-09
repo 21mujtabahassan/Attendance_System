@@ -60,23 +60,28 @@ CREATE TABLE IF NOT EXISTS class_sections (
 );
 
 -- =====================================================================
--- 4. STUDENTS
+-- 4. STUDENTS & SEQUENCES
 -- =====================================================================
+CREATE SEQUENCE IF NOT EXISTS student_id_seq START 1;
+
 CREATE TABLE IF NOT EXISTS students (
   id            VARCHAR(50) PRIMARY KEY,
   school_id     VARCHAR(50) NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
   class_id      VARCHAR(50) NOT NULL REFERENCES classes(id),
   section_id    UUID REFERENCES class_sections(id),
   section_name  VARCHAR(50),
+  roll_number   INT,
   name          VARCHAR(150) NOT NULL,
   parent_phone  VARCHAR(20),
   parent_email  VARCHAR(150),
   is_active     BOOLEAN NOT NULL DEFAULT true,   -- soft delete: preserves attendance/result history
   created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
-  updated_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+  updated_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (class_id, section_id, roll_number)
 );
 CREATE INDEX IF NOT EXISTS idx_students_school_class ON students(school_id, class_id);
 CREATE INDEX IF NOT EXISTS idx_students_phone ON students(parent_phone);
+CREATE INDEX IF NOT EXISTS idx_students_section_roll ON students(class_id, section_id, roll_number);
 
 -- =====================================================================
 -- 5. ATTENDANCE

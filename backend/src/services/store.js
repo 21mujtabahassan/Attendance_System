@@ -184,7 +184,7 @@ async function deleteClass(schoolId = 'unique_scholars', classId) {
 }
 
 // -------------------------------------------------------------
-// 3. STUDENTS (Soft deletes preserve history)
+// 3. STUDENTS (Section-Scoped Roll Number & Sequential ID)
 // -------------------------------------------------------------
 async function getStudents(schoolId = 'unique_scholars', classId = null) {
   if (isPostgresConfigured()) {
@@ -193,11 +193,18 @@ async function getStudents(schoolId = 'unique_scholars', classId = null) {
       .where({ 'students.school_id': schoolId, 'students.is_active': true });
     if (classId) query.andWhere({ 'students.class_id': classId });
 
-    const rows = await query.orderBy('students.id', 'asc');
+    // Order primarily by roll number asc, then by id
+    const rows = await query.orderBy([
+      { column: 'students.roll_number', order: 'asc', nulls: 'last' },
+      { column: 'students.id', order: 'asc' }
+    ]);
+
     return rows.map(r => ({
       id: r.id,
+      rollNumber: r.roll_number !== null && r.roll_number !== undefined ? Number(r.roll_number) : null,
       schoolId: r.school_id,
       classId: r.class_id,
+      sectionId: r.section_id,
       section: r.section_name || 'Section A',
       name: r.name,
       parentPhone: r.parent_phone || '',
@@ -206,7 +213,9 @@ async function getStudents(schoolId = 'unique_scholars', classId = null) {
   }
 
   const db = readJsonDb();
-  return (db.students || []).filter(s => s.schoolId === schoolId && s.isActive !== false && (!classId || s.classId === classId));
+  let list = (db.students || []).filter(s => s.schoolId === schoolId && s.isActive !== false && (!classId || s.classId === classId));
+  list.sort((a, b) => (a.rollNumber || 999999) - (b.rollNumber || 999999));
+  return list;
 }
 
 async function addStudent(schoolId = 'unique_scholars', studentData) {
@@ -214,85 +223,130 @@ async function addStudent(schoolId = 'unique_scholars', studentData) {
     throw new Error('Student name is required.');
   }
 
-  const id = `STU-${Date.now().toString().slice(-6)}`;
-  const secName = studentData.section || 'Section A';
+  const secName = (studentData.section || 'Section A').trim();
 
   if (isPostgresConfigured()) {
     const db = getDb();
 
-    // Resolve class ID from either classId or className
-    let cls = null;
-    if (studentData.classId) {
-      cls = await db('classes')
-        .where({ school_id: schoolId })
-        .andWhere(function() {
-          this.where('id', studentData.classId).orWhere('name', studentData.classId);
-        })
+    // Use transaction with row-level lock for absolute concurrency safety
+    return await db.transaction(async trx => {
+      // 1. Resolve class
+      let cls = null;
+      if (studentData.classId) {
+        cls = await trx('classes')
+          .where({ school_id: schoolId })
+          .andWhere(function() {
+            this.where('id', studentData.classId).orWhere('name', studentData.classId);
+          })
+          .first();
+      }
+      if (!cls) {
+        cls = await trx('classes').where({ school_id: schoolId }).first();
+      }
+      if (!cls) {
+        throw new Error('No valid class found in school to enroll student.');
+      }
+
+      const resolvedClassId = cls.id;
+
+      // 2. Ensure section exists
+      let secRow = await trx('class_sections')
+        .where({ class_id: resolvedClassId, section_name: secName })
         .first();
-    }
-    if (!cls) {
-      cls = await db('classes').where({ school_id: schoolId }).first();
-    }
-    if (!cls) {
-      throw new Error('No valid class found in school to enroll student.');
-    }
 
-    const resolvedClassId = cls.id;
-
-    let secRow = await db('class_sections').where({ class_id: resolvedClassId, section_name: secName }).first();
-    if (!secRow) {
-      try {
-        await db('class_sections').insert({
+      if (!secRow) {
+        await trx('class_sections').insert({
           class_id: resolvedClassId,
           section_name: secName
         });
-        secRow = await db('class_sections').where({ class_id: resolvedClassId, section_name: secName }).first();
-      } catch (secErr) {}
-    }
+        secRow = await trx('class_sections')
+          .where({ class_id: resolvedClassId, section_name: secName })
+          .first();
+      }
 
-    await db('students').insert({
-      id,
-      school_id: schoolId,
-      class_id: resolvedClassId,
-      section_id: secRow?.id || null,
-      section_name: secName,
-      name: studentData.name.trim(),
-      parent_phone: studentData.parentPhone || '',
-      parent_email: studentData.parentEmail || '',
-      is_active: true
+      // Lock the section row for update so concurrent additions to this section are strictly serialized
+      if (secRow && secRow.id) {
+        await trx('class_sections')
+          .where({ id: secRow.id })
+          .forUpdate();
+      }
+
+      // 3. Compute next roll number scoped strictly to this (Class, Section)
+      const rollRow = await trx('students')
+        .where({ class_id: resolvedClassId, section_id: secRow.id })
+        .max('roll_number as maxRoll')
+        .first();
+
+      const nextRoll = (rollRow && rollRow.maxRoll !== null && rollRow.maxRoll !== undefined ? Number(rollRow.maxRoll) : 0) + 1;
+
+      // 4. Sequential Student ID generation using database sequence (zero-padded 6-digit)
+      const seqRes = await trx.raw("SELECT nextval('student_id_seq') AS seq");
+      const seqNum = seqRes.rows[0].seq;
+      const studentId = `STU-${String(seqNum).padStart(6, '0')}`;
+
+      // 5. Insert student
+      await trx('students').insert({
+        id: studentId,
+        school_id: schoolId,
+        class_id: resolvedClassId,
+        section_id: secRow.id,
+        section_name: secName,
+        roll_number: nextRoll,
+        name: studentData.name.trim(),
+        parent_phone: (studentData.parentPhone || '').trim(),
+        parent_email: (studentData.parentEmail || '').trim(),
+        is_active: true
+      });
+
+      const newStudent = {
+        id: studentId,
+        rollNumber: nextRoll,
+        schoolId,
+        name: studentData.name.trim(),
+        classId: resolvedClassId,
+        sectionId: secRow.id,
+        section: secName,
+        parentPhone: (studentData.parentPhone || '').trim(),
+        parentEmail: (studentData.parentEmail || '').trim()
+      };
+
+      // Mirror to JSON file for offline/fallback consistency
+      try {
+        const jDb = readJsonDb();
+        if (!jDb.students) jDb.students = [];
+        jDb.students.push(newStudent);
+        writeJsonDb(jDb);
+      } catch (e) {}
+
+      return newStudent;
     });
-
-    const newStudent = {
-      id,
-      schoolId,
-      name: studentData.name.trim(),
-      classId: resolvedClassId,
-      section: secName,
-      parentPhone: studentData.parentPhone || '',
-      parentEmail: studentData.parentEmail || ''
-    };
-
-    // Mirror to JSON file for offline/fallback consistency
-    try {
-      const jDb = readJsonDb();
-      if (!jDb.students) jDb.students = [];
-      jDb.students.push(newStudent);
-      writeJsonDb(jDb);
-    } catch (e) {}
-
-    return newStudent;
   }
 
+  // Local JSON fallback
   const db = readJsonDb();
   if (!db.students) db.students = [];
+
+  const targetClassId = studentData.classId || 'Class-Play';
+  const existingInSec = db.students.filter(s => s.schoolId === schoolId && s.classId === targetClassId && s.section === secName);
+  const maxRoll = existingInSec.reduce((max, s) => Math.max(max, Number(s.rollNumber || 0)), 0);
+  const nextRoll = maxRoll + 1;
+
+  // Auto-increment sequential ID for JSON fallback
+  const maxSeq = db.students.reduce((max, s) => {
+    const match = s.id && s.id.match(/^STU-(\d+)$/);
+    return match ? Math.max(max, parseInt(match[1], 10)) : max;
+  }, 0);
+  const studentId = `STU-${String(maxSeq + 1).padStart(6, '0')}`;
+
   const newStudent = {
-    id,
+    id: studentId,
+    rollNumber: nextRoll,
     schoolId,
     name: studentData.name.trim(),
-    classId: studentData.classId || 'Class-Play',
+    classId: targetClassId,
     section: secName,
-    parentPhone: studentData.parentPhone || '',
-    parentEmail: studentData.parentEmail || ''
+    parentPhone: (studentData.parentPhone || '').trim(),
+    parentEmail: (studentData.parentEmail || '').trim()
   };
   db.students.push(newStudent);
   writeJsonDb(db);
@@ -302,53 +356,120 @@ async function addStudent(schoolId = 'unique_scholars', studentData) {
 async function updateStudent(schoolId = 'unique_scholars', studentId, updates) {
   if (isPostgresConfigured()) {
     const db = getDb();
-    const payload = {};
-    if (updates.name !== undefined) payload.name = updates.name.trim();
-    if (updates.classId !== undefined) {
-      const cls = await db('classes')
-        .where({ school_id: schoolId })
-        .andWhere(function() {
-          this.where('id', updates.classId).orWhere('name', updates.classId);
-        })
-        .first();
-      payload.class_id = cls ? cls.id : updates.classId;
-    }
-    if (updates.section !== undefined) payload.section_name = updates.section;
-    if (updates.parentPhone !== undefined) payload.parent_phone = updates.parentPhone;
-    if (updates.parentEmail !== undefined) payload.parent_email = updates.parentEmail;
-    payload.updated_at = new Date();
+    return await db.transaction(async trx => {
+      const current = await trx('students').where({ school_id: schoolId, id: studentId }).first();
+      if (!current) return null;
 
-    await db('students').where({ school_id: schoolId, id: studentId }).update(payload);
-    const updated = await db('students').where({ school_id: schoolId, id: studentId }).first();
-    if (!updated) return null;
+      const payload = {};
+      if (updates.name !== undefined) payload.name = updates.name.trim();
+      if (updates.parentPhone !== undefined) payload.parent_phone = updates.parentPhone.trim();
+      if (updates.parentEmail !== undefined) payload.parent_email = updates.parentEmail.trim();
+      payload.updated_at = new Date();
 
-    const result = {
-      id: updated.id,
-      schoolId: updated.school_id,
-      classId: updated.class_id,
-      section: updated.section_name,
-      name: updated.name,
-      parentPhone: updated.parent_phone || '',
-      parentEmail: updated.parent_email || ''
-    };
-
-    // Mirror to JSON
-    try {
-      const jDb = readJsonDb();
-      const idx = (jDb.students || []).findIndex(s => s.id === studentId);
-      if (idx >= 0) {
-        jDb.students[idx] = { ...jDb.students[idx], ...result };
-        writeJsonDb(jDb);
+      // Check if Section Transfer occurs
+      let destClassId = current.class_id;
+      if (updates.classId !== undefined) {
+        const cls = await trx('classes')
+          .where({ school_id: schoolId })
+          .andWhere(function() {
+            this.where('id', updates.classId).orWhere('name', updates.classId);
+          })
+          .first();
+        destClassId = cls ? cls.id : updates.classId;
+        payload.class_id = destClassId;
       }
-    } catch (e) {}
 
-    return result;
+      let destSecName = current.section_name || 'Section A';
+      if (updates.section !== undefined) {
+        destSecName = updates.section.trim();
+        payload.section_name = destSecName;
+      }
+
+      const isTransfer = (destClassId !== current.class_id) || (destSecName !== current.section_name);
+
+      if (isTransfer) {
+        // Ensure destination section exists and lock it
+        let destSecRow = await trx('class_sections')
+          .where({ class_id: destClassId, section_name: destSecName })
+          .first();
+        if (!destSecRow) {
+          await trx('class_sections').insert({
+            class_id: destClassId,
+            section_name: destSecName
+          });
+          destSecRow = await trx('class_sections')
+            .where({ class_id: destClassId, section_name: destSecName })
+            .first();
+        }
+
+        if (destSecRow && destSecRow.id) {
+          await trx('class_sections').where({ id: destSecRow.id }).forUpdate();
+        }
+
+        // Allocate new roll number in destination section (old roll number retired permanently)
+        const rollRow = await trx('students')
+          .where({ class_id: destClassId, section_id: destSecRow.id })
+          .max('roll_number as maxRoll')
+          .first();
+
+        const newRoll = (rollRow && rollRow.maxRoll !== null && rollRow.maxRoll !== undefined ? Number(rollRow.maxRoll) : 0) + 1;
+        payload.section_id = destSecRow.id;
+        payload.roll_number = newRoll;
+      }
+
+      await trx('students').where({ school_id: schoolId, id: studentId }).update(payload);
+      const updated = await trx('students').where({ school_id: schoolId, id: studentId }).first();
+      if (!updated) return null;
+
+      const result = {
+        id: updated.id,
+        rollNumber: updated.roll_number !== null ? Number(updated.roll_number) : null,
+        schoolId: updated.school_id,
+        classId: updated.class_id,
+        sectionId: updated.section_id,
+        section: updated.section_name,
+        name: updated.name,
+        parentPhone: updated.parent_phone || '',
+        parentEmail: updated.parent_email || ''
+      };
+
+      // Mirror to JSON
+      try {
+        const jDb = readJsonDb();
+        const idx = (jDb.students || []).findIndex(s => s.id === studentId);
+        if (idx >= 0) {
+          jDb.students[idx] = { ...jDb.students[idx], ...result };
+          writeJsonDb(jDb);
+        }
+      } catch (e) {}
+
+      return result;
+    });
   }
 
+  // JSON Fallback
   const db = readJsonDb();
   const idx = (db.students || []).findIndex(s => s.schoolId === schoolId && s.id === studentId);
   if (idx >= 0) {
-    db.students[idx] = { ...db.students[idx], ...updates };
+    const current = db.students[idx];
+    const destClassId = updates.classId || current.classId;
+    const destSecName = updates.section || current.section;
+    const isTransfer = (destClassId !== current.classId) || (destSecName !== current.section);
+
+    let newRoll = current.rollNumber;
+    if (isTransfer) {
+      const inDest = db.students.filter(s => s.schoolId === schoolId && s.classId === destClassId && s.section === destSecName);
+      const maxRoll = inDest.reduce((max, s) => Math.max(max, Number(s.rollNumber || 0)), 0);
+      newRoll = maxRoll + 1;
+    }
+
+    db.students[idx] = {
+      ...db.students[idx],
+      ...updates,
+      classId: destClassId,
+      section: destSecName,
+      rollNumber: newRoll
+    };
     writeJsonDb(db);
     return db.students[idx];
   }
@@ -1470,12 +1591,17 @@ async function getStudentFeeLedger(schoolId = 'unique_scholars', month = null, c
       .select(
         'student_fee_dues.*',
         'students.name as student_name',
+        'students.roll_number as student_roll_number',
+        'students.section_name as student_section_name',
         'students.parent_phone',
         'students.class_id',
         'classes.name as class_name',
         'class_fee_structures.base_fee as struct_base_fee'
       )
-      .orderBy('students.name', 'asc');
+      .orderBy([
+        { column: 'students.roll_number', order: 'asc', nulls: 'last' },
+        { column: 'students.name', order: 'asc' }
+      ]);
 
     const ledger = rows.map(r => {
       const discount = parseFloat(r.discount_amount) || 0;
@@ -1488,7 +1614,8 @@ async function getStudentFeeLedger(schoolId = 'unique_scholars', month = null, c
         id: r.id,
         studentId: r.student_id,
         studentName: r.student_name,
-        rollNo: String(r.student_id).replace('STU-', ''),
+        rollNo: r.student_roll_number !== null && r.student_roll_number !== undefined ? Number(r.student_roll_number) : String(r.student_id).replace('STU-', ''),
+        section: r.student_section_name || 'Section A',
         parentPhone: r.parent_phone || '',
         classId: r.class_name || r.class_id,
         rawClassId: r.class_id,
@@ -1546,6 +1673,8 @@ async function getStudentFeeLedger(schoolId = 'unique_scholars', month = null, c
         id: record.id,
         studentId: s.id,
         studentName: s.name,
+        rollNo: s.rollNumber !== null && s.rollNumber !== undefined ? Number(s.rollNumber) : String(s.id).replace('STU-', ''),
+        section: s.section || 'Section A',
         parentPhone: s.parentPhone || '',
         classId: s.classId,
         className: cls ? cls.name : s.classId,
@@ -1699,7 +1828,7 @@ async function recordFeePayment(schoolId = 'unique_scholars', feeId, paymentData
       id: feeId,
       studentId: record.student_id,
       studentName: student ? student.name : 'Student',
-      rollNo: student ? String(student.id).replace('STU-', '') : '-',
+      rollNo: student && (student.roll_number || student.rollNumber) ? Number(student.roll_number || student.rollNumber) : String(record.student_id).replace('STU-', ''),
       classId: cls ? cls.name : (student ? student.class_id : '-'),
       parentPhone: student ? student.parent_phone : '',
       month: record.term_or_month,
@@ -1741,7 +1870,7 @@ async function recordFeePayment(schoolId = 'unique_scholars', feeId, paymentData
     id: feeId,
     studentId: record.studentId,
     studentName: student ? student.name : 'Student',
-    rollNo: student ? String(student.id).replace('STU-', '') : '-',
+    rollNo: student && student.rollNumber ? Number(student.rollNumber) : String(record.studentId).replace('STU-', ''),
     classId: cls ? cls.name : (student ? student.classId : '-'),
     parentPhone: student ? student.parentPhone : '',
     month: record.termOrMonth,
