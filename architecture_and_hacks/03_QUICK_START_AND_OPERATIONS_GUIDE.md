@@ -71,7 +71,7 @@ In [`backend/src/services/whatsapp.js`](file:///c:/Users/Zartash%20Haider/Deskto
   ```
 
 ### 2. Chrome shows: *"unique-scholars-attendance.vercel.app wants to: Access other devices on your local network"*
-- **Action**: Click **`Allow`**. This allows Chrome to make direct high-speed dispatches to your local gateway (`http://192.168.100.63:3000`). Even if you miss it, the Cloud Sync Worker will telecast the messages automatically.
+- **Action**: Click **`Allow`**. This allows Chrome to make direct high-speed dispatches to your local gateway (`http://192.168.8.106:3000` or `http://localhost:3000`). Even if you miss it, the Cloud Sync Worker will telecast the messages automatically.
 
 ### 3. WhatsApp Status shows *"Disconnected 🔴"*
 - **Action**: In the **WhatsApp Gateway** tab, click **"Ping"**. If unreachable, verify that `npm run backend` is running in your terminal. If online but unlinked, click **"Connect / View QR Code"** and scan the QR code with your phone.

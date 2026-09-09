@@ -5,6 +5,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Unique Scholars Academy - Unified Admin Portal</title>
+  <link rel="icon" type="image/png" href="favicon.png?v=2026">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link
@@ -22,8 +23,8 @@
     <!-- SIDEBAR -->
     <aside class="sidebar" id="sidebar">
       <div class="brand">
-        <div class="brand-icon">
-          <i class="fa-solid fa-graduation-cap"></i>
+        <div class="brand-logo-container">
+          <img src="logo.png?v=2026" alt="Unique Scholars Academy" class="brand-logo-img">
         </div>
         <div>
           <h2>Unique Scholars</h2>
@@ -487,7 +488,7 @@
                 </p>
               </div>
               <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
-                <input type="text" id="waGatewayUrlInput" placeholder="http://192.168.100.63:3000" style="padding: 8px 12px; border-radius: 8px; background: #1e293b; border: 1px solid #334155; color: #fff; font-size: 13px; width: 260px;">
+                <input type="text" id="waGatewayUrlInput" placeholder="http://192.168.8.106:3000" style="padding: 8px 12px; border-radius: 8px; background: #1e293b; border: 1px solid #334155; color: #fff; font-size: 13px; width: 260px;">
                 <button class="btn btn-secondary btn-sm" onclick="handlePingGateway()"><i class="fa-solid fa-bolt"></i> Ping</button>
                 <button class="btn btn-primary btn-sm" onclick="handleSaveGatewayUrl()"><i class="fa-solid fa-floppy-disk"></i> Save</button>
               </div>
@@ -496,13 +497,13 @@
           </div>
 
           <div style="display: flex; justify-content: center; gap: 15px; margin-bottom: 25px; flex-wrap: wrap;">
-            <button class="btn btn-primary" onclick="triggerWhatsAppConnect()">
+            <button class="btn btn-primary" id="btnWaConnect" onclick="triggerWhatsAppConnect()">
               <i class="fa-solid fa-qrcode"></i> Connect / View QR Code
             </button>
-            <button class="btn btn-secondary" onclick="triggerWhatsAppReconnect()">
+            <button class="btn btn-secondary" id="btnWaReconnect" onclick="triggerWhatsAppReconnect()">
               <i class="fa-solid fa-rotate-right"></i> Reconnect Socket
             </button>
-            <button class="btn btn-danger" onclick="triggerWhatsAppDisconnect()">
+            <button class="btn btn-danger" id="btnWaDisconnect" onclick="triggerWhatsAppDisconnect()">
               <i class="fa-solid fa-power-off"></i> Disconnect / Clear Session
             </button>
           </div>

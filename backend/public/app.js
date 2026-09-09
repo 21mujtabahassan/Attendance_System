@@ -1186,16 +1186,30 @@ async function getWaGatewayBase() {
     return resolvedWaApiBase;
   }
 
-  // 3. If running on Vercel or cloud, try candidate local/LAN URLs
+  // 3. If running on Vercel or cloud, check dynamic DB gateway registration and candidate LAN URLs
   const candidateUrls = [
     'http://localhost:3000',
+    'http://192.168.8.106:3000',
     'http://192.168.100.63:3000'
   ];
 
-  for (const candidate of candidateUrls) {
+  try {
+    const controller = new AbortController();
+    const id = setTimeout(() => controller.abort(), 1500);
+    const gwInfoRes = await fetch(`${API_BASE}/whatsapp/gateway-info?schoolId=${CURRENT_SCHOOL_ID}`, { signal: controller.signal });
+    clearTimeout(id);
+    if (gwInfoRes.ok) {
+      const gwInfoData = await gwInfoRes.json();
+      if (gwInfoData && gwInfoData.gatewayUrlConfigured) {
+        candidateUrls.unshift(gwInfoData.gatewayUrlConfigured.replace(/\/api\/?$/, ''));
+      }
+    }
+  } catch (e) {}
+
+  for (const candidate of [...new Set(candidateUrls)]) {
     try {
       const controller = new AbortController();
-      const id = setTimeout(() => controller.abort(), 1200);
+      const id = setTimeout(() => controller.abort(), 1500);
       const res = await fetch(`${candidate}/api/whatsapp/gateway-info?schoolId=${CURRENT_SCHOOL_ID}`, { signal: controller.signal });
       clearTimeout(id);
       if (res.ok) {
@@ -1303,17 +1317,25 @@ function updateWaStatusUI(data) {
 
   const status = data.status || 'disconnected';
   const qr = data.qr || '';
-  const message = data.message || '';
+  const isConnected = status === 'connected' || !!data.isConnected;
+  const lastError = data.lastError || '';
 
-  if (status === 'connected') {
+  if (isConnected) {
     if (sidebarPill) sidebarPill.className = 'wa-status-pill connected';
     if (sidebarText) sidebarText.innerText = 'WhatsApp Connected ✅';
     if (qrBox) {
       qrBox.innerHTML = `
-        <div style="text-align: center; padding: 20px;">
-          <i class="fa-solid fa-circle-check" style="font-size: 64px; color: #10b981; margin-bottom: 12px;"></i>
-          <h3 style="color: #fff; margin-bottom: 6px;">WhatsApp Connected & Synced!</h3>
-          <p style="color: #94a3b8; font-size: 13px;">School WhatsApp Gateway is online. Parent alerts and marksheet report cards will dispatch automatically.</p>
+        <div style="text-align: center; padding: 25px 20px;">
+          <div style="width: 72px; height: 72px; background: rgba(16, 185, 129, 0.15); border: 2px solid #10b981; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; margin-bottom: 16px;">
+            <i class="fa-solid fa-check" style="font-size: 36px; color: #10b981;"></i>
+          </div>
+          <h3 style="color: #fff; margin-bottom: 6px; font-size: 20px;">WhatsApp Gateway Connected & Synced!</h3>
+          <p style="color: #94a3b8; font-size: 13px; max-width: 480px; margin: 0 auto 15px auto;">
+            School WhatsApp Gateway session is active and verified on disk. Parent attendance alerts, broadcast notices, and marksheet report cards will dispatch automatically.
+          </p>
+          <div style="display: inline-flex; align-items: center; gap: 8px; padding: 6px 14px; background: rgba(16, 185, 129, 0.1); border-radius: 20px; font-size: 12px; color: #34d399;">
+            <span style="width: 8px; height: 8px; border-radius: 50%; background: #34d399;"></span> Baileys Persistent Socket Active
+          </div>
         </div>
       `;
     }
@@ -1321,18 +1343,41 @@ function updateWaStatusUI(data) {
     if (sidebarPill) sidebarPill.className = 'wa-status-pill connecting';
     if (sidebarText) sidebarText.innerText = 'Scan QR Code ⚡';
     if (qrBox) {
-      qrBox.innerHTML = `
-        <p style="color: #f59e0b; font-weight: bold; margin-bottom: 14px;">⚡ Scan QR Code with School WhatsApp Phone:</p>
-        <img src="${qr}" alt="WhatsApp QR Code" style="width: 220px; height: 220px; border-radius: 12px; border: 4px solid #fff;">
-        <p style="color: #94a3b8; font-size: 12px; margin-top: 12px;">Open WhatsApp > Linked Devices > Link a Device</p>
-      `;
+      const qrImg = qrBox.querySelector('#waQrImage');
+      if (qrImg) {
+        // Smoothly update QR src without blinking container
+        if (qrImg.src !== qr) {
+          qrImg.src = qr;
+        }
+      } else {
+        qrBox.innerHTML = `
+          <div style="text-align: center; padding: 15px 20px;">
+            <p style="color: #f59e0b; font-weight: 700; font-size: 15px; margin-bottom: 12px; display: flex; align-items: center; justify-content: center; gap: 8px;">
+              <i class="fa-solid fa-qrcode"></i> Scan QR Code with School WhatsApp Phone:
+            </p>
+            <div style="display: inline-block; padding: 12px; background: #ffffff; border-radius: 16px; box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5);">
+              <img id="waQrImage" src="${qr}" alt="WhatsApp QR Code" style="width: 230px; height: 230px; display: block; border-radius: 8px;">
+            </div>
+            <p style="color: #cbd5e1; font-size: 13px; margin-top: 14px; font-weight: 500;">
+              Open WhatsApp → <strong>Linked Devices</strong> → <strong>Link a Device</strong>
+            </p>
+            <p style="color: #64748b; font-size: 11px; margin-top: 6px; display: flex; align-items: center; justify-content: center; gap: 6px;">
+              <i class="fa-solid fa-arrows-rotate fa-spin" style="font-size: 10px; color: #38bdf8;"></i> Auto-refreshes on expiry. Waiting for scan...
+            </p>
+          </div>
+        `;
+      }
     }
   } else if (status === 'connecting') {
     if (sidebarPill) sidebarPill.className = 'wa-status-pill connecting';
     if (sidebarText) sidebarText.innerText = 'Connecting WA...';
     if (qrBox) {
       qrBox.innerHTML = `
-        <p class="text-muted"><i class="fa-solid fa-spinner fa-spin"></i> Connecting to WhatsApp Gateway Engine...</p>
+        <div style="text-align: center; padding: 40px 20px;">
+          <i class="fa-solid fa-spinner fa-spin" style="font-size: 38px; color: #38bdf8; margin-bottom: 14px;"></i>
+          <p style="color: #f1f5f9; font-size: 15px; font-weight: 600; margin-bottom: 6px;">Initializing WhatsApp Gateway Engine...</p>
+          <p style="color: #94a3b8; font-size: 12px;">Checking saved session keys and negotiating socket handshake.</p>
+        </div>
       `;
     }
   } else {
@@ -1340,8 +1385,16 @@ function updateWaStatusUI(data) {
     if (sidebarText) sidebarText.innerText = 'WA Disconnected 🔴';
     if (qrBox) {
       qrBox.innerHTML = `
-        <p style="color: #ef4444; font-weight: bold; margin-bottom: 10px;">🔴 WhatsApp Disconnected</p>
-        <p class="text-muted" style="font-size: 13px; margin-bottom: 15px;">Click "Connect / View QR Code" to pair, or verify the Shared Gateway URL above.</p>
+        <div style="text-align: center; padding: 30px 20px;">
+          <div style="width: 60px; height: 60px; background: rgba(239, 68, 68, 0.12); border: 2px solid #ef4444; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; margin-bottom: 14px;">
+            <i class="fa-solid fa-power-off" style="font-size: 26px; color: #ef4444;"></i>
+          </div>
+          <p style="color: #ef4444; font-weight: 700; font-size: 16px; margin-bottom: 6px;">WhatsApp Gateway Disconnected</p>
+          <p style="color: #94a3b8; font-size: 13px; max-width: 440px; margin: 0 auto 12px auto;">
+            ${lastError ? `<span style="color: #fca5a5;">${lastError}</span><br>` : ''}
+            Click <strong>"Connect / View QR Code"</strong> to pair, or tap <strong>"Reconnect Socket"</strong> to resume an existing session.
+          </p>
+        </div>
       `;
     }
   }
@@ -1349,57 +1402,130 @@ function updateWaStatusUI(data) {
 
 let waPollTimer = null;
 
-function startWaStatusPolling() {
+// Actively poll while connecting OR while QR code is waiting for user to scan
+function startWaStatusPolling(maxSeconds = 120) {
   if (waPollTimer) clearInterval(waPollTimer);
-  let pollAttempts = 0;
+  const startTime = Date.now();
+
   waPollTimer = setInterval(async () => {
-    pollAttempts += 1;
+    const elapsed = (Date.now() - startTime) / 1000;
     await fetchWaStatus();
-    if (currentWaStatus.status === 'connected' || currentWaStatus.status === 'qr_ready' || pollAttempts > 30) {
+
+    // If connected, stop fast polling and celebrate
+    if (currentWaStatus && (currentWaStatus.status === 'connected' || currentWaStatus.isConnected)) {
+      clearInterval(waPollTimer);
+      waPollTimer = null;
+      showToast('🎉 WhatsApp Gateway Connected & Synchronized!');
+      return;
+    }
+
+    // If timed out after 2 minutes of inactivity, slow down
+    if (elapsed > maxSeconds) {
       clearInterval(waPollTimer);
       waPollTimer = null;
     }
-  }, 1500);
+  }, 1800);
+}
+
+function setWaButtonState(btnId, loading, originalHtml) {
+  const btn = document.getElementById(btnId);
+  if (!btn) return;
+  if (loading) {
+    btn.disabled = true;
+    btn.dataset.originalHtml = btn.innerHTML;
+    btn.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Working...`;
+  } else {
+    btn.disabled = false;
+    btn.innerHTML = btn.dataset.originalHtml || originalHtml;
+  }
 }
 
 async function triggerWhatsAppConnect() {
+  const btn = document.getElementById('btnWaConnect');
+  setWaButtonState('btnWaConnect', true, '<i class="fa-solid fa-qrcode"></i> Connect / View QR Code');
+  showToast('⚡ Connecting WhatsApp Gateway...');
+
   try {
-    showToast('Initializing WhatsApp connection...');
     const baseUrl = await getWaApiBase();
+    updateWaStatusUI({ status: 'connecting' });
+
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 20000);
+
     const res = await fetch(`${baseUrl}/whatsapp/connect`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ schoolId: CURRENT_SCHOOL_ID })
+      body: JSON.stringify({ schoolId: CURRENT_SCHOOL_ID, forceClean: false }),
+      signal: controller.signal
     });
+    clearTimeout(timer);
+
     const data = await res.json();
+    currentWaStatus = data;
     updateWaStatusUI(data);
-    startWaStatusPolling();
+
+    if (data.status === 'connected') {
+      showToast('✅ WhatsApp Connected & Ready!');
+    } else if (data.status === 'qr_ready') {
+      showToast('⚡ QR Code ready. Scan with WhatsApp on your phone!');
+    }
+
+    // Keep polling active while user scans or socket handshakes!
+    startWaStatusPolling(120);
   } catch (e) {
-    showToast('Error connecting WhatsApp socket.');
+    console.error('Connect error:', e);
+    showToast(`Connect error: ${e.message}`);
+    fetchWaStatus();
+  } finally {
+    setWaButtonState('btnWaConnect', false, '<i class="fa-solid fa-qrcode"></i> Connect / View QR Code');
   }
 }
 
 async function triggerWhatsAppReconnect() {
+  setWaButtonState('btnWaReconnect', true, '<i class="fa-solid fa-rotate-right"></i> Reconnect Socket');
+  showToast('🔄 Reconnecting WhatsApp Socket...');
+
   try {
-    showToast('Reconnecting WhatsApp socket...');
     const baseUrl = await getWaApiBase();
+    updateWaStatusUI({ status: 'connecting' });
+
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 20000);
+
     const res = await fetch(`${baseUrl}/whatsapp/reconnect`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ schoolId: CURRENT_SCHOOL_ID })
+      body: JSON.stringify({ schoolId: CURRENT_SCHOOL_ID }),
+      signal: controller.signal
     });
+    clearTimeout(timer);
+
     const data = await res.json();
+    currentWaStatus = data;
     updateWaStatusUI(data);
-    startWaStatusPolling();
+
+    if (data.status === 'connected') {
+      showToast('✅ Reconnected WhatsApp session cleanly!');
+    } else if (data.status === 'qr_ready') {
+      showToast('⚡ Session expired. Please scan new QR code.');
+    }
+
+    startWaStatusPolling(120);
   } catch (e) {
-    showToast('Error triggering reconnect.');
+    console.error('Reconnect error:', e);
+    showToast(`Reconnect error: ${e.message}`);
+    fetchWaStatus();
+  } finally {
+    setWaButtonState('btnWaReconnect', false, '<i class="fa-solid fa-rotate-right"></i> Reconnect Socket');
   }
 }
 
 async function triggerWhatsAppDisconnect() {
   if (!confirm('Are you sure you want to disconnect WhatsApp and clear active session keys?')) return;
+  setWaButtonState('btnWaDisconnect', true, '<i class="fa-solid fa-power-off"></i> Disconnect');
+  showToast('Disconnecting WhatsApp session...');
+
   try {
-    showToast('Disconnecting WhatsApp session...');
     const baseUrl = await getWaApiBase();
     const res = await fetch(`${baseUrl}/whatsapp/disconnect`, {
       method: 'POST',
@@ -1407,10 +1533,13 @@ async function triggerWhatsAppDisconnect() {
       body: JSON.stringify({ schoolId: CURRENT_SCHOOL_ID })
     });
     const data = await res.json();
-    updateWaStatusUI(data);
+    currentWaStatus = { status: 'disconnected' };
+    updateWaStatusUI(currentWaStatus);
     showToast('WhatsApp session cleared.');
   } catch (e) {
     showToast('Error disconnecting WhatsApp.');
+  } finally {
+    setWaButtonState('btnWaDisconnect', false, '<i class="fa-solid fa-power-off"></i> Disconnect');
   }
 }
 

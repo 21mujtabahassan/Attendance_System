@@ -61,6 +61,27 @@ body {
   margin-bottom: 24px;
 }
 
+.brand-logo-container {
+  width: 46px;
+  height: 46px;
+  border-radius: var(--radius-md);
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  overflow: hidden;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  padding: 2px;
+}
+
+.brand-logo-img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
 .brand-icon {
   width: 40px;
   height: 40px;
@@ -171,6 +192,31 @@ body {
   margin-left: var(--sidebar-w);
   padding: 24px;
   min-width: 0;
+  position: relative;
+  min-height: 100vh;
+}
+
+/* SUBTLE LOGO WATERMARK BACKGROUND FOR ADMIN PORTAL */
+.main-content::before {
+  content: '';
+  position: fixed;
+  top: 50%;
+  left: calc(var(--sidebar-w) + (100vw - var(--sidebar-w)) / 2);
+  transform: translate(-50%, -50%);
+  width: 540px;
+  height: 540px;
+  max-width: 70vw;
+  max-height: 70vh;
+  background: url('assets/logo_watermark.png') no-repeat center center;
+  background-size: contain;
+  opacity: 0.12;
+  pointer-events: none;
+  z-index: 0;
+}
+
+.topbar, .tab-content {
+  position: relative;
+  z-index: 1;
 }
 
 /* TOPBAR */
@@ -274,11 +320,14 @@ body {
 
 /* CARDS */
 .card {
-  background-color: var(--bg-card);
+  background-color: rgba(30, 41, 59, 0.92);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
   border: 1px solid var(--border-color);
   border-radius: var(--radius-lg);
   padding: 20px;
   margin-bottom: 20px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
 }
 
 .card-header {

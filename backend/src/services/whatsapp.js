@@ -42,6 +42,27 @@ function getSchoolSessionDir(schoolId = 'unique_scholars') {
   if (!fs.existsSync(dir)) {
     fs.mkdirSync(dir, { recursive: true });
   }
+
+  // Self-healing migration: if school directory has missing/0-byte creds but root directory has valid creds, copy them
+  try {
+    const schoolCreds = path.join(dir, 'creds.json');
+    const rootCreds = path.join(BASE_SESSION_DIR, 'creds.json');
+    const isSchoolCredsValid = fs.existsSync(schoolCreds) && fs.statSync(schoolCreds).size > 100;
+    const isRootCredsValid = fs.existsSync(rootCreds) && fs.statSync(rootCreds).size > 100;
+
+    if (!isSchoolCredsValid && isRootCredsValid) {
+      console.log(`[${schoolId}] Auto-migrating root session credentials to school session folder...`);
+      const files = fs.readdirSync(BASE_SESSION_DIR, { withFileTypes: true });
+      for (const f of files) {
+        if (!f.isDirectory()) {
+          fs.copyFileSync(path.join(BASE_SESSION_DIR, f.name), path.join(dir, f.name));
+        }
+      }
+    }
+  } catch (e) {
+    console.error(`[${schoolId}] Session migration check notice:`, e.message);
+  }
+
   return dir;
 }
 
@@ -81,6 +102,26 @@ async function initWhatsApp(schoolId = 'unique_scholars', io = null, forceClean 
     return { status: sess.status, qr: sess.qr };
   }
 
+  // If already initializing and socket is active, wait for existing socket rather than creating conflicting duplicate
+  if (sess.isInitializing && sess.sock && !forceClean) {
+    return new Promise((resolve) => {
+      let done = false;
+      const checker = setInterval(() => {
+        if (sess.status === 'connected' || sess.qr || sess.status === 'disconnected') {
+          clearInterval(checker);
+          done = true;
+          resolve({ status: sess.status, qr: sess.qr });
+        }
+      }, 500);
+      setTimeout(() => {
+        if (!done) {
+          clearInterval(checker);
+          resolve({ status: sess.status, qr: sess.qr });
+        }
+      }, 15000);
+    });
+  }
+
   sess.isInitializing = true;
   sess.status = 'connecting';
   notifyStatusUpdate(schoolId);
@@ -88,23 +129,30 @@ async function initWhatsApp(schoolId = 'unique_scholars', io = null, forceClean 
   return new Promise(async (resolve) => {
     let resolved = false;
 
-    // Timeout fallback after 5 seconds if Baileys is slow
+    // Timeout fallback after 20 seconds (allows Baileys sufficient time to compute keys & QR on cold starts)
     const timeout = setTimeout(() => {
       if (!resolved) {
         resolved = true;
         resolve({ status: sess.status, qr: sess.qr });
       }
-    }, 5000);
+    }, 20000);
 
     try {
       const sessionDir = getSchoolSessionDir(schoolId);
       const { state, saveCreds } = await useMultiFileAuthState(sessionDir);
-      const { version } = await fetchLatestBaileysVersion();
+      
+      let version;
+      try {
+        const vInfo = await fetchLatestBaileysVersion();
+        version = vInfo?.version;
+      } catch (verErr) {
+        // Fallback gracefully if network check is throttled
+      }
 
       sess.sock = makeWASocket({
-        version,
+        ...(version ? { version } : {}),
         auth: state,
-        printQRInTerminal: true,
+        printQRInTerminal: false,
         logger: pino({ level: 'silent' }),
         browser: Browsers.ubuntu('Chrome'),
         keepAliveIntervalMs: 30000,
@@ -120,14 +168,17 @@ async function initWhatsApp(schoolId = 'unique_scholars', io = null, forceClean 
         if (qr) {
           try {
             sess.qr = await QRCode.toDataURL(qr);
+            sess.qrTimestamp = Date.now();
+            sess.qrVersion = (sess.qrVersion || 0) + 1;
             sess.status = 'qr_ready';
-            console.log(`⚡ [${schoolId}] WhatsApp QR Code ready for scanning!`);
+            sess.isInitializing = false;
+            console.log(`⚡ [${new Date().toISOString()}] [${schoolId}] WhatsApp QR Code #${sess.qrVersion} ready for scanning!`);
             notifyStatusUpdate(schoolId);
 
             if (!resolved) {
               resolved = true;
               clearTimeout(timeout);
-              resolve({ status: 'qr_ready', qr: sess.qr });
+              resolve({ status: 'qr_ready', qr: sess.qr, qrVersion: sess.qrVersion, qrTimestamp: sess.qrTimestamp });
             }
           } catch (err) {
             console.error(`[${schoolId}] Error generating QR Data URL:`, err);
@@ -136,46 +187,69 @@ async function initWhatsApp(schoolId = 'unique_scholars', io = null, forceClean 
 
         if (connection === 'close') {
           sess.isInitializing = false;
-          const statusCode = lastDisconnect?.error?.output?.statusCode;
-          const isLoggedOut = statusCode === DisconnectReason.loggedOut;
-          const shouldReconnect = !isLoggedOut;
-
-          console.log(`🔴 [${schoolId}] WhatsApp connection closed (Status Code: ${statusCode}): ${lastDisconnect?.error?.message}. Reconnecting: ${shouldReconnect}`);
-
-          sess.lastError = lastDisconnect?.error?.message || 'Connection closed';
-          sess.status = 'disconnected';
-          sess.qr = '';
           sess.sock = null;
-          notifyStatusUpdate(schoolId);
+          sess.qr = '';
 
-          if (!resolved) {
-            resolved = true;
-            clearTimeout(timeout);
-            resolve({ status: 'disconnected', error: sess.lastError });
-          }
+          const statusCode = lastDisconnect?.error?.output?.statusCode;
+          const errorMsg = lastDisconnect?.error?.message || 'Connection closed';
 
-          if (shouldReconnect) {
+          // Critical categorization of disconnect reasons
+          const isLoggedOut = statusCode === DisconnectReason?.loggedOut || statusCode === 401 || statusCode === 403;
+          const isBadSession = statusCode === DisconnectReason?.badSession || statusCode === 500;
+          const isRestartRequired = statusCode === DisconnectReason?.restartRequired || statusCode === 515;
+
+          console.log(`🔴 [${new Date().toISOString()}] [${schoolId}] WhatsApp connection closed. StatusCode: ${statusCode}, Reason: ${errorMsg}`);
+
+          if (isLoggedOut || isBadSession) {
+            console.log(`🔴 [${schoolId}] Session revoked or corrupted (${statusCode}). Clearing saved credentials to prompt fresh re-scan.`);
+            clearSessionData(schoolId);
+            sess.status = 'disconnected';
+            sess.lastError = isLoggedOut 
+              ? 'WhatsApp session was unlinked from your phone. Please scan QR to reconnect.' 
+              : 'Session data corrupted. Please scan fresh QR code.';
+            sess.retryCount = 0;
+            notifyStatusUpdate(schoolId);
+
+            if (!resolved) {
+              resolved = true;
+              clearTimeout(timeout);
+              resolve({ status: 'disconnected', error: sess.lastError });
+            }
+          } else if (isRestartRequired) {
+            console.log(`🔄 [${schoolId}] Baileys restart required (515). Silently restarting socket immediately...`);
+            sess.status = 'connecting';
+            notifyStatusUpdate(schoolId);
+            initWhatsApp(schoolId, ioInstance, false);
+          } else {
+            // Network drops, socket timeouts (408), connection reset (428)
+            sess.status = 'disconnected';
+            sess.lastError = `Temporary network drop (${statusCode || 'timeout'}). Reconnecting silently...`;
+            notifyStatusUpdate(schoolId);
+
+            if (!resolved) {
+              resolved = true;
+              clearTimeout(timeout);
+              resolve({ status: 'disconnected', error: sess.lastError });
+            }
+
             sess.retryCount += 1;
-            const backoffDelay = Math.min(30000, 2000 * Math.pow(1.5, sess.retryCount - 1));
+            const backoffDelay = Math.min(25000, 1500 * Math.pow(1.3, sess.retryCount - 1));
             console.log(`🔄 [${schoolId}] Auto-reconnecting in ${(backoffDelay / 1000).toFixed(1)}s (Attempt #${sess.retryCount})...`);
 
             if (sess.reconnectTimer) clearTimeout(sess.reconnectTimer);
             sess.reconnectTimer = setTimeout(() => {
-              initWhatsApp(schoolId);
+              initWhatsApp(schoolId, ioInstance, false);
             }, backoffDelay);
-          } else {
-            console.log(`🔴 [${schoolId}] WhatsApp session logged out. Clearing session auth data...`);
-            clearSessionData(schoolId);
-            sess.retryCount = 0;
           }
         } else if (connection === 'open') {
           sess.isInitializing = false;
           sess.status = 'connected';
           sess.qr = '';
+          sess.qrTimestamp = null;
           sess.lastError = '';
           sess.retryCount = 0;
           if (sess.reconnectTimer) clearTimeout(sess.reconnectTimer);
-          console.log(`✅ [${schoolId}] WhatsApp Connected Successfully!`);
+          console.log(`✅ [${new Date().toISOString()}] [${schoolId}] WhatsApp Gateway Connected Successfully!`);
           notifyStatusUpdate(schoolId);
 
           if (!resolved) {
@@ -202,10 +276,10 @@ async function initWhatsApp(schoolId = 'unique_scholars', io = null, forceClean 
 }
 
 /**
- * Trigger manual reconnect for a school
+ * Trigger manual reconnect for a school (re-uses existing auth credentials without wiping)
  */
-async function reconnectWhatsApp(schoolId = 'unique_scholars', io = null) {
-  return await initWhatsApp(schoolId, io, true);
+async function reconnectWhatsApp(schoolId = 'unique_scholars', io = null, forceClean = false) {
+  return await initWhatsApp(schoolId, io, forceClean);
 }
 
 /**
@@ -243,14 +317,68 @@ function clearSessionData(schoolId = 'unique_scholars') {
   }
 }
 
+const os = require('os');
+const { getDb, isPostgresConfigured } = require('../db');
+
+function getLocalIpAddresses() {
+  const interfaces = os.networkInterfaces();
+  const addresses = [];
+  for (const name of Object.keys(interfaces)) {
+    for (const net of interfaces[name]) {
+      if (net.family === 'IPv4' && !net.internal) {
+        addresses.push(net.address);
+      }
+    }
+  }
+  return addresses;
+}
+
+async function syncSessionToDb(schoolId = 'unique_scholars') {
+  if (process.env.VERCEL || !isPostgresConfigured()) return;
+  try {
+    const sess = getSessionState(schoolId);
+    const db = getDb();
+    const port = process.env.PORT || 3000;
+    const ips = getLocalIpAddresses();
+    const preferredIp = ips.find(ip => ip.startsWith('192.168.')) || ips[0] || 'localhost';
+    const gatewayUrl = `http://${preferredIp}:${port}`;
+
+    await db('whatsapp_sessions')
+      .insert({
+        school_id: schoolId,
+        status: sess.status,
+        last_connected_at: sess.status === 'connected' ? new Date() : null,
+        last_error: sess.lastError || null,
+        retry_count: sess.retryCount || 0,
+        gateway_url: gatewayUrl,
+        updated_at: new Date()
+      })
+      .onConflict('school_id')
+      .merge({
+        status: sess.status,
+        last_connected_at: sess.status === 'connected' ? new Date() : db.raw('whatsapp_sessions.last_connected_at'),
+        last_error: sess.lastError || null,
+        retry_count: sess.retryCount || 0,
+        gateway_url: gatewayUrl,
+        updated_at: new Date()
+      });
+  } catch (err) {
+    // Non-fatal
+  }
+}
+
 function notifyStatusUpdate(schoolId = 'unique_scholars') {
   const sess = getSessionState(schoolId);
+  syncSessionToDb(schoolId).catch(() => {});
   if (ioInstance) {
     ioInstance.emit('whatsapp_status', {
       schoolId,
       status: sess.status,
       qr: sess.qr,
-      lastError: sess.lastError
+      qrTimestamp: sess.qrTimestamp || null,
+      qrVersion: sess.qrVersion || 0,
+      lastError: sess.lastError,
+      isConnected: sess.status === 'connected' && !!sess.sock
     });
   }
 }
@@ -259,7 +387,11 @@ function formatPhoneToJid(phone) {
   if (!phone) return null;
   let cleaned = String(phone).replace(/[\s\-\+\(\)]/g, '');
 
-  if (cleaned.startsWith('03')) {
+  if (cleaned.startsWith('0092')) {
+    cleaned = '92' + cleaned.substring(4);
+  } else if (cleaned.startsWith('03')) {
+    cleaned = '92' + cleaned.substring(1);
+  } else if (cleaned.startsWith('0') && cleaned.length === 11) {
     cleaned = '92' + cleaned.substring(1);
   } else if (!cleaned.startsWith('92') && cleaned.length === 10 && cleaned.startsWith('3')) {
     cleaned = '92' + cleaned;
@@ -303,7 +435,17 @@ async function sendWhatsAppMessage(phone, message, schoolId = 'unique_scholars',
   }
 
   // 2. If running on Vercel or local socket not active, check for a persistent WhatsApp Gateway URL
-  const gatewayUrl = gatewayUrlOverride || process.env.WHATSAPP_GATEWAY_URL || process.env.PERSISTENT_BACKEND_URL;
+  let gatewayUrl = gatewayUrlOverride || process.env.WHATSAPP_GATEWAY_URL || process.env.PERSISTENT_BACKEND_URL;
+  if (!gatewayUrl && process.env.VERCEL && isPostgresConfigured()) {
+    try {
+      const db = getDb();
+      const row = await db('whatsapp_sessions').where({ school_id: schoolId }).first();
+      if (row && row.gateway_url) {
+        gatewayUrl = row.gateway_url;
+      }
+    } catch (e) {}
+  }
+
   if (gatewayUrl) {
     try {
       const cleanUrl = gatewayUrl.replace(/\/+$/, '');
@@ -346,27 +488,74 @@ async function sendWhatsAppMessage(phone, message, schoolId = 'unique_scholars',
   };
 }
 
-function getWhatsAppStatus(schoolId = 'unique_scholars') {
+async function getWhatsAppStatus(schoolId = 'unique_scholars') {
   const sess = getSessionState(schoolId);
+  const sessionDir = getSchoolSessionDir(schoolId);
+  const credsPath = path.join(sessionDir, 'creds.json');
+  const hasSessionFiles = fs.existsSync(credsPath) && fs.statSync(credsPath).size > 100;
+
+  if (process.env.VERCEL && isPostgresConfigured()) {
+    try {
+      const db = getDb();
+      const row = await db('whatsapp_sessions').where({ school_id: schoolId }).first();
+      if (row) {
+        return {
+          schoolId,
+          status: row.status,
+          qr: '',
+          qrTimestamp: null,
+          qrVersion: 0,
+          lastError: row.last_error || '',
+          gatewayUrl: row.gateway_url,
+          lastConnectedAt: row.last_connected_at,
+          isConnected: row.status === 'connected',
+          hasSessionFiles: false
+        };
+      }
+    } catch (e) {}
+  }
   return {
     schoolId,
     status: sess.status,
     qr: sess.qr,
-    lastError: sess.lastError
+    qrTimestamp: sess.qrTimestamp || null,
+    qrVersion: sess.qrVersion || 0,
+    lastError: sess.lastError || '',
+    isConnected: sess.status === 'connected' && !!sess.sock,
+    hasSessionFiles,
+    retryCount: sess.retryCount || 0
   };
 }
 
-function getGatewayInfo(schoolId = 'unique_scholars') {
+async function getGatewayInfo(schoolId = 'unique_scholars') {
   const sess = getSessionState(schoolId);
   const sessionDir = path.join(BASE_SESSION_DIR, schoolId);
+  const credsPath = path.join(sessionDir, 'creds.json');
+  let isConnected = sess.status === 'connected' && !!sess.sock;
+  let status = sess.status;
+  let gatewayUrlConfigured = process.env.WHATSAPP_GATEWAY_URL || process.env.PERSISTENT_BACKEND_URL || null;
+
+  if (process.env.VERCEL && isPostgresConfigured()) {
+    try {
+      const db = getDb();
+      const row = await db('whatsapp_sessions').where({ school_id: schoolId }).first();
+      if (row) {
+        status = row.status;
+        isConnected = row.status === 'connected';
+        if (row.gateway_url) gatewayUrlConfigured = row.gateway_url;
+      }
+    } catch (e) {}
+  }
+
   return {
     schoolId,
-    status: sess.status,
-    isConnected: sess.status === 'connected' && !!sess.sock,
+    status,
+    isConnected,
     isVercel: !!process.env.VERCEL,
-    gatewayUrlConfigured: process.env.WHATSAPP_GATEWAY_URL || process.env.PERSISTENT_BACKEND_URL || null,
-    hasSessionFiles: fs.existsSync(path.join(sessionDir, 'creds.json')),
-    uptime: process.uptime()
+    gatewayUrlConfigured,
+    hasSessionFiles: fs.existsSync(credsPath) && fs.statSync(credsPath).size > 100,
+    uptime: process.uptime(),
+    localIps: getLocalIpAddresses()
   };
 }
 
@@ -381,8 +570,9 @@ async function initAllSessions(io = null) {
       if (entry.isDirectory()) {
         const schoolId = entry.name;
         const credsPath = path.join(BASE_SESSION_DIR, schoolId, 'creds.json');
-        if (fs.existsSync(credsPath)) {
-          console.log(`[${schoolId}] Found existing session creds. Auto-initializing WhatsApp connection...`);
+        const hasValidCreds = fs.existsSync(credsPath) && fs.statSync(credsPath).size > 100;
+        if (hasValidCreds) {
+          console.log(`[${schoolId}] Found existing valid session creds. Auto-initializing WhatsApp connection...`);
           initWhatsApp(schoolId, ioInstance, false).catch(err => {
             console.error(`[${schoolId}] Auto-init session error:`, err.message);
           });
@@ -402,5 +592,7 @@ module.exports = {
   sendWhatsAppMessage,
   disconnectWhatsApp,
   formatPhoneToJid,
-  initAllSessions
+  initAllSessions,
+  getLocalIpAddresses,
+  syncSessionToDb
 };

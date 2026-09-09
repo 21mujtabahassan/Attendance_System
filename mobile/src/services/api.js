@@ -1,7 +1,8 @@
 import Constants from 'expo-constants';
 
 const VERCEL_API_BASE = 'https://unique-scholars-attendance.vercel.app/api';
-const FALLBACK_LOCAL_IP = '192.168.100.63';
+const FALLBACK_LOCAL_IP = '10.36.30.40';
+
 
 let currentBackendStatus = {
   mode: 'detecting', // 'local' | 'cloud'
@@ -49,9 +50,12 @@ const safeFetch = async (path, options = {}) => {
     ...(options.headers || {})
   };
 
+  // WhatsApp pairing requires time to compute Baileys cryptographic keys & generate QR
+  const timeoutMs = options.timeout || (path.includes('/whatsapp/') ? 15000 : 3500);
+
   try {
     const controller = new AbortController();
-    const id = setTimeout(() => controller.abort(), 2000);
+    const id = setTimeout(() => controller.abort(), timeoutMs);
     const res = await fetch(localUrl, { ...options, headers, signal: controller.signal });
     clearTimeout(id);
     if (res.ok || res.status < 500) {
@@ -155,6 +159,19 @@ export const connectWhatsApp = async (schoolId = 'unique_scholars') => {
 export const reconnectWhatsApp = async (schoolId = 'unique_scholars') => {
   try {
     const res = await safeFetch('/whatsapp/reconnect', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ schoolId })
+    });
+    return await res.json();
+  } catch (error) {
+    return { status: 'disconnected', error: error.message };
+  }
+};
+
+export const resetWhatsApp = async (schoolId = 'unique_scholars') => {
+  try {
+    const res = await safeFetch('/whatsapp/reset', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ schoolId })

@@ -303,6 +303,15 @@ async function saveDraftAttendance(schoolId = 'unique_scholars', classId, dateSt
     const db = getDb();
     const saved = [];
 
+    let resolvedClassId = classId;
+    try {
+      const matched = await db('classes')
+        .where({ school_id: schoolId, is_active: true })
+        .whereRaw('LOWER(id) = LOWER(?)', [classId])
+        .first();
+      if (matched) resolvedClassId = matched.id;
+    } catch (e) {}
+
     await db.transaction(async trx => {
       for (const r of records) {
         const logKey = `${dateStr}_${r.studentId}`;
@@ -326,7 +335,7 @@ async function saveDraftAttendance(schoolId = 'unique_scholars', classId, dateSt
         const logRecord = {
           log_key: logKey,
           school_id: schoolId,
-          class_id: classId,
+          class_id: resolvedClassId,
           student_id: r.studentId,
           attendance_date: dateStr,
           attendance_time: timeStr || new Date().toLocaleTimeString('en-US', { hour12: true }),
@@ -383,13 +392,22 @@ async function submitFinalAttendance(schoolId = 'unique_scholars', classId, date
     const absentToAlert = [];
     const attendanceLogs = [];
 
+    let resolvedClassId = classId;
+    try {
+      const matched = await db('classes')
+        .where({ school_id: schoolId, is_active: true })
+        .whereRaw('LOWER(id) = LOWER(?)', [classId])
+        .first();
+      if (matched) resolvedClassId = matched.id;
+    } catch (e) {}
+
     await db.transaction(async trx => {
       for (const r of records) {
         const logKey = `${dateStr}_${r.studentId}`;
         const logRecord = {
           log_key: logKey,
           school_id: schoolId,
-          class_id: classId,
+          class_id: resolvedClassId,
           student_id: r.studentId,
           attendance_date: dateStr,
           attendance_time: timeStr || new Date().toLocaleTimeString('en-US', { hour12: true }),
@@ -415,14 +433,25 @@ async function submitFinalAttendance(schoolId = 'unique_scholars', classId, date
           state: 'SUBMITTED'
         });
 
-        if (r.status === 'Absent' && r.parentPhone) {
-          absentToAlert.push({
-            studentId: r.studentId,
-            name: r.name,
-            parentPhone: r.parentPhone,
-            parentEmail: r.parentEmail,
-            time: logRecord.attendance_time
-          });
+        if (r.status === 'Absent') {
+          let parentPhone = r.parentPhone;
+          let name = r.name;
+          if (!parentPhone || !name) {
+            const stu = await trx('students').where({ id: r.studentId }).first();
+            if (stu) {
+              parentPhone = parentPhone || stu.parent_phone;
+              name = name || stu.name;
+            }
+          }
+          if (parentPhone) {
+            absentToAlert.push({
+              studentId: r.studentId,
+              name: name || r.studentId,
+              parentPhone: parentPhone,
+              parentEmail: r.parentEmail,
+              time: logRecord.attendance_time
+            });
+          }
         }
       }
     });
@@ -443,8 +472,25 @@ async function submitFinalAttendance(schoolId = 'unique_scholars', classId, date
     if (idx >= 0) db.attendanceLogs[idx] = entry;
     else db.attendanceLogs.push(entry);
 
-    if (r.status === 'Absent' && r.parentPhone) {
-      absentToAlert.push(r);
+    if (r.status === 'Absent') {
+      let parentPhone = r.parentPhone;
+      let name = r.name;
+      if (!parentPhone || !name) {
+        const stu = (db.students || []).find(s => s.id === r.studentId);
+        if (stu) {
+          parentPhone = parentPhone || stu.parentPhone;
+          name = name || stu.name;
+        }
+      }
+      if (parentPhone) {
+        absentToAlert.push({
+          studentId: r.studentId,
+          name: name || r.studentId,
+          parentPhone: parentPhone,
+          parentEmail: r.parentEmail,
+          time: timeStr
+        });
+      }
     }
   });
   writeJsonDb(db);
@@ -1016,9 +1062,10 @@ async function getAdminRecords(schoolId = 'unique_scholars', filters = {}) {
 // -------------------------------------------------------------
 // 9. WHATSAPP DISPATCH QUEUE (Relational dispatch_batches)
 // -------------------------------------------------------------
-async function addPendingDispatches(schoolId = 'unique_scholars', batch = []) {
+async function addPendingDispatches(schoolId = 'unique_scholars', batch = [], source = 'results') {
   if (!Array.isArray(batch) || batch.length === 0) return null;
   const batchId = `BATCH-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
+  const validSource = ['attendance', 'results', 'broadcast'].includes(source) ? source : 'results';
 
   if (isPostgresConfigured()) {
     const db = getDb();
@@ -1026,7 +1073,7 @@ async function addPendingDispatches(schoolId = 'unique_scholars', batch = []) {
       await trx('dispatch_batches').insert({
         id: batchId,
         school_id: schoolId,
-        source: 'results',
+        source: validSource,
         status: 'pending'
       });
 
@@ -1042,7 +1089,7 @@ async function addPendingDispatches(schoolId = 'unique_scholars', batch = []) {
       }
     });
 
-    return { id: batchId, schoolId, status: 'pending', messages: batch };
+    return { id: batchId, schoolId, source: validSource, status: 'pending', messages: batch };
   }
 
   const db = readJsonDb();
@@ -1050,6 +1097,7 @@ async function addPendingDispatches(schoolId = 'unique_scholars', batch = []) {
   const record = {
     id: batchId,
     schoolId,
+    source: validSource,
     createdAt: new Date().toISOString(),
     status: 'pending',
     messages: batch
@@ -1079,6 +1127,7 @@ async function getPendingDispatches(schoolId = 'unique_scholars') {
     return batches.map(b => ({
       id: b.id,
       schoolId: b.school_id,
+      source: b.source,
       status: b.status,
       messages: messages.filter(m => m.batch_id === b.id).map(m => ({
         studentId: m.student_id,

@@ -12,7 +12,8 @@ const {
   getGatewayInfo,
   sendWhatsAppMessage,
   disconnectWhatsApp,
-  initAllSessions
+  initAllSessions,
+  getLocalIpAddresses
 } = require('./services/whatsapp');
 
 const {
@@ -84,25 +85,45 @@ function startCloudDispatchWorker() {
     if (isWorking) return;
     try {
       isWorking = true;
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), 4000);
-      const res = await fetch(`${CLOUD_URL}/admin/pending-dispatches?schoolId=unique_scholars`, {
-        signal: controller.signal
-      });
-      clearTimeout(timer);
-      if (!res.ok) { isWorking = false; return; }
-      const data = await res.json();
-      if (!data.success || !Array.isArray(data.batches) || data.batches.length === 0) {
+
+      // 1. Check local/shared PostgreSQL queue first for zero-latency pickup
+      let batchesToProcess = [];
+      try {
+        const localBatches = await getPendingDispatches('unique_scholars');
+        if (Array.isArray(localBatches) && localBatches.length > 0) {
+          batchesToProcess = localBatches;
+        }
+      } catch (dbErr) {}
+
+      // 2. Also poll Vercel cloud endpoint in case Vercel ran on ephemeral JSON fallback
+      if (batchesToProcess.length === 0) {
+        try {
+          const controller = new AbortController();
+          const timer = setTimeout(() => controller.abort(), 4000);
+          const res = await fetch(`${CLOUD_URL}/admin/pending-dispatches?schoolId=unique_scholars`, {
+            signal: controller.signal
+          });
+          clearTimeout(timer);
+          if (res.ok) {
+            const data = await res.json();
+            if (data.success && Array.isArray(data.batches) && data.batches.length > 0) {
+              batchesToProcess = data.batches;
+            }
+          }
+        } catch (fetchErr) {}
+      }
+
+      if (batchesToProcess.length === 0) {
         isWorking = false;
         return;
       }
 
-      for (const batch of data.batches) {
-        console.log(`📡 [Cloud Sync Worker] Found queued batch ${batch.id} with ${batch.messages.length} messages. Telecasting via WhatsApp...`);
+      for (const batch of batchesToProcess) {
+        console.log(`📡 [Cloud Sync Worker] Found queued batch ${batch.id} (${batch.source || 'general'}) with ${batch.messages.length} messages. Telecasting via WhatsApp...`);
         const deliveryResults = [];
         for (const item of batch.messages) {
           if (!item.phone || !item.message) continue;
-          const waRes = await sendWhatsAppMessage(item.phone, item.message, batch.schoolId);
+          const waRes = await sendWhatsAppMessage(item.phone, item.message, batch.schoolId || 'unique_scholars');
           deliveryResults.push({
             studentId: item.studentId,
             phone: item.phone,
@@ -111,11 +132,20 @@ function startCloudDispatchWorker() {
           });
         }
 
-        await fetch(`${CLOUD_URL}/admin/pending-dispatches/complete`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ schoolId: batch.schoolId, batchId: batch.id, results: deliveryResults })
-        });
+        // Mark complete locally in database
+        try {
+          await markPendingDispatchComplete(batch.schoolId || 'unique_scholars', batch.id, deliveryResults);
+        } catch (e) {}
+
+        // Notify cloud endpoint if applicable
+        try {
+          await fetch(`${CLOUD_URL}/admin/pending-dispatches/complete`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ schoolId: batch.schoolId || 'unique_scholars', batchId: batch.id, results: deliveryResults })
+          });
+        } catch (e) {}
+
         console.log(`✅ [Cloud Sync Worker] Successfully telecasted batch ${batch.id} (${deliveryResults.filter(r => r.success).length}/${batch.messages.length} sent).`);
       }
     } catch (err) {
@@ -132,9 +162,9 @@ if (!process.env.VERCEL) {
     cors: { origin: '*', methods: ['GET', 'POST'] }
   });
 
-  io.on('connection', (socket) => {
+  io.on('connection', async (socket) => {
     console.log('🌐 Admin/App client connected via Socket.IO');
-    socket.emit('whatsapp_status', getWhatsAppStatus('unique_scholars'));
+    socket.emit('whatsapp_status', await getWhatsAppStatus('unique_scholars'));
   });
 
   // Start & restore all saved Baileys WhatsApp Gateway Sessions
@@ -144,10 +174,13 @@ if (!process.env.VERCEL) {
   startCloudDispatchWorker();
 
   server.listen(PORT, () => {
+    const localIps = getLocalIpAddresses();
+    const primaryIp = localIps.find(ip => ip.startsWith('192.168.')) || localIps[0] || 'localhost';
     console.log(`
 =====================================================
 🎓 Unique Scholars Backend API & WhatsApp Engine
-🌐 REST API Endpoint: http://localhost:${PORT}
+🌐 REST API Endpoint:   http://localhost:${PORT}
+🌐 Local Network URL:   http://${primaryIp}:${PORT}
 🖥️ Admin Web Dashboard: http://localhost:${PORT}/admin
 ⚡ Baileys Multi-Tenant WhatsApp Gateway Running
 🔄 Cloud Dispatch Sync Worker Active (auto-telecast)
@@ -160,14 +193,24 @@ if (!process.env.VERCEL) {
 // WHATSAPP GATEWAY ENDPOINTS
 // -------------------------------------------------------------
 
-app.get('/api/whatsapp/status', (req, res) => {
+app.get('/api/whatsapp/status', async (req, res) => {
   const { schoolId = 'unique_scholars' } = req.query;
-  res.json(getWhatsAppStatus(schoolId));
+  res.json(await getWhatsAppStatus(schoolId));
 });
 
-app.get('/api/whatsapp/gateway-info', (req, res) => {
+app.get('/api/whatsapp/gateway-info', async (req, res) => {
   const { schoolId = 'unique_scholars' } = req.query;
-  res.json(getGatewayInfo(schoolId));
+  res.json(await getGatewayInfo(schoolId));
+});
+
+app.get('/api/network-info', (req, res) => {
+  const localIps = getLocalIpAddresses();
+  res.json({
+    success: true,
+    port: PORT,
+    localIps,
+    primaryLocalIp: localIps.find(ip => ip.startsWith('192.168.')) || localIps[0] || 'localhost'
+  });
 });
 
 app.get('/api/admin/pending-dispatches', async (req, res) => {
@@ -231,14 +274,20 @@ app.post('/api/whatsapp/dispatch-batch', async (req, res) => {
 });
 
 app.post('/api/whatsapp/connect', async (req, res) => {
-  const { schoolId = 'unique_scholars' } = req.body;
-  const result = await initWhatsApp(schoolId, io, true);
+  const { schoolId = 'unique_scholars', forceClean = false } = req.body;
+  const result = await initWhatsApp(schoolId, io, forceClean);
   res.json(result);
 });
 
 app.post('/api/whatsapp/reconnect', async (req, res) => {
   const { schoolId = 'unique_scholars' } = req.body;
-  const result = await reconnectWhatsApp(schoolId, io);
+  const result = await reconnectWhatsApp(schoolId, io, false);
+  res.json(result);
+});
+
+app.post('/api/whatsapp/reset', async (req, res) => {
+  const { schoolId = 'unique_scholars' } = req.body;
+  const result = await initWhatsApp(schoolId, io, true);
   res.json(result);
 });
 
@@ -350,14 +399,15 @@ app.post('/api/attendance/submit', async (req, res) => {
       return res.status(400).json({ error: 'Invalid attendance submission payload.' });
     }
 
-    const schools = getSchools();
+    const schools = await getSchools();
     const school = schools.find(s => s.id === schoolId) || { name: 'Unique Scholars Academy' };
     const dateStr = attendanceDate || new Date().toISOString().split('T')[0];
     const timeStr = attendanceTime || new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true });
     const gatewayUrl = req.headers['x-whatsapp-gateway-url'] || req.body.gatewayUrl || process.env.WHATSAPP_GATEWAY_URL || process.env.PERSISTENT_BACKEND_URL;
 
-    const { absentStudentsToAlert } = submitFinalAttendance(schoolId, classId, dateStr, attendance, timeStr);
+    const { absentStudentsToAlert } = await submitFinalAttendance(schoolId, classId, dateStr, attendance, timeStr);
     const whatsappResults = [];
+    const pendingBatch = [];
 
     for (const item of absentStudentsToAlert) {
       const message = 
@@ -376,6 +426,13 @@ Yeh inform kiya jata hai ke aapka bacha aaj ${school.name} mein absent raha. Cle
 Thank you,
 ${school.name}`;
 
+      pendingBatch.push({
+        studentId: item.studentId,
+        studentName: item.name,
+        phone: item.parentPhone,
+        message
+      });
+
       const result = await sendWhatsAppMessage(item.parentPhone, message, schoolId, gatewayUrl);
       whatsappResults.push({
         studentId: item.studentId,
@@ -387,6 +444,16 @@ ${school.name}`;
       });
     }
 
+    const dispatchedCount = whatsappResults.filter(r => r.success).length;
+    const failedCount = whatsappResults.filter(r => !r.success).length;
+
+    // Queue for persistent cloud sync worker if direct dispatches didn't go through (e.g. running on Vercel)
+    let queuedRecord = null;
+    if (dispatchedCount === 0 && pendingBatch.length > 0) {
+      queuedRecord = await addPendingDispatches(schoolId, pendingBatch, 'attendance');
+      console.log(`Queued ${pendingBatch.length} attendance alerts for persistent WhatsApp gateway telecast (Batch: ${queuedRecord?.id})`);
+    }
+
     res.json({
       success: true,
       message: `Final attendance finalized and locked for ${classId}!`,
@@ -395,10 +462,12 @@ ${school.name}`;
         total: attendance.length,
         present: attendance.filter(a => a.status.toLowerCase() !== 'absent').length,
         absent: absentStudentsToAlert.length,
-        whatsappAlertsSent: whatsappResults.filter(r => r.success).length,
-        whatsappAlertsFailed: whatsappResults.filter(r => !r.success).length
+        whatsappAlertsSent: dispatchedCount,
+        whatsappAlertsFailed: failedCount,
+        whatsappQueued: queuedRecord ? pendingBatch.length : 0
       },
-      whatsappDetails: whatsappResults
+      whatsappDetails: whatsappResults,
+      pendingBatch
     });
   } catch (error) {
     console.error('Error in submit attendance:', error);
@@ -746,11 +815,19 @@ app.post('/api/admin/broadcast/send', async (req, res) => {
     }
 
     const results = [];
+    const pendingBatch = [];
     for (const student of targetStudents) {
       if (!student.parentPhone) continue;
       const formattedMessage = message
         .replace(/{student_name}/g, student.name)
         .replace(/{class_id}/g, student.classId);
+
+      pendingBatch.push({
+        studentId: student.id,
+        studentName: student.name,
+        phone: student.parentPhone,
+        message: formattedMessage
+      });
 
       const waRes = await sendWhatsAppMessage(student.parentPhone, formattedMessage, schoolId, gatewayUrl);
       results.push({
@@ -763,12 +840,23 @@ app.post('/api/admin/broadcast/send', async (req, res) => {
       });
     }
 
+    const sentCount = results.filter(r => r.success).length;
+    const failedCount = results.filter(r => !r.success).length;
+
+    let queuedRecord = null;
+    if (sentCount === 0 && pendingBatch.length > 0) {
+      queuedRecord = await addPendingDispatches(schoolId, pendingBatch, 'broadcast');
+      console.log(`Queued ${pendingBatch.length} broadcast messages for persistent WhatsApp gateway telecast (Batch: ${queuedRecord?.id})`);
+    }
+
     res.json({
       success: true,
       message: `Broadcast message dispatched to ${results.length} recipients.`,
-      sentCount: results.filter(r => r.success).length,
-      failedCount: results.filter(r => !r.success).length,
-      details: results
+      sentCount,
+      failedCount,
+      queuedCount: queuedRecord ? pendingBatch.length : 0,
+      details: results,
+      pendingBatch
     });
   } catch (error) {
     console.error('Error sending broadcast:', error);

@@ -8,7 +8,7 @@ import {
   getClasses, getStudents, saveAttendanceDraft, 
   submitFinalAttendance, getWhatsAppStatus, getAttendanceLogs,
   loginAdmin, getAdminInsights, getAdminRecords,
-  connectWhatsApp, reconnectWhatsApp, disconnectWhatsApp,
+  connectWhatsApp, reconnectWhatsApp, disconnectWhatsApp, resetWhatsApp,
   subscribeBackendStatus
 } from './src/services/api';
 
@@ -26,6 +26,55 @@ export default function App() {
   const [currentTime, setCurrentTime] = useState(new Date());
   const [refreshing, setRefreshing] = useState(false);
   const [backendStatus, setBackendStatus] = useState({ mode: 'detecting', url: '' });
+  const [waConnecting, setWaConnecting] = useState(false);
+
+  // Active polling while QR code is waiting for user to scan on their phone
+  const startActiveMobileWaPolling = () => {
+    let attempts = 0;
+    const maxAttempts = 60; // 2 minutes active window
+    const timer = setInterval(async () => {
+      attempts += 1;
+      const st = await getWhatsAppStatus();
+      setWaStatus(st);
+
+      if (st.status === 'connected') {
+        clearInterval(timer);
+        setWaConnecting(false);
+        Alert.alert('Scan Confirmed! 🎉', 'Your WhatsApp has been paired and saved successfully!');
+      } else if (attempts >= maxAttempts) {
+        clearInterval(timer);
+        setWaConnecting(false);
+      }
+    }, 2000);
+  };
+
+  const handleConnectWhatsApp = async (forceClean = false) => {
+    setWaConnecting(true);
+    setWaStatus(prev => ({ 
+      ...prev, 
+      status: 'connecting', 
+      message: forceClean ? 'Generating fresh QR code...' : 'Restoring saved session on disk...' 
+    }));
+
+    try {
+      const res = forceClean 
+        ? await resetWhatsApp('unique_scholars')
+        : await connectWhatsApp('unique_scholars');
+      
+      setWaStatus(res);
+
+      if (res.status === 'connected') {
+        setWaConnecting(false);
+        Alert.alert('Connected! 🎉', 'WhatsApp Gateway is active. Parent notifications will dispatch automatically.');
+        return;
+      }
+
+      startActiveMobileWaPolling();
+    } catch (e) {
+      setWaConnecting(false);
+      Alert.alert('Connection Notice', e.message || 'Connecting to WhatsApp Gateway...');
+    }
+  };
 
   // Principal / Admin Authentication State
   const [isAdminLoggedIn, setIsAdminLoggedIn] = useState(false);
@@ -290,11 +339,27 @@ export default function App() {
     <SafeAreaView style={styles.container}>
       <StatusBar barStyle="light-content" backgroundColor="#0f172a" />
 
+      {/* BACKGROUND WATERMARK */}
+      <View style={styles.watermarkContainer} pointerEvents="none">
+        <Image 
+          source={require('./assets/logo_watermark.png')} 
+          style={styles.watermarkImage} 
+          resizeMode="contain" 
+        />
+      </View>
+
       {/* NAVBAR */}
       <View style={styles.header}>
-        <View>
-          <Text style={styles.brandTitle}>Unique Scholars</Text>
-          <Text style={styles.brandSubtitle}>Mobile Attendance Portal</Text>
+        <View style={styles.brandWrapper}>
+          <Image 
+            source={require('./assets/logo.png')} 
+            style={styles.brandLogo} 
+            resizeMode="contain" 
+          />
+          <View>
+            <Text style={styles.brandTitle}>Unique Scholars</Text>
+            <Text style={styles.brandSubtitle}>Mobile Attendance Portal</Text>
+          </View>
         </View>
 
         <View style={{ flexDirection: 'row', alignItems: 'center' }}>
@@ -398,7 +463,7 @@ export default function App() {
             <View style={styles.backendRow}>
               <View style={[styles.backendDot, { backgroundColor: backendStatus.mode === 'local' ? '#10b981' : '#38bdf8' }]} />
               <Text style={styles.backendText}>
-                {backendStatus.mode === 'local' ? 'Local Server (192.168.100.63)' : 'Cloud Server (Vercel)'}
+                {backendStatus.mode === 'local' ? `Local Server (${backendStatus.url.replace(/^https?:\/\//, '').replace(/\/api$/, '')})` : 'Cloud Server (Vercel)'}
               </Text>
               <TouchableOpacity style={styles.quickSyncBtn} onPress={handleRefresh} disabled={refreshing}>
                 <Text style={styles.quickSyncText}>{refreshing ? '⏳ Syncing...' : '🔄 Pull to Sync'}</Text>
@@ -512,32 +577,49 @@ export default function App() {
               Pair school WhatsApp phone to enable parent dispatches. Connected once, saved for both App & Admin Portal!
             </Text>
 
-            <View style={{ flexDirection: 'row', justifyContent: 'center', gap: 10, marginBottom: 20 }}>
+            <View style={{ flexDirection: 'row', justifyContent: 'center', flexWrap: 'wrap', gap: 8, marginBottom: 20 }}>
               <TouchableOpacity 
-                style={[styles.refreshBtn, { backgroundColor: '#3b82f6', paddingHorizontal: 15 }]} 
-                onPress={async () => {
-                  const res = await connectWhatsApp('unique_scholars');
-                  setWaStatus(res);
-                  let attempts = 0;
-                  const timer = setInterval(async () => {
-                    attempts += 1;
-                    const st = await getWhatsAppStatus();
-                    setWaStatus(st);
-                    if (st.status === 'connected' || st.qr || attempts > 15) clearInterval(timer);
-                  }, 1500);
-                }}
+                style={[styles.refreshBtn, { backgroundColor: '#10b981', paddingHorizontal: 14, opacity: waConnecting ? 0.6 : 1 }]} 
+                onPress={() => handleConnectWhatsApp(false)}
+                disabled={waConnecting}
               >
-                <Text style={styles.refreshBtnText}>⚡ Connect / View QR</Text>
+                <Text style={styles.refreshBtnText}>
+                  {waConnecting ? '⏳ Connecting...' : '⚡ Connect & Restore'}
+                </Text>
               </TouchableOpacity>
 
               <TouchableOpacity 
-                style={[styles.refreshBtn, { backgroundColor: '#334155', paddingHorizontal: 15 }]} 
+                style={[styles.refreshBtn, { backgroundColor: '#334155', paddingHorizontal: 12 }]} 
                 onPress={async () => {
-                  const res = await reconnectWhatsApp('unique_scholars');
-                  setWaStatus(res);
+                  const st = await getWhatsAppStatus();
+                  setWaStatus(st);
+                  if (st.status === 'connected') {
+                    Alert.alert('Status Verified ✅', 'WhatsApp Gateway is online and ready.');
+                  }
                 }}
               >
-                <Text style={styles.refreshBtnText}>🔄 Reconnect</Text>
+                <Text style={styles.refreshBtnText}>🔄 Check Status</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity 
+                style={[styles.refreshBtn, { backgroundColor: '#7f1d1d', paddingHorizontal: 12, opacity: waConnecting ? 0.6 : 1 }]} 
+                onPress={() => {
+                  Alert.alert(
+                    'Pair New Phone? 📱',
+                    'This will reset your current WhatsApp session and generate a brand new QR code for a different number.',
+                    [
+                      { text: 'Cancel', style: 'cancel' },
+                      {
+                        text: 'Reset & Scan New',
+                        style: 'destructive',
+                        onPress: () => handleConnectWhatsApp(true)
+                      }
+                    ]
+                  );
+                }}
+                disabled={waConnecting}
+              >
+                <Text style={styles.refreshBtnText}>🗑️ Pair New Phone</Text>
               </TouchableOpacity>
             </View>
 
@@ -551,18 +633,26 @@ export default function App() {
             {waStatus.qr ? (
               <View style={styles.qrContainer}>
                 <Image source={{ uri: waStatus.qr }} style={{ width: 230, height: 230, borderRadius: 12, borderWidth: 4, borderColor: '#ffffff' }} />
-                <Text style={styles.qrHint}>Point your WhatsApp phone camera at this QR code</Text>
+                <Text style={styles.qrHint}>Open WhatsApp → Linked Devices → Link a Device → Scan this QR code</Text>
               </View>
             ) : waStatus.status === 'connected' ? (
               <View style={styles.connectedBox}>
                 <Text style={styles.connectedTitle}>✅ WhatsApp Connected & Synced!</Text>
-                <Text style={styles.connectedText}>Session is active. Parent alerts & report cards will be sent automatically.</Text>
+                <Text style={styles.connectedText}>Session is saved permanently on disk. Parent alerts & report cards will send automatically without scanning again.</Text>
               </View>
-            ) : (
+            ) : waStatus.status === 'connecting' ? (
               <View style={{ alignItems: 'center', marginVertical: 20 }}>
                 <ActivityIndicator size="large" color="#3b82f6" style={{ marginVertical: 15 }} />
                 <Text style={{ color: '#94a3b8', textAlign: 'center', fontSize: 13 }}>
-                  {waStatus.status === 'connecting' ? 'Connecting to WhatsApp Gateway...' : 'Tap "Connect / View QR" to generate pairing QR code.'}
+                  Initializing WhatsApp Gateway & checking saved credentials...
+                </Text>
+              </View>
+            ) : (
+              <View style={{ alignItems: 'center', padding: 20, backgroundColor: '#1e293b', borderRadius: 12, marginVertical: 10 }}>
+                <Text style={{ fontSize: 24, marginBottom: 8 }}>📴</Text>
+                <Text style={{ color: '#f1f5f9', fontWeight: '600', fontSize: 14, marginBottom: 4 }}>WhatsApp Gateway Offline</Text>
+                <Text style={{ color: '#94a3b8', textAlign: 'center', fontSize: 12, lineHeight: 18 }}>
+                  If you already paired your phone earlier, tap "⚡ Connect & Restore" to resume without scanning.
                 </Text>
               </View>
             )}
@@ -595,9 +685,12 @@ export default function App() {
           {/* HEADER SUMMARY CARD */}
           <View style={styles.principalBanner}>
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-              <View>
-                <Text style={styles.principalBannerTitle}>👑 Principal Executive Portal</Text>
-                <Text style={styles.principalBannerSubtitle}>Unique Scholars Academy • Insights & Control</Text>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                <Image source={require('./assets/logo.png')} style={styles.bannerLogo} resizeMode="contain" />
+                <View>
+                  <Text style={styles.principalBannerTitle}>Principal Executive Portal</Text>
+                  <Text style={styles.principalBannerSubtitle}>Unique Scholars Academy • Insights</Text>
+                </View>
               </View>
               <TouchableOpacity style={styles.logoutBtn} onPress={handleAdminLogout}>
                 <Text style={styles.logoutBtnText}>Logout</Text>
@@ -759,6 +852,11 @@ export default function App() {
       >
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
+            <Image 
+              source={require('./assets/logo.png')} 
+              style={styles.modalLogo} 
+              resizeMode="contain" 
+            />
             <Text style={styles.modalTitle}>👑 Principal Admin Login</Text>
             <Text style={styles.modalSub}>Enter your Principal Security PIN to view full attendance ratios, analytics, and records.</Text>
 
@@ -851,7 +949,40 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '600'
   },
-  brandTitle: { fontSize: 18, fontWeight: 'bold', color: '#f8fafc' },
+  brandWrapper: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  brandLogo: {
+    width: 38,
+    height: 38,
+  },
+  bannerLogo: {
+    width: 34,
+    height: 34,
+  },
+  modalLogo: {
+    width: 68,
+    height: 68,
+    marginBottom: 12,
+  },
+  watermarkContainer: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 0,
+  },
+  watermarkImage: {
+    width: 300,
+    height: 300,
+    opacity: 0.08,
+  },
+  brandTitle: { fontSize: 17, fontWeight: 'bold', color: '#f8fafc' },
   brandSubtitle: { fontSize: 11, color: '#94a3b8' },
   adminBadgeBtn: { backgroundColor: '#d97706', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 16, marginRight: 8 },
   adminBadgeLoggedIn: { backgroundColor: '#059669', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 16, marginRight: 8 },
