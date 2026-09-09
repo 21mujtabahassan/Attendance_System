@@ -209,6 +209,24 @@ app.get('/api/whatsapp/gateway-info', async (req, res) => {
   res.json(await getGatewayInfo(schoolId));
 });
 
+app.post('/api/whatsapp/connect', async (req, res) => {
+  const { schoolId = 'unique_scholars' } = req.body;
+  const result = await initWhatsApp(schoolId, io, false);
+  res.json(result);
+});
+
+app.post('/api/whatsapp/reconnect', async (req, res) => {
+  const { schoolId = 'unique_scholars' } = req.body;
+  const result = await reconnectWhatsApp(schoolId, io, false);
+  res.json(result);
+});
+
+app.post('/api/whatsapp/disconnect', async (req, res) => {
+  const { schoolId = 'unique_scholars' } = req.body;
+  const result = await disconnectWhatsApp(schoolId);
+  res.json(result);
+});
+
 app.get('/api/network-info', (req, res) => {
   const localIps = getLocalIpAddresses();
   res.json({

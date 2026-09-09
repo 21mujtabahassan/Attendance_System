@@ -212,14 +212,34 @@ async function getStudents(schoolId = 'unique_scholars', classId = null) {
 async function addStudent(schoolId = 'unique_scholars', studentData) {
   if (isPostgresConfigured()) {
     const db = getDb();
-    const id = `STU-${Date.now().toString().slice(-4)}`;
+    const id = `STU-${Date.now().toString().slice(-6)}`;
     const secName = studentData.section || 'Section A';
 
-    let secRow = await db('class_sections').where({ class_id: studentData.classId, section_name: secName }).first();
+    // Resolve class ID from either classId or className
+    const cls = await db('classes')
+      .where({ school_id: schoolId })
+      .andWhere(function() {
+        this.where('id', studentData.classId).orWhere('name', studentData.classId);
+      })
+      .first();
+
+    const resolvedClassId = cls ? cls.id : studentData.classId;
+
+    let secRow = await db('class_sections').where({ class_id: resolvedClassId, section_name: secName }).first();
+    if (!secRow && cls) {
+      try {
+        await db('class_sections').insert({
+          class_id: resolvedClassId,
+          section_name: secName
+        });
+        secRow = await db('class_sections').where({ class_id: resolvedClassId, section_name: secName }).first();
+      } catch (secErr) {}
+    }
+
     await db('students').insert({
       id,
       school_id: schoolId,
-      class_id: studentData.classId,
+      class_id: resolvedClassId,
       section_id: secRow?.id || null,
       section_name: secName,
       name: studentData.name,
@@ -228,13 +248,13 @@ async function addStudent(schoolId = 'unique_scholars', studentData) {
       is_active: true
     });
 
-    return { id, schoolId, ...studentData, section: secName };
+    return { id, schoolId, ...studentData, classId: resolvedClassId, section: secName };
   }
 
   const db = readJsonDb();
   if (!db.students) db.students = [];
   const newStudent = {
-    id: `STU-${Date.now().toString().slice(-4)}`,
+    id: `STU-${Date.now().toString().slice(-6)}`,
     schoolId,
     ...studentData
   };
@@ -248,7 +268,15 @@ async function updateStudent(schoolId = 'unique_scholars', studentId, updates) {
     const db = getDb();
     const payload = {};
     if (updates.name !== undefined) payload.name = updates.name;
-    if (updates.classId !== undefined) payload.class_id = updates.classId;
+    if (updates.classId !== undefined) {
+      const cls = await db('classes')
+        .where({ school_id: schoolId })
+        .andWhere(function() {
+          this.where('id', updates.classId).orWhere('name', updates.classId);
+        })
+        .first();
+      payload.class_id = cls ? cls.id : updates.classId;
+    }
     if (updates.section !== undefined) payload.section_name = updates.section;
     if (updates.parentPhone !== undefined) payload.parent_phone = updates.parentPhone;
     if (updates.parentEmail !== undefined) payload.parent_email = updates.parentEmail;
@@ -281,8 +309,12 @@ async function updateStudent(schoolId = 'unique_scholars', studentId, updates) {
 async function deleteStudent(schoolId = 'unique_scholars', studentId) {
   if (isPostgresConfigured()) {
     const db = getDb();
-    const updated = await db('students').where({ school_id: schoolId, id: studentId }).update({ is_active: false });
-    return updated > 0;
+    // Cleanly delete child records first to satisfy foreign keys
+    await db('attendance_logs').where({ school_id: schoolId, student_id: studentId }).del();
+    await db('student_results').where({ school_id: schoolId, student_id: studentId }).del();
+    await db('student_fee_dues').where({ school_id: schoolId, student_id: studentId }).del();
+    const deleted = await db('students').where({ school_id: schoolId, id: studentId }).del();
+    return deleted > 0;
   }
 
   const db = readJsonDb();

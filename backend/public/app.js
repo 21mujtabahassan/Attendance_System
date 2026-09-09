@@ -1023,9 +1023,11 @@ async function handleCreateStudent(e) {
       document.getElementById('addStudentForm').reset();
       await fetchStudents();
       filterStudentTable();
+    } else {
+      showToast(data.error || 'Failed to create student.');
     }
   } catch (e) {
-    showToast('Error creating student.');
+    showToast(`Error creating student: ${e.message}`);
   }
 }
 
@@ -1065,24 +1067,30 @@ async function handleEditStudentSubmit(e) {
       closeModal('editStudentModal');
       await fetchStudents();
       filterStudentTable();
+    } else {
+      showToast(data.error || 'Failed to update student profile.');
     }
   } catch (e) {
-    showToast('Error updating student.');
+    showToast(`Error updating student: ${e.message}`);
   }
 }
 
 async function handleDeleteStudent(studentId) {
-  if (!confirm('Are you sure you want to delete this student record?')) return;
+  if (!confirm('Are you sure you want to permanently delete this student record?')) return;
   try {
     const res = await fetch(`${API_BASE}/admin/students/${studentId}?schoolId=${CURRENT_SCHOOL_ID}`, { method: 'DELETE' });
     const data = await res.json();
     if (data.success) {
-      showToast('Student deleted.');
+      showToast('Student permanently deleted from database. 🗑️');
       await fetchStudents();
       filterStudentTable();
+      if (typeof loadOverviewData === 'function') loadOverviewData();
+      if (typeof loadFeeLedger === 'function') loadFeeLedger();
+    } else {
+      showToast(data.error || 'Error deleting student.');
     }
   } catch (e) {
-    showToast('Error deleting student.');
+    showToast(`Error deleting student: ${e.message}`);
   }
 }
 
@@ -1511,7 +1519,9 @@ async function triggerWhatsAppReconnect() {
     if (data.status === 'connected') {
       showToast('✅ Reconnected WhatsApp session cleanly!');
     } else if (data.status === 'qr_ready') {
-      showToast('⚡ Session expired. Please scan new QR code.');
+      showToast('⚡ Please scan the QR code to pair your WhatsApp.');
+    } else {
+      showToast(`WhatsApp status: ${data.status || 'disconnected'}`);
     }
 
     startWaStatusPolling(120);

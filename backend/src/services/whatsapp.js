@@ -195,19 +195,17 @@ async function initWhatsApp(schoolId = 'unique_scholars', io = null, forceClean 
           const errorMsg = lastDisconnect?.error?.message || 'Connection closed';
 
           // Critical categorization of disconnect reasons
+          // Only actual 401/403 logout means user unlinked their phone
           const isLoggedOut = statusCode === DisconnectReason?.loggedOut || statusCode === 401 || statusCode === 403;
-          const isBadSession = statusCode === DisconnectReason?.badSession || statusCode === 500;
           const isRestartRequired = statusCode === DisconnectReason?.restartRequired || statusCode === 515;
 
           console.log(`🔴 [${new Date().toISOString()}] [${schoolId}] WhatsApp connection closed. StatusCode: ${statusCode}, Reason: ${errorMsg}`);
 
-          if (isLoggedOut || isBadSession) {
-            console.log(`🔴 [${schoolId}] Session revoked or corrupted (${statusCode}). Clearing saved credentials to prompt fresh re-scan.`);
+          if (isLoggedOut) {
+            console.log(`🔴 [${schoolId}] Session unlinked from phone (${statusCode}). Clearing saved credentials to prompt fresh QR re-scan.`);
             clearSessionData(schoolId);
             sess.status = 'disconnected';
-            sess.lastError = isLoggedOut
-              ? 'WhatsApp session was unlinked from your phone. Please scan QR to reconnect.'
-              : 'Session data corrupted. Please scan fresh QR code.';
+            sess.lastError = 'WhatsApp session was unlinked from your phone. Please scan QR to reconnect.';
             sess.retryCount = 0;
             notifyStatusUpdate(schoolId);
 
