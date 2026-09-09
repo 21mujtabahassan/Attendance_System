@@ -6,6 +6,8 @@ let globalClasses = [];
 let globalStudents = [];
 let globalTerms = [];
 let globalTemplates = [];
+let globalFeeLedger = [];
+let globalFeeStructures = [];
 let currentWaStatus = { status: 'disconnected', qr: '' };
 let currentMarksGridData = [];
 let socket = null;
@@ -106,6 +108,7 @@ function setupTabNavigation() {
   const titlesMap = {
     overview: { title: 'Executive Overview', subtitle: 'Real-time attendance ratios, class breakdown & quick stats' },
     results: { title: 'Academic Results & Digital Marksheets', subtitle: 'Configure terms, enter student marks, and dispatch branded WhatsApp report cards' },
+    fees: { title: 'Tuition Fee Management & Billing Ledger', subtitle: 'Standard class rates, scholarship concessions, payment collection & WhatsApp receipts' },
     broadcast: { title: 'WhatsApp Broadcast Center', subtitle: 'Send targeted broadcasts & custom message templates to parents' },
     classes: { title: 'Classes & Sections Architecture', subtitle: 'Manage school grade levels and classroom sections' },
     students: { title: 'Student Directory & Contact Numbers', subtitle: 'Manage student roster, parent WhatsApp phone numbers, and profile details' },
@@ -130,6 +133,7 @@ function setupTabNavigation() {
 
       if (targetTab === 'overview') loadOverviewData();
       if (targetTab === 'results') loadResultsTabData();
+      if (targetTab === 'fees') loadFeesTabData();
       if (targetTab === 'broadcast') loadBroadcastTabData();
       if (targetTab === 'classes') renderClassesGrid();
       if (targetTab === 'students') renderStudentsTable();
@@ -1543,6 +1547,537 @@ async function triggerWhatsAppDisconnect() {
   }
 }
 
+
+// -------------------------------------------------------------
+// FEE MANAGEMENT MODULE
+// -------------------------------------------------------------
+
+function switchFeesSubTab(subTabId) {
+  document.querySelectorAll('.fees-subtab').forEach(t => t.style.display = 'none');
+  const btnLedger = document.getElementById('btnSubnavFeeLedger');
+  const btnStructure = document.getElementById('btnSubnavFeeStructure');
+
+  if (btnLedger && btnStructure) {
+    btnLedger.classList.toggle('active', subTabId === 'ledger');
+    btnStructure.classList.toggle('active', subTabId === 'structure');
+  }
+
+  const target = document.getElementById(`fees-subtab-${subTabId}`);
+  if (target) {
+    target.style.display = 'block';
+  }
+
+  if (subTabId === 'structure') {
+    loadFeeStructures();
+  } else {
+    loadFeeLedger();
+  }
+}
+
+async function loadFeesTabData() {
+  const monthInput = document.getElementById('feeFilterMonth');
+  if (monthInput && !monthInput.value) {
+    const now = new Date();
+    const yyyy = now.getFullYear();
+    const mm = String(now.getMonth() + 1).padStart(2, '0');
+    monthInput.value = `${yyyy}-${mm}`;
+  }
+
+  // Populate Class filter dropdown
+  const classFilter = document.getElementById('feeFilterClass');
+  if (classFilter && globalClasses.length > 0) {
+    const currentVal = classFilter.value;
+    classFilter.innerHTML = '<option value="">All Classes</option>';
+    globalClasses.forEach(c => {
+      const opt = document.createElement('option');
+      opt.value = c.name;
+      opt.innerText = c.name;
+      classFilter.appendChild(opt);
+    });
+    classFilter.value = currentVal;
+  }
+
+  await Promise.all([
+    loadFeeLedger(),
+    loadFeeStructures()
+  ]);
+}
+
+async function loadFeeStructures() {
+  const container = document.getElementById('feeStructureListContainer');
+  if (!container) return;
+
+  try {
+    const res = await fetch(`${API_BASE}/admin/fees/structure?schoolId=${CURRENT_SCHOOL_ID}`);
+    const data = await res.json();
+    if (!data.success) throw new Error(data.error || 'Failed to fetch fee structures');
+
+    globalFeeStructures = data.structures || [];
+
+    if (globalClasses.length === 0) {
+      container.innerHTML = '<p class="text-muted">No classes configured yet.</p>';
+      return;
+    }
+
+    container.innerHTML = '';
+    globalClasses.forEach(cls => {
+      const struct = globalFeeStructures.find(s => s.classId === cls.name);
+      const currentFee = struct ? struct.baseFee : 3000;
+      const studentCount = globalStudents.filter(s => s.classId === cls.name).length;
+
+      const card = document.createElement('div');
+      card.className = 'fee-struct-card';
+      card.innerHTML = `
+        <div class="fee-struct-info">
+          <h4>${cls.name}</h4>
+          <p><i class="fa-solid fa-users"></i> ${studentCount} enrolled student(s)</p>
+        </div>
+        <div class="fee-struct-action">
+          <span style="font-size: 13px; color: var(--text-muted); font-weight: 600;">PKR</span>
+          <input type="number" class="fee-struct-input" id="feeRate_${cls.name.replace(/\s+/g, '_')}" value="${currentFee}" min="0" step="100">
+          <button class="btn btn-primary btn-sm" onclick="saveClassFeeRate('${cls.name}')">
+            <i class="fa-solid fa-floppy-disk"></i> Save Rate
+          </button>
+        </div>
+      `;
+      container.appendChild(card);
+    });
+  } catch (error) {
+    console.error('Error loading fee structures:', error);
+    container.innerHTML = `<p class="text-danger">Failed to load fee structures: ${error.message}</p>`;
+  }
+}
+
+async function saveClassFeeRate(classId) {
+  const inputEl = document.getElementById(`feeRate_${classId.replace(/\s+/g, '_')}`);
+  if (!inputEl) return;
+  const baseFee = parseFloat(inputEl.value);
+  if (isNaN(baseFee) || baseFee < 0) {
+    alert('Please enter a valid non-negative fee amount.');
+    return;
+  }
+
+  try {
+    const res = await fetch(`${API_BASE}/admin/fees/structure`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ schoolId: CURRENT_SCHOOL_ID, classId, baseFee })
+    });
+    const data = await res.json();
+    if (data.success) {
+      showToast(`Updated standard base fee for ${classId} to PKR ${baseFee.toLocaleString()}`);
+      loadFeeStructures();
+    } else {
+      showToast(`Error: ${data.error || 'Failed to update fee'}`);
+    }
+  } catch (e) {
+    showToast(`Network error updating fee structure: ${e.message}`);
+  }
+}
+
+async function loadFeeLedger() {
+  const monthInput = document.getElementById('feeFilterMonth');
+  const classFilter = document.getElementById('feeFilterClass');
+  const month = monthInput?.value || '';
+  const classId = classFilter?.value || '';
+
+  const tbody = document.getElementById('feeLedgerTableBody');
+  if (tbody) {
+    tbody.innerHTML = '<tr><td colspan="10" class="text-center text-muted">Loading fee ledger records...</td></tr>';
+  }
+
+  try {
+    let url = `${API_BASE}/admin/fees/ledger?schoolId=${CURRENT_SCHOOL_ID}`;
+    if (month) url += `&month=${encodeURIComponent(month)}`;
+    if (classId) url += `&classId=${encodeURIComponent(classId)}`;
+
+    const res = await fetch(url);
+    const data = await res.json();
+    if (!data.success) throw new Error(data.error || 'Failed to load fee ledger');
+
+    globalFeeLedger = data.ledger || [];
+    const summary = data.summary || { totalExpected: 0, totalCollected: 0, totalOutstanding: 0, collectionRate: 0, paidCount: 0, pendingCount: 0 };
+
+    // Update Top Metric Cards
+    const metricExp = document.getElementById('feeMetricExpected');
+    const metricExpSub = document.getElementById('feeMetricExpectedSub');
+    const metricCol = document.getElementById('feeMetricCollected');
+    const metricColSub = document.getElementById('feeMetricCollectedSub');
+    const metricOut = document.getElementById('feeMetricOutstanding');
+    const metricOutSub = document.getElementById('feeMetricPendingCount');
+    const metricRate = document.getElementById('feeMetricRate');
+    const metricProgress = document.getElementById('feeMetricProgressBar');
+
+    if (metricExp) metricExp.innerText = `PKR ${Number(summary.totalExpected || 0).toLocaleString()}`;
+    if (metricExpSub) metricExpSub.innerText = `${data.month || month} Billing (${globalFeeLedger.length} students)`;
+    if (metricCol) metricCol.innerText = `PKR ${Number(summary.totalCollected || 0).toLocaleString()}`;
+    if (metricColSub) metricColSub.innerText = `${summary.paidCount || 0} student(s) cleared`;
+    if (metricOut) metricOut.innerText = `PKR ${Number(summary.totalOutstanding || 0).toLocaleString()}`;
+    if (metricOutSub) metricOutSub.innerText = `${summary.pendingCount || 0} student(s) pending`;
+    if (metricRate) metricRate.innerText = `${summary.collectionRate || 0}%`;
+    if (metricProgress) metricProgress.style.width = `${Math.min(100, Math.max(0, summary.collectionRate || 0))}%`;
+
+    filterFeeLedgerRows();
+  } catch (error) {
+    console.error('Error loading fee ledger:', error);
+    if (tbody) {
+      tbody.innerHTML = `<tr><td colspan="10" class="text-center text-danger">Error loading ledger: ${error.message}</td></tr>`;
+    }
+  }
+}
+
+function filterFeeLedgerRows() {
+  const tbody = document.getElementById('feeLedgerTableBody');
+  if (!tbody) return;
+
+  const statusFilter = document.getElementById('feeFilterStatus')?.value || '';
+  const search = (document.getElementById('feeSearchInput')?.value || '').toLowerCase().trim();
+
+  let filtered = globalFeeLedger.slice();
+
+  if (statusFilter) {
+    filtered = filtered.filter(f => f.status === statusFilter);
+  }
+
+  if (search) {
+    filtered = filtered.filter(f => 
+      (f.studentName && f.studentName.toLowerCase().includes(search)) ||
+      (f.rollNo && String(f.rollNo).toLowerCase().includes(search)) ||
+      (f.classId && f.classId.toLowerCase().includes(search)) ||
+      (f.parentPhone && f.parentPhone.includes(search))
+    );
+  }
+
+  if (filtered.length === 0) {
+    tbody.innerHTML = `
+      <tr>
+        <td colspan="10" class="text-center text-muted" style="padding: 24px;">
+          <i class="fa-solid fa-folder-open" style="font-size: 24px; margin-bottom: 8px; display: block; opacity: 0.5;"></i>
+          No fee records found matching criteria. Click <strong>Sync Month Dues</strong> above to generate fee billing for this month.
+        </td>
+      </tr>
+    `;
+    return;
+  }
+
+  tbody.innerHTML = '';
+  filtered.forEach(item => {
+    const tr = document.createElement('tr');
+
+    let badgeClass = 'badge-fee-unpaid';
+    if (item.status === 'Paid') badgeClass = 'badge-fee-paid';
+    else if (item.status === 'Partial') badgeClass = 'badge-fee-partial';
+
+    const concessionText = item.discountAmount > 0 
+      ? `<span style="color: #38bdf8; font-weight: 700;">-PKR ${Number(item.discountAmount).toLocaleString()}</span>${item.discountReason ? `<div style="font-size: 10px; color: var(--text-muted);">${item.discountReason}</div>` : ''}`
+      : `<span style="color: var(--text-muted);">-</span>`;
+
+    const phoneDisplay = item.parentPhone
+      ? `<a href="https://wa.me/${item.parentPhone.replace(/[^0-9]/g, '')}" target="_blank" style="color: #34d399; text-decoration: none; display: inline-flex; align-items: center; gap: 4px;">
+           <i class="fa-brands fa-whatsapp"></i> ${item.parentPhone}
+         </a>`
+      : `<span class="text-muted">No Phone</span>`;
+
+    tr.innerHTML = `
+      <td>
+        <div style="font-weight: 700; color: #fff;">${item.studentName || 'Student'}</div>
+        <div style="font-size: 11px; color: var(--text-muted);">Roll #${item.rollNo || '-'}</div>
+      </td>
+      <td>
+        <span class="badge" style="background: rgba(59, 130, 246, 0.15); color: #60a5fa;">${item.classId || '-'}</span>
+        ${item.section ? `<span style="font-size: 11px; color: var(--text-muted); margin-left: 4px;">(${item.section})</span>` : ''}
+      </td>
+      <td>${phoneDisplay}</td>
+      <td style="font-weight: 600;">PKR ${Number(item.baseFee || 0).toLocaleString()}</td>
+      <td>${concessionText}</td>
+      <td style="font-weight: 700; color: #fff;">PKR ${Number(item.netFee || 0).toLocaleString()}</td>
+      <td style="font-weight: 700; color: #10b981;">PKR ${Number(item.paidAmount || 0).toLocaleString()}</td>
+      <td style="font-weight: 800; color: ${item.balanceDue > 0 ? '#f59e0b' : '#94a3b8'};">
+        PKR ${Number(item.balanceDue || 0).toLocaleString()}
+      </td>
+      <td>
+        <span class="badge ${badgeClass}">${item.status}</span>
+      </td>
+      <td>
+        <div style="display: flex; gap: 6px; align-items: center;">
+          <button class="btn btn-sm btn-success" onclick="openFeePaymentModal(${item.id})" title="Collect & Record Fee Payment">
+            <i class="fa-solid fa-cash-register"></i> Pay
+          </button>
+          <button class="btn btn-sm btn-secondary" onclick="openFeeConcessionModal(${item.studentId}, '${encodeURIComponent(item.studentName || '')}', '${item.classId}', ${item.discountAmount || 0}, ${item.baseFee || 0}, '${encodeURIComponent(item.discountReason || '')}')" title="Set Scholarship / Concession">
+            <i class="fa-solid fa-hand-holding-heart"></i>
+          </button>
+          <button class="btn btn-sm btn-primary" onclick="handleDispatchSingleReminder(${item.id})" title="${item.status === 'Paid' ? 'Send WhatsApp Receipt' : 'Send WhatsApp Reminder'}">
+            <i class="fa-brands fa-whatsapp"></i>
+          </button>
+        </div>
+      </td>
+    `;
+    tbody.appendChild(tr);
+  });
+}
+
+async function handleGenerateMonthlyFees() {
+  const month = document.getElementById('feeFilterMonth')?.value || '';
+  const classId = document.getElementById('feeFilterClass')?.value || '';
+
+  if (!month) {
+    alert('Please choose a billing month.');
+    return;
+  }
+
+  const targetLabel = classId ? `Class ${classId}` : 'All Classes';
+  if (!confirm(`Generate / Sync monthly fee billing for ${targetLabel} for ${month}? Existing payments and concessions will be preserved.`)) {
+    return;
+  }
+
+  showToast(`Syncing monthly fees for ${month}...`);
+
+  try {
+    const res = await fetch(`${API_BASE}/admin/fees/generate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ schoolId: CURRENT_SCHOOL_ID, month, classId })
+    });
+    const data = await res.json();
+    if (data.success) {
+      showToast(data.message || 'Fee billing synced successfully.');
+      loadFeeLedger();
+    } else {
+      showToast(`Error: ${data.error || 'Failed to sync fee records'}`);
+    }
+  } catch (error) {
+    showToast(`Error syncing fee dues: ${error.message}`);
+  }
+}
+
+function openFeePaymentModal(feeId) {
+  const item = globalFeeLedger.find(f => f.id === feeId);
+  if (!item) return;
+
+  document.getElementById('payFeeId').value = item.id;
+  document.getElementById('payStudentPhone').value = item.parentPhone || '';
+  document.getElementById('payStudentName').innerText = item.studentName || 'Student';
+  document.getElementById('payStudentClassRoll').innerText = `Class: ${item.classId} | Roll #${item.rollNo || '-'}`;
+  document.getElementById('payCurrentBalance').innerText = `PKR ${Number(item.balanceDue).toLocaleString()}`;
+
+  // Prefill pay amount with balance due (or net fee if zero)
+  const defaultPay = item.balanceDue > 0 ? item.balanceDue : item.netFee;
+  document.getElementById('payAmountInput').value = defaultPay;
+  document.getElementById('payNotesInput').value = '';
+  document.getElementById('payMethodInput').value = 'Cash';
+
+  openModal('feePaymentModal');
+}
+
+async function handleSubmitFeePayment(event) {
+  event.preventDefault();
+  const feeId = parseInt(document.getElementById('payFeeId').value, 10);
+  const paidAmount = parseFloat(document.getElementById('payAmountInput').value);
+  const paymentMethod = document.getElementById('payMethodInput').value;
+  const notes = document.getElementById('payNotesInput').value;
+  const sendReceipt = document.getElementById('paySendReceiptWa').checked;
+
+  if (isNaN(paidAmount) || paidAmount <= 0) {
+    alert('Please enter a valid payment amount.');
+    return;
+  }
+
+  const btn = document.getElementById('btnSubmitPayment');
+  if (btn) {
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Processing...';
+  }
+
+  try {
+    const gwUrl = await getWaGatewayBase();
+    const res = await fetch(`${API_BASE}/admin/fees/collect`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        schoolId: CURRENT_SCHOOL_ID,
+        feeId,
+        paidAmount,
+        paymentMethod,
+        notes,
+        sendReceipt,
+        gatewayUrl: gwUrl
+      })
+    });
+    const data = await res.json();
+    if (data.success) {
+      closeModal('feePaymentModal');
+      const receiptMsg = data.receiptSent ? ' & WhatsApp receipt sent! ✅' : '';
+      showToast(`Payment of PKR ${paidAmount.toLocaleString()} recorded${receiptMsg}`);
+      loadFeeLedger();
+    } else {
+      alert(`Error recording payment: ${data.error}`);
+    }
+  } catch (error) {
+    alert(`Network error: ${error.message}`);
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = '<i class="fa-solid fa-check"></i> Record Payment';
+    }
+  }
+}
+
+function openFeeConcessionModal(studentId, encodedName, classId, currentConcession, baseFee, encodedReason) {
+  const studentName = decodeURIComponent(encodedName);
+  const currentReason = decodeURIComponent(encodedReason);
+  const month = document.getElementById('feeFilterMonth')?.value || '';
+
+  document.getElementById('concessionStudentId').value = studentId;
+  document.getElementById('concessionMonth').value = month;
+  document.getElementById('concessionStudentName').innerText = studentName;
+  document.getElementById('concessionClassBaseFee').innerText = `Class: ${classId} | Standard Base Fee: PKR ${Number(baseFee).toLocaleString()}`;
+  document.getElementById('concessionAmountInput').value = currentConcession || 0;
+
+  const presetSelect = document.getElementById('concessionReasonPreset');
+  const customInput = document.getElementById('concessionReasonInput');
+  const customGroup = document.getElementById('concessionCustomReasonGroup');
+
+  if (['Sibling Discount', 'Orphan / Need-based Aid', 'Merit Scholarship', 'Staff Child Concession', 'Special Concession'].includes(currentReason)) {
+    presetSelect.value = currentReason;
+    customGroup.style.display = 'none';
+  } else if (currentReason) {
+    presetSelect.value = 'Other';
+    customInput.value = currentReason;
+    customGroup.style.display = 'block';
+  } else {
+    presetSelect.value = 'Sibling Discount';
+    customGroup.style.display = 'none';
+  }
+
+  openModal('feeConcessionModal');
+}
+
+function applyConcessionReasonPreset() {
+  const preset = document.getElementById('concessionReasonPreset').value;
+  const customGroup = document.getElementById('concessionCustomReasonGroup');
+  customGroup.style.display = preset === 'Other' ? 'block' : 'none';
+}
+
+async function handleSubmitConcession(event) {
+  event.preventDefault();
+  const studentId = parseInt(document.getElementById('concessionStudentId').value, 10);
+  const month = document.getElementById('concessionMonth').value;
+  const discountAmount = parseFloat(document.getElementById('concessionAmountInput').value) || 0;
+  const preset = document.getElementById('concessionReasonPreset').value;
+  const customReason = document.getElementById('concessionReasonInput').value;
+  const reason = preset === 'Other' ? customReason : preset;
+
+  try {
+    const res = await fetch(`${API_BASE}/admin/fees/concession`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        schoolId: CURRENT_SCHOOL_ID,
+        studentId,
+        month,
+        discountAmount,
+        reason
+      })
+    });
+    const data = await res.json();
+    if (data.success) {
+      closeModal('feeConcessionModal');
+      showToast(`Concession updated (PKR ${discountAmount.toLocaleString()}) for student`);
+      loadFeeLedger();
+    } else {
+      alert(`Error updating concession: ${data.error}`);
+    }
+  } catch (error) {
+    alert(`Network error: ${error.message}`);
+  }
+}
+
+async function handleDispatchSingleReminder(feeId) {
+  const item = globalFeeLedger.find(f => f.id === feeId);
+  if (!item) return;
+
+  if (!item.parentPhone) {
+    alert('This student does not have a parent WhatsApp phone number on file.');
+    return;
+  }
+
+  const actionName = item.status === 'Paid' ? 'WhatsApp fee receipt' : 'WhatsApp payment reminder';
+  if (!confirm(`Send ${actionName} to parent of ${item.studentName} (${item.parentPhone})?`)) {
+    return;
+  }
+
+  showToast(`Sending WhatsApp notice to ${item.parentPhone}...`);
+
+  try {
+    const gwUrl = await getWaGatewayBase();
+    const res = await fetch(`${API_BASE}/admin/fees/dispatch-reminder`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        schoolId: CURRENT_SCHOOL_ID,
+        feeId,
+        gatewayUrl: gwUrl
+      })
+    });
+    const data = await res.json();
+    if (data.success) {
+      if (data.sentCount > 0) {
+        showToast(`WhatsApp message successfully delivered to parent! ✅`);
+      } else if (data.queuedCount > 0) {
+        showToast(`WhatsApp message queued for gateway telecast! ⚡`);
+      } else {
+        showToast(`Message could not be delivered. Check gateway status.`);
+      }
+    } else {
+      alert(`Dispatch error: ${data.error}`);
+    }
+  } catch (error) {
+    alert(`Network error: ${error.message}`);
+  }
+}
+
+async function handleDispatchBulkReminders() {
+  const unpaid = globalFeeLedger.filter(f => f.status !== 'Paid' && f.balanceDue > 0 && f.parentPhone);
+  if (unpaid.length === 0) {
+    alert('No pending fee dues with valid parent WhatsApp phone numbers found in the current view.');
+    return;
+  }
+
+  const month = document.getElementById('feeFilterMonth')?.value || '';
+  const classId = document.getElementById('feeFilterClass')?.value || '';
+  const scopeLabel = classId ? `Class ${classId}` : 'all classes';
+
+  if (!confirm(`Are you sure you want to dispatch WhatsApp fee due reminders to ${unpaid.length} parent(s) for ${scopeLabel} (${month})?`)) {
+    return;
+  }
+
+  showToast(`Dispatching WhatsApp fee reminders to ${unpaid.length} parents...`);
+
+  try {
+    const gwUrl = await getWaGatewayBase();
+    const res = await fetch(`${API_BASE}/admin/fees/dispatch-reminder`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        schoolId: CURRENT_SCHOOL_ID,
+        month,
+        classId,
+        feeIds: unpaid.map(u => u.id),
+        gatewayUrl: gwUrl
+      })
+    });
+    const data = await res.json();
+    if (data.success) {
+      const sent = data.sentCount || 0;
+      const queued = data.queuedCount || 0;
+      showToast(`Completed: ${sent} delivered, ${queued} queued for gateway telecast.`);
+    } else {
+      alert(`Bulk dispatch error: ${data.error}`);
+    }
+  } catch (error) {
+    alert(`Network error: ${error.message}`);
+  }
+}
 
 // -------------------------------------------------------------
 // MODALS & TOAST HELPERS

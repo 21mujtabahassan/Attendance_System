@@ -914,3 +914,83 @@ body {
   border-left: 3px solid var(--accent-primary);
 }
 
+/* FEE MANAGEMENT STYLING */
+.badge-fee-paid {
+  background: rgba(16, 185, 129, 0.2);
+  color: #34d399;
+  border: 1px solid rgba(16, 185, 129, 0.4);
+}
+
+.badge-fee-partial {
+  background: rgba(245, 158, 11, 0.2);
+  color: #fbbf24;
+  border: 1px solid rgba(245, 158, 11, 0.4);
+}
+
+.badge-fee-unpaid {
+  background: rgba(239, 68, 68, 0.2);
+  color: #f87171;
+  border: 1px solid rgba(239, 68, 68, 0.4);
+}
+
+.fees-subtab {
+  display: none;
+}
+
+.fees-subtab.active {
+  display: block;
+}
+
+.fee-struct-card {
+  background: #0f172a;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  padding: 16px 20px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  transition: all 0.2s ease;
+}
+
+.fee-struct-card:hover {
+  border-color: var(--accent-primary);
+  background: rgba(30, 41, 59, 0.6);
+}
+
+.fee-struct-info h4 {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text-main);
+}
+
+.fee-struct-info p {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-top: 3px;
+}
+
+.fee-struct-action {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.fee-struct-input {
+  width: 120px;
+  background: #1e293b;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  color: #fff;
+  padding: 8px 10px;
+  font-weight: 700;
+  font-size: 14px;
+  text-align: right;
+}
+
+.fee-struct-input:focus {
+  outline: none;
+  border-color: var(--accent-primary);
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.3);
+}
+
+

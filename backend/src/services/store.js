@@ -1180,6 +1180,453 @@ async function markPendingDispatchComplete(schoolId = 'unique_scholars', batchId
   return false;
 }
 
+// -------------------------------------------------------------
+// 12. FEE STRUCTURES & MONTHLY BILLING
+// -------------------------------------------------------------
+async function getClassFeeStructures(schoolId = 'unique_scholars') {
+  if (isPostgresConfigured()) {
+    const db = getDb();
+    const classes = await db('classes').where({ school_id: schoolId, is_active: true }).orderBy('name', 'asc');
+    const structures = await db('class_fee_structures').where({ school_id: schoolId });
+    return classes.map(c => {
+      const found = structures.find(s => s.class_id === c.id);
+      return {
+        classId: c.id,
+        className: c.name,
+        baseFee: found ? parseFloat(found.base_fee) : 0,
+        updatedAt: found?.updated_at || null
+      };
+    });
+  }
+
+  const db = readJsonDb();
+  if (!db.classFeeStructures) db.classFeeStructures = [];
+  const classes = (db.classes || []).filter(c => c.schoolId === schoolId && c.isActive !== false);
+  return classes.map(c => {
+    const found = db.classFeeStructures.find(s => s.classId === c.id && s.schoolId === schoolId);
+    return {
+      classId: c.id,
+      className: c.name,
+      baseFee: found ? parseFloat(found.baseFee) : 0,
+      updatedAt: found?.updatedAt || null
+    };
+  });
+}
+
+async function saveClassFeeStructure(schoolId = 'unique_scholars', classId, baseFee) {
+  const feeNum = Math.max(0, parseFloat(baseFee) || 0);
+  if (isPostgresConfigured()) {
+    const db = getDb();
+    const cls = await db('classes')
+      .where({ school_id: schoolId })
+      .andWhere(function() {
+        this.where('id', classId).orWhere('name', classId);
+      })
+      .first();
+    const resolvedClassId = cls ? cls.id : classId;
+    const id = `FEE-${schoolId}-${resolvedClassId}`;
+    await db('class_fee_structures')
+      .insert({
+        id,
+        school_id: schoolId,
+        class_id: resolvedClassId,
+        base_fee: feeNum,
+        updated_at: new Date()
+      })
+      .onConflict(['school_id', 'class_id'])
+      .merge({
+        base_fee: feeNum,
+        updated_at: new Date()
+      });
+    return { classId: resolvedClassId, baseFee: feeNum, success: true };
+  }
+
+  const db = readJsonDb();
+  if (!db.classFeeStructures) db.classFeeStructures = [];
+  const existing = db.classFeeStructures.find(s => s.schoolId === schoolId && s.classId === classId);
+  if (existing) {
+    existing.baseFee = feeNum;
+    existing.updatedAt = new Date().toISOString();
+  } else {
+    db.classFeeStructures.push({
+      id: `FEE-${schoolId}-${classId}`,
+      schoolId,
+      classId,
+      baseFee: feeNum,
+      updatedAt: new Date().toISOString()
+    });
+  }
+  writeJsonDb(db);
+  return { classId, baseFee: feeNum, success: true };
+}
+
+async function getStudentFeeLedger(schoolId = 'unique_scholars', month = null, classId = null) {
+  const now = new Date();
+  const defaultMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+  const currentMonth = month || defaultMonth;
+
+  if (isPostgresConfigured()) {
+    const db = getDb();
+
+    // Auto-generate unbilled students for this month so ledger is always complete
+    await generateMonthlyFeeLedger(schoolId, currentMonth, classId);
+
+    const query = db('student_fee_dues')
+      .join('students', 'student_fee_dues.student_id', '=', 'students.id')
+      .join('classes', 'students.class_id', '=', 'classes.id')
+      .leftJoin('class_fee_structures', function() {
+        this.on('class_fee_structures.class_id', '=', 'classes.id')
+            .andOn('class_fee_structures.school_id', '=', db.raw('?', [schoolId]));
+      })
+      .where({
+        'student_fee_dues.school_id': schoolId,
+        'student_fee_dues.term_or_month': currentMonth,
+        'students.is_active': true
+      });
+
+    if (classId) {
+      query.andWhere(function() {
+        this.where('students.class_id', classId).orWhere('classes.name', classId);
+      });
+    }
+
+    const rows = await query
+      .select(
+        'student_fee_dues.*',
+        'students.name as student_name',
+        'students.parent_phone',
+        'students.class_id',
+        'classes.name as class_name',
+        'class_fee_structures.base_fee as struct_base_fee'
+      )
+      .orderBy('students.name', 'asc');
+
+    const ledger = rows.map(r => {
+      const discount = parseFloat(r.discount_amount) || 0;
+      const total = parseFloat(r.total_amount) || 0;
+      const baseFee = r.struct_base_fee !== null && r.struct_base_fee !== undefined
+        ? parseFloat(r.struct_base_fee)
+        : (total + discount);
+
+      return {
+        id: r.id,
+        studentId: r.student_id,
+        studentName: r.student_name,
+        rollNo: String(r.student_id).replace('STU-', ''),
+        parentPhone: r.parent_phone || '',
+        classId: r.class_name || r.class_id,
+        rawClassId: r.class_id,
+        month: r.term_or_month,
+        baseFee,
+        discountAmount: discount,
+        discountReason: r.notes || '',
+        netFee: total,
+        totalAmount: total,
+        paidAmount: parseFloat(r.paid_amount) || 0,
+        balanceDue: parseFloat(r.due_amount) || 0,
+        dueAmount: parseFloat(r.due_amount) || 0,
+        status: r.pay_later_status || 'Unpaid',
+        paymentMethod: r.payment_method || 'Cash',
+        notes: r.notes || '',
+        paidAt: r.paid_at,
+        createdAt: r.created_at
+      };
+    });
+
+    const totalExpected = ledger.reduce((acc, cur) => acc + cur.totalAmount, 0);
+    const totalCollected = ledger.reduce((acc, cur) => acc + cur.paidAmount, 0);
+    const totalOutstanding = ledger.reduce((acc, cur) => acc + cur.dueAmount, 0);
+    const collectionRate = totalExpected > 0 ? Math.round((totalCollected / totalExpected) * 100) : 0;
+
+    return {
+      month: currentMonth,
+      summary: {
+        totalExpected,
+        totalCollected,
+        totalOutstanding,
+        collectionRate,
+        paidCount: ledger.filter(l => l.status === 'Paid').length,
+        partialCount: ledger.filter(l => l.status === 'Partial').length,
+        unpaidCount: ledger.filter(l => l.status === 'Unpaid' || l.status === 'Pending').length
+      },
+      ledger
+    };
+  }
+
+  // JSON DB Fallback
+  const db = readJsonDb();
+  if (!db.studentFeeDues) db.studentFeeDues = [];
+  await generateMonthlyFeeLedger(schoolId, currentMonth, classId);
+
+  const students = (db.students || []).filter(s => s.schoolId === schoolId && s.isActive !== false && (!classId || s.classId === classId));
+  const classes = db.classes || [];
+
+  const ledger = [];
+  for (const s of students) {
+    const record = db.studentFeeDues.find(d => d.schoolId === schoolId && d.studentId === s.id && d.termOrMonth === currentMonth);
+    const cls = classes.find(c => c.id === s.classId);
+    if (record) {
+      ledger.push({
+        id: record.id,
+        studentId: s.id,
+        studentName: s.name,
+        parentPhone: s.parentPhone || '',
+        classId: s.classId,
+        className: cls ? cls.name : s.classId,
+        month: currentMonth,
+        totalAmount: record.totalAmount,
+        discountAmount: record.discountAmount || 0,
+        paidAmount: record.paidAmount || 0,
+        dueAmount: record.dueAmount,
+        status: record.payLaterStatus || 'Unpaid',
+        paymentMethod: record.paymentMethod || 'Cash',
+        notes: record.notes || '',
+        paidAt: record.paidAt || null
+      });
+    }
+  }
+
+  const totalExpected = ledger.reduce((acc, cur) => acc + cur.totalAmount, 0);
+  const totalCollected = ledger.reduce((acc, cur) => acc + cur.paidAmount, 0);
+  const totalOutstanding = ledger.reduce((acc, cur) => acc + cur.dueAmount, 0);
+  const collectionRate = totalExpected > 0 ? Math.round((totalCollected / totalExpected) * 100) : 0;
+
+  return {
+    month: currentMonth,
+    summary: {
+      totalExpected,
+      totalCollected,
+      totalOutstanding,
+      collectionRate,
+      paidCount: ledger.filter(l => l.status === 'Paid').length,
+      partialCount: ledger.filter(l => l.status === 'Partial').length,
+      unpaidCount: ledger.filter(l => l.status === 'Unpaid' || l.status === 'Pending').length
+    },
+    ledger
+  };
+}
+
+async function generateMonthlyFeeLedger(schoolId = 'unique_scholars', month, classId = null) {
+  if (isPostgresConfigured()) {
+    const db = getDb();
+    const studentsQuery = db('students').where({ school_id: schoolId, is_active: true });
+    if (classId) {
+      studentsQuery.andWhere(function() {
+        this.where('class_id', classId)
+            .orWhereIn('class_id', db('classes').select('id').where('name', classId));
+      });
+    }
+    const students = await studentsQuery;
+
+    const structures = await db('class_fee_structures').where({ school_id: schoolId });
+    const existingDues = await db('student_fee_dues')
+      .where({ school_id: schoolId, term_or_month: month });
+
+    const existingMap = new Set(existingDues.map(d => d.student_id));
+    let count = 0;
+
+    for (const student of students) {
+      if (!existingMap.has(student.id)) {
+        const feeStruct = structures.find(s => s.class_id === student.class_id);
+        const baseFee = feeStruct ? parseFloat(feeStruct.base_fee) : 0;
+        const discountAmount = 0;
+        const totalAmount = Math.max(0, baseFee - discountAmount);
+
+        await db('student_fee_dues').insert({
+          school_id: schoolId,
+          student_id: student.id,
+          term_or_month: month,
+          total_amount: totalAmount,
+          discount_amount: discountAmount,
+          paid_amount: 0,
+          due_amount: totalAmount,
+          pay_later_status: totalAmount === 0 ? 'Paid' : 'Unpaid',
+          payment_method: 'Cash',
+          created_at: new Date()
+        });
+        count++;
+      }
+    }
+    return { success: true, count, month };
+  }
+
+  const db = readJsonDb();
+  if (!db.studentFeeDues) db.studentFeeDues = [];
+  if (!db.classFeeStructures) db.classFeeStructures = [];
+
+  const students = (db.students || []).filter(s => s.schoolId === schoolId && s.isActive !== false && (!classId || s.classId === classId));
+  let count = 0;
+
+  for (const student of students) {
+    const exists = db.studentFeeDues.find(d => d.schoolId === schoolId && d.studentId === student.id && d.termOrMonth === month);
+    if (!exists) {
+      const feeStruct = db.classFeeStructures.find(s => s.schoolId === schoolId && s.classId === student.classId);
+      const baseFee = feeStruct ? parseFloat(feeStruct.baseFee) : 0;
+      const discountAmount = 0;
+      const totalAmount = Math.max(0, baseFee - discountAmount);
+
+      db.studentFeeDues.push({
+        id: `DUE-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
+        schoolId,
+        studentId: student.id,
+        termOrMonth: month,
+        totalAmount,
+        discountAmount,
+        paidAmount: 0,
+        dueAmount: totalAmount,
+        payLaterStatus: totalAmount === 0 ? 'Paid' : 'Unpaid',
+        paymentMethod: 'Cash',
+        createdAt: new Date().toISOString()
+      });
+      count++;
+    }
+  }
+  writeJsonDb(db);
+  return { success: true, count, month };
+}
+
+async function recordFeePayment(schoolId = 'unique_scholars', feeId, paymentData) {
+  const amountToPay = Math.max(0, parseFloat(paymentData.paidAmount || paymentData.amountPaid) || 0);
+  const paymentMethod = paymentData.paymentMethod || 'Cash';
+  const notes = paymentData.notes || '';
+
+  if (isPostgresConfigured()) {
+    const db = getDb();
+    const record = await db('student_fee_dues')
+      .where({ id: feeId, school_id: schoolId })
+      .first();
+
+    if (!record) return { success: false, error: 'Fee record not found' };
+
+    const student = await db('students').where({ id: record.student_id }).first();
+    const cls = student ? await db('classes').where({ id: student.class_id }).first() : null;
+
+    const currentPaid = parseFloat(record.paid_amount) || 0;
+    const total = parseFloat(record.total_amount) || 0;
+    const newPaid = currentPaid + amountToPay;
+    const newDue = Math.max(0, total - newPaid);
+    const newStatus = newDue <= 0 ? 'Paid' : (newPaid > 0 ? 'Partial' : 'Unpaid');
+
+    await db('student_fee_dues')
+      .where({ id: feeId })
+      .update({
+        paid_amount: newPaid,
+        due_amount: newDue,
+        pay_later_status: newStatus,
+        payment_method: paymentMethod,
+        notes: notes ? (record.notes ? `${record.notes}; ${notes}` : notes) : record.notes,
+        paid_at: new Date()
+      });
+
+    return {
+      success: true,
+      id: feeId,
+      studentId: record.student_id,
+      studentName: student ? student.name : 'Student',
+      rollNo: student ? String(student.id).replace('STU-', '') : '-',
+      classId: cls ? cls.name : (student ? student.class_id : '-'),
+      parentPhone: student ? student.parent_phone : '',
+      month: record.term_or_month,
+      baseFee: total + (parseFloat(record.discount_amount) || 0),
+      discountAmount: parseFloat(record.discount_amount) || 0,
+      netFee: total,
+      paidAmount: newPaid,
+      balanceDue: newDue,
+      dueAmount: newDue,
+      status: newStatus,
+      paymentMethod
+    };
+  }
+
+  const db = readJsonDb();
+  if (!db.studentFeeDues) return { success: false, error: 'No fee records found' };
+  const record = db.studentFeeDues.find(d => d.id === feeId && d.schoolId === schoolId);
+  if (!record) return { success: false, error: 'Fee record not found' };
+
+  const student = (db.students || []).find(s => s.id === record.studentId);
+  const cls = (db.classes || []).find(c => c.id === student?.classId);
+
+  const currentPaid = parseFloat(record.paidAmount) || 0;
+  const total = parseFloat(record.totalAmount) || 0;
+  const newPaid = currentPaid + amountToPay;
+  const newDue = Math.max(0, total - newPaid);
+  const newStatus = newDue <= 0 ? 'Paid' : (newPaid > 0 ? 'Partial' : 'Unpaid');
+
+  record.paidAmount = newPaid;
+  record.dueAmount = newDue;
+  record.payLaterStatus = newStatus;
+  record.paymentMethod = paymentMethod;
+  if (notes) record.notes = record.notes ? `${record.notes}; ${notes}` : notes;
+  record.paidAt = new Date().toISOString();
+
+  writeJsonDb(db);
+  return {
+    success: true,
+    id: feeId,
+    studentId: record.studentId,
+    studentName: student ? student.name : 'Student',
+    rollNo: student ? String(student.id).replace('STU-', '') : '-',
+    classId: cls ? cls.name : (student ? student.classId : '-'),
+    parentPhone: student ? student.parentPhone : '',
+    month: record.termOrMonth,
+    baseFee: total + (parseFloat(record.discountAmount) || 0),
+    discountAmount: parseFloat(record.discountAmount) || 0,
+    netFee: total,
+    paidAmount: newPaid,
+    balanceDue: newDue,
+    dueAmount: newDue,
+    status: newStatus,
+    paymentMethod
+  };
+}
+
+async function updateStudentConcession(schoolId = 'unique_scholars', studentId, month, discountAmount, reason = '') {
+  const discountNum = Math.max(0, parseFloat(discountAmount) || 0);
+
+  if (isPostgresConfigured()) {
+    const db = getDb();
+    const record = await db('student_fee_dues')
+      .where({ student_id: studentId, term_or_month: month, school_id: schoolId })
+      .first();
+
+    if (record) {
+      // Recalculate based on student's class base fee
+      const student = await db('students').where({ id: studentId }).first();
+      const feeStruct = student ? await db('class_fee_structures').where({ class_id: student.class_id, school_id: schoolId }).first() : null;
+      const baseFee = feeStruct ? parseFloat(feeStruct.base_fee) : parseFloat(record.total_amount);
+      const newTotal = Math.max(0, baseFee - discountNum);
+      const paid = parseFloat(record.paid_amount) || 0;
+      const newDue = Math.max(0, newTotal - paid);
+      const newStatus = newDue <= 0 ? 'Paid' : (paid > 0 ? 'Partial' : 'Unpaid');
+
+      await db('student_fee_dues').where({ id: record.id }).update({
+        discount_amount: discountNum,
+        total_amount: newTotal,
+        due_amount: newDue,
+        pay_later_status: newStatus,
+        notes: reason ? `${reason}` : record.notes
+      });
+      return { success: true, discountAmount: discountNum, totalAmount: newTotal, dueAmount: newDue };
+    }
+  }
+
+  const db = readJsonDb();
+  if (!db.studentFeeDues) db.studentFeeDues = [];
+  const record = db.studentFeeDues.find(d => d.studentId === studentId && d.termOrMonth === month && d.schoolId === schoolId);
+  if (record) {
+    record.discountAmount = discountNum;
+    const baseFee = record.totalAmount + (record.discountAmount || 0);
+    record.totalAmount = Math.max(0, baseFee - discountNum);
+    record.dueAmount = Math.max(0, record.totalAmount - (record.paidAmount || 0));
+    record.payLaterStatus = record.dueAmount <= 0 ? 'Paid' : ((record.paidAmount || 0) > 0 ? 'Partial' : 'Unpaid');
+    if (reason) record.notes = reason;
+    writeJsonDb(db);
+    return { success: true, discountAmount: discountNum, totalAmount: record.totalAmount, dueAmount: record.dueAmount };
+  }
+
+  return { success: false, error: 'Fee record not found for student' };
+}
+
 module.exports = {
   getSchools,
   getClasses,
@@ -1208,5 +1655,11 @@ module.exports = {
   getAdminRecords,
   addPendingDispatches,
   getPendingDispatches,
-  markPendingDispatchComplete
+  markPendingDispatchComplete,
+  getClassFeeStructures,
+  saveClassFeeStructure,
+  getStudentFeeLedger,
+  generateMonthlyFeeLedger,
+  recordFeePayment,
+  updateStudentConcession
 };

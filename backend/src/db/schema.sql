@@ -212,23 +212,38 @@ CREATE TABLE IF NOT EXISTS whatsapp_sessions (
 );
 
 -- =====================================================================
--- 10. STUDENT FEE DUES & PAY LATER TRACKING
+-- 10. CLASS FEE STRUCTURES & STUDENT FEE BILLING
 -- =====================================================================
+CREATE TABLE IF NOT EXISTS class_fee_structures (
+  id          VARCHAR(80) PRIMARY KEY, -- 'FEE-<school_id>-<class_id>'
+  school_id   VARCHAR(50) NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
+  class_id    VARCHAR(50) NOT NULL REFERENCES classes(id) ON DELETE CASCADE,
+  base_fee    NUMERIC(8,2) NOT NULL DEFAULT 0,
+  updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (school_id, class_id)
+);
+CREATE INDEX IF NOT EXISTS idx_class_fee_school ON class_fee_structures(school_id);
+
 CREATE TABLE IF NOT EXISTS student_fee_dues (
   id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   school_id       VARCHAR(50) NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
   student_id      VARCHAR(50) NOT NULL REFERENCES students(id),
-  term_or_month   VARCHAR(50) NOT NULL,
+  term_or_month   VARCHAR(50) NOT NULL, -- e.g. 'September 2026'
   total_amount    NUMERIC(8,2) NOT NULL,
+  discount_amount NUMERIC(8,2) NOT NULL DEFAULT 0,
   paid_amount     NUMERIC(8,2) NOT NULL DEFAULT 0,
   due_amount      NUMERIC(8,2) NOT NULL,
   due_date        DATE,
-  pay_later_status VARCHAR(20) NOT NULL DEFAULT 'Deferred'
-                  CHECK (pay_later_status IN ('Pending', 'Deferred', 'Partial', 'Paid')),
+  pay_later_status VARCHAR(20) NOT NULL DEFAULT 'Unpaid'
+                  CHECK (pay_later_status IN ('Pending', 'Deferred', 'Partial', 'Paid', 'Unpaid')),
+  payment_method  VARCHAR(30) DEFAULT 'Cash',
   notes           TEXT,
-  created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+  paid_at         TIMESTAMPTZ,
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (student_id, term_or_month)
 );
 CREATE INDEX IF NOT EXISTS idx_fee_dues_student ON student_fee_dues(student_id);
+CREATE INDEX IF NOT EXISTS idx_fee_dues_month ON student_fee_dues(school_id, term_or_month);
 
 -- =====================================================================
 -- 11. VIEWS

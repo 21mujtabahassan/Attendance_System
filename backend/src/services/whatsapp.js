@@ -1,3 +1,4 @@
+
 let makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion, Browsers;
 if (!process.env.VERCEL) {
   try {
@@ -89,7 +90,7 @@ async function initWhatsApp(schoolId = 'unique_scholars', io = null, forceClean 
 
   if (forceClean) {
     if (sess.sock) {
-      try { sess.sock.end(undefined); } catch (e) {}
+      try { sess.sock.end(undefined); } catch (e) { }
       sess.sock = null;
     }
     clearSessionData(schoolId);
@@ -140,7 +141,7 @@ async function initWhatsApp(schoolId = 'unique_scholars', io = null, forceClean 
     try {
       const sessionDir = getSchoolSessionDir(schoolId);
       const { state, saveCreds } = await useMultiFileAuthState(sessionDir);
-      
+
       let version;
       try {
         const vInfo = await fetchLatestBaileysVersion();
@@ -204,8 +205,8 @@ async function initWhatsApp(schoolId = 'unique_scholars', io = null, forceClean 
             console.log(`🔴 [${schoolId}] Session revoked or corrupted (${statusCode}). Clearing saved credentials to prompt fresh re-scan.`);
             clearSessionData(schoolId);
             sess.status = 'disconnected';
-            sess.lastError = isLoggedOut 
-              ? 'WhatsApp session was unlinked from your phone. Please scan QR to reconnect.' 
+            sess.lastError = isLoggedOut
+              ? 'WhatsApp session was unlinked from your phone. Please scan QR to reconnect.'
               : 'Session data corrupted. Please scan fresh QR code.';
             sess.retryCount = 0;
             notifyStatusUpdate(schoolId);
@@ -369,7 +370,7 @@ async function syncSessionToDb(schoolId = 'unique_scholars') {
 
 function notifyStatusUpdate(schoolId = 'unique_scholars') {
   const sess = getSessionState(schoolId);
-  syncSessionToDb(schoolId).catch(() => {});
+  syncSessionToDb(schoolId).catch(() => { });
   if (ioInstance) {
     ioInstance.emit('whatsapp_status', {
       schoolId,
@@ -443,7 +444,7 @@ async function sendWhatsAppMessage(phone, message, schoolId = 'unique_scholars',
       if (row && row.gateway_url) {
         gatewayUrl = row.gateway_url;
       }
-    } catch (e) {}
+    } catch (e) { }
   }
 
   if (gatewayUrl) {
@@ -512,7 +513,7 @@ async function getWhatsAppStatus(schoolId = 'unique_scholars') {
           hasSessionFiles: false
         };
       }
-    } catch (e) {}
+    } catch (e) { }
   }
   return {
     schoolId,
@@ -544,7 +545,7 @@ async function getGatewayInfo(schoolId = 'unique_scholars') {
         isConnected = row.status === 'connected';
         if (row.gateway_url) gatewayUrlConfigured = row.gateway_url;
       }
-    } catch (e) {}
+    } catch (e) { }
   }
 
   return {

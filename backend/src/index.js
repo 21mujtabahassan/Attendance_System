@@ -44,7 +44,13 @@ const {
   getAdminRecords,
   addPendingDispatches,
   getPendingDispatches,
-  markPendingDispatchComplete
+  markPendingDispatchComplete,
+  getClassFeeStructures,
+  saveClassFeeStructure,
+  getStudentFeeLedger,
+  generateMonthlyFeeLedger,
+  recordFeePayment,
+  updateStudentConcession
 } = require('./services/store');
 
 const app = express();
@@ -889,6 +895,245 @@ app.get('/api/admin/records', async (req, res) => {
   const { schoolId, classId, status, date, search } = req.query;
   const records = await getAdminRecords(schoolId || 'unique_scholars', { classId, status, date, search });
   res.json({ success: true, total: records.length, records });
+});
+
+// -------------------------------------------------------------
+// FEE MANAGEMENT ENDPOINTS
+// -------------------------------------------------------------
+
+// Get base fee structures for classes
+app.get('/api/admin/fees/structure', async (req, res) => {
+  try {
+    const { schoolId = 'unique_scholars' } = req.query;
+    const structures = await getClassFeeStructures(schoolId);
+    res.json({ success: true, structures });
+  } catch (error) {
+    console.error('Error fetching fee structures:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Update base fee for a class
+app.post('/api/admin/fees/structure', async (req, res) => {
+  try {
+    const { schoolId = 'unique_scholars', classId, baseFee } = req.body;
+    if (!classId) return res.status(400).json({ success: false, error: 'classId is required' });
+    if (baseFee === undefined || baseFee === null || isNaN(baseFee) || Number(baseFee) < 0) {
+      return res.status(400).json({ success: false, error: 'Valid positive baseFee is required' });
+    }
+    const updated = await saveClassFeeStructure(schoolId, classId, Number(baseFee));
+    res.json({ success: true, structure: updated });
+  } catch (error) {
+    console.error('Error saving fee structure:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Get student fee dues & summary metrics for a given month and class
+app.get('/api/admin/fees/ledger', async (req, res) => {
+  try {
+    const { schoolId = 'unique_scholars', month, classId } = req.query;
+    const result = await getStudentFeeLedger(schoolId, month, classId);
+    res.json({
+      success: true,
+      month: result.month,
+      summary: result.summary,
+      ledger: result.ledger
+    });
+  } catch (error) {
+    console.error('Error fetching fee ledger:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Generate / initialize monthly fee billing for all or specific class
+app.post('/api/admin/fees/generate', async (req, res) => {
+  try {
+    const { schoolId = 'unique_scholars', month, classId } = req.body;
+    const result = await generateMonthlyFeeLedger(schoolId, month, classId);
+    res.json({
+      success: true,
+      count: result.count,
+      message: `Generated fee records for ${result.count} student(s) for ${result.month}.`,
+      ledger: result.ledger
+    });
+  } catch (error) {
+    console.error('Error generating fee ledger:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Record a fee payment (full or partial) with optional WhatsApp receipt
+app.post('/api/admin/fees/collect', async (req, res) => {
+  try {
+    const {
+      schoolId = 'unique_scholars',
+      feeId,
+      paidAmount,
+      paymentMethod = 'Cash',
+      notes = '',
+      sendReceipt = true,
+      gatewayUrl
+    } = req.body;
+
+    if (!feeId) return res.status(400).json({ success: false, error: 'feeId is required' });
+    if (!paidAmount || isNaN(paidAmount) || Number(paidAmount) <= 0) {
+      return res.status(400).json({ success: false, error: 'A positive payment amount is required' });
+    }
+
+    const updatedFee = await recordFeePayment(schoolId, feeId, {
+      paidAmount: Number(paidAmount),
+      paymentMethod,
+      notes
+    });
+
+    let receiptSent = false;
+    let receiptError = null;
+
+    if (sendReceipt && updatedFee.parentPhone) {
+      const receiptNo = `USHS-${String(updatedFee.id).slice(-6)}`;
+      const dateStr = new Date().toLocaleDateString('en-PK', { day: '2-digit', month: 'short', year: 'numeric' });
+      const receiptMsg = 
+`🎓 *UNIQUE SCHOLARS HIGH SCHOOL*
+*Official Fee Payment Receipt*
+-----------------------------------
+Receipt No: *${receiptNo}*
+Student: *${updatedFee.studentName}* (Roll #${updatedFee.rollNo || '-'})
+Class: *${updatedFee.classId}*
+Billing Month: *${updatedFee.month}*
+
+💵 Paid Now: *PKR ${Number(paidAmount).toLocaleString()}*
+💳 Payment Method: *${paymentMethod}*
+📅 Date: ${dateStr}
+
+📊 Total Fee: PKR ${Number(updatedFee.baseFee).toLocaleString()}
+${updatedFee.discountAmount > 0 ? `🎁 Concession: PKR ${Number(updatedFee.discountAmount).toLocaleString()}\n` : ''}💰 Total Paid: PKR ${Number(updatedFee.paidAmount).toLocaleString()}
+⚠️ *Remaining Due: PKR ${Number(updatedFee.balanceDue).toLocaleString()}*
+Status: *${updatedFee.status.toUpperCase()}*
+${notes ? `Note: ${notes}\n` : ''}-----------------------------------
+Thank you for your timely payment!`;
+
+      try {
+        const waRes = await sendWhatsAppMessage(updatedFee.parentPhone, receiptMsg, schoolId, gatewayUrl);
+        receiptSent = waRes.success;
+        if (!waRes.success) receiptError = waRes.error;
+      } catch (waErr) {
+        receiptError = waErr.message;
+      }
+    }
+
+    res.json({
+      success: true,
+      fee: updatedFee,
+      receiptSent,
+      receiptError
+    });
+  } catch (error) {
+    console.error('Error recording fee payment:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Update concession / scholarship discount for a student
+app.post('/api/admin/fees/concession', async (req, res) => {
+  try {
+    const { schoolId = 'unique_scholars', studentId, month, discountAmount, reason } = req.body;
+    if (!studentId) return res.status(400).json({ success: false, error: 'studentId is required' });
+    if (discountAmount === undefined || isNaN(discountAmount) || Number(discountAmount) < 0) {
+      return res.status(400).json({ success: false, error: 'Valid discountAmount is required' });
+    }
+
+    const updated = await updateStudentConcession(schoolId, studentId, month, Number(discountAmount), reason);
+    res.json({ success: true, fee: updated });
+  } catch (error) {
+    console.error('Error updating concession:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Dispatch fee payment reminders via WhatsApp (single or batch)
+app.post('/api/admin/fees/dispatch-reminder', async (req, res) => {
+  try {
+    const { schoolId = 'unique_scholars', feeId, feeIds, month, classId, gatewayUrl } = req.body;
+    
+    // Fetch ledger records to send reminders for
+    const { ledger } = await getStudentFeeLedger(schoolId, month, classId);
+    let targetDues = [];
+
+    if (feeId) {
+      targetDues = ledger.filter(d => String(d.id) === String(feeId));
+    } else if (Array.isArray(feeIds) && feeIds.length > 0) {
+      const idSet = new Set(feeIds.map(String));
+      targetDues = ledger.filter(d => idSet.has(String(d.id)));
+    } else {
+      // Bulk: send to all unpaid / partial
+      targetDues = ledger.filter(d => d.status !== 'Paid' && d.balanceDue > 0);
+    }
+
+    const results = [];
+    const pendingBatch = [];
+
+    for (const item of targetDues) {
+      if (!item.parentPhone) continue;
+
+      const reminderMsg =
+`🎓 *UNIQUE SCHOLARS HIGH SCHOOL*
+*Monthly Tuition Fee Reminder*
+-----------------------------------
+Respected Parents of *${item.studentName}* (Class ${item.classId}, Roll #${item.rollNo || '-'}),
+
+This is a gentle reminder regarding the school tuition fee for *${item.month}*.
+
+📋 *Account Summary:*
+• Net Payable: PKR ${Number(item.netFee).toLocaleString()}
+• Amount Paid: PKR ${Number(item.paidAmount).toLocaleString()}
+• *Pending Balance: PKR ${Number(item.balanceDue).toLocaleString()}*
+• Due Date: ${item.dueDate || '10th of this month'}
+
+Kindly submit the dues at the school accounts office or via digital bank transfer to ensure uninterrupted academic services.
+
+-----------------------------------
+Accounts Office: Unique Scholars High School`;
+
+      pendingBatch.push({
+        studentId: item.studentId,
+        studentName: item.studentName,
+        phone: item.parentPhone,
+        message: reminderMsg
+      });
+
+      const waRes = await sendWhatsAppMessage(item.parentPhone, reminderMsg, schoolId, gatewayUrl);
+      results.push({
+        studentId: item.studentId,
+        studentName: item.studentName,
+        phone: item.parentPhone,
+        success: waRes.success,
+        error: waRes.error || null,
+        balanceDue: item.balanceDue
+      });
+    }
+
+    const sentCount = results.filter(r => r.success).length;
+    const failedCount = results.filter(r => !r.success).length;
+
+    let queuedRecord = null;
+    if (sentCount === 0 && pendingBatch.length > 0) {
+      queuedRecord = await addPendingDispatches(schoolId, pendingBatch, 'fee_reminder');
+      console.log(`Queued ${pendingBatch.length} fee reminders for WhatsApp gateway telecast (Batch: ${queuedRecord?.id})`);
+    }
+
+    res.json({
+      success: true,
+      message: `Fee reminders dispatched to ${results.length} parent(s).`,
+      sentCount,
+      failedCount,
+      queuedCount: queuedRecord ? pendingBatch.length : 0,
+      details: results
+    });
+  } catch (error) {
+    console.error('Error dispatching fee reminders:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
 });
 
 module.exports = app;

@@ -39,6 +39,9 @@
         <button class="nav-item" data-tab="results">
           <i class="fa-solid fa-award"></i> <span>Academic Results</span>
         </button>
+        <button class="nav-item" data-tab="fees">
+          <i class="fa-solid fa-file-invoice-dollar"></i> <span>Fee Management</span>
+        </button>
         <button class="nav-item" data-tab="broadcast">
           <i class="fa-solid fa-bullhorn"></i> <span>WhatsApp Broadcast</span>
         </button>
@@ -298,7 +301,155 @@
         </div>
       </section>
 
-      <!-- TAB 3: WHATSAPP BROADCAST CENTER -->
+      <!-- TAB 3: FEE MANAGEMENT & ACCOUNTS MODULE -->
+      <section class="tab-content" id="tab-fees">
+        <!-- TOP METRICS (4 CARDS) -->
+        <div class="metrics-grid">
+          <div class="card metric-card">
+            <div class="metric-icon blue"><i class="fa-solid fa-file-invoice-dollar"></i></div>
+            <div style="flex: 1;">
+              <div class="metric-label">TOTAL EXPECTED BILLING</div>
+              <div class="metric-value" id="feeMetricExpected">PKR 0</div>
+              <div class="metric-sub" id="feeMetricExpectedSub">For selected month</div>
+            </div>
+          </div>
+          <div class="card metric-card">
+            <div class="metric-icon green"><i class="fa-solid fa-hand-holding-dollar"></i></div>
+            <div style="flex: 1;">
+              <div class="metric-label">TOTAL RECOVERED / PAID</div>
+              <div class="metric-value" id="feeMetricCollected" style="color: #10b981;">PKR 0</div>
+              <div class="metric-sub" id="feeMetricCollectedSub">0 receipts recorded</div>
+            </div>
+          </div>
+          <div class="card metric-card">
+            <div class="metric-icon orange"><i class="fa-solid fa-clock-rotate-left"></i></div>
+            <div style="flex: 1;">
+              <div class="metric-label">OUTSTANDING / PENDING</div>
+              <div class="metric-value" id="feeMetricOutstanding" style="color: #f59e0b;">PKR 0</div>
+              <div class="metric-sub" id="feeMetricPendingCount">0 students pending</div>
+            </div>
+          </div>
+          <div class="card metric-card">
+            <div class="metric-icon purple"><i class="fa-solid fa-chart-pie"></i></div>
+            <div style="flex: 1;">
+              <div class="metric-label">COLLECTION RATIO</div>
+              <div class="metric-value" id="feeMetricRate" style="color: #a855f7;">0%</div>
+              <div class="metric-sub">
+                <div style="height: 6px; background: rgba(255,255,255,0.1); border-radius: 3px; overflow: hidden; margin-top: 4px;">
+                  <div id="feeMetricProgressBar" style="height: 100%; width: 0%; background: linear-gradient(90deg, #8b5cf6, #10b981); transition: width 0.4s ease;"></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- MAIN FEE SUB-NAV / CONTROL BAR -->
+        <div class="card" style="margin-bottom: 20px;">
+          <div class="card-header-flex">
+            <div>
+              <h2><i class="fa-solid fa-file-invoice-dollar"></i> Tuition Fee Management & Recovery</h2>
+              <p>Configure grade-level base fees, apply student scholarship concessions, track monthly collections, and dispatch WhatsApp receipts & reminders.</p>
+            </div>
+            <div class="search-filter-group">
+              <button class="btn btn-secondary" onclick="switchFeesSubTab('structure')">
+                <i class="fa-solid fa-sliders"></i> Class Base Fees Setup
+              </button>
+              <button class="btn btn-primary" onclick="switchFeesSubTab('ledger')">
+                <i class="fa-solid fa-book-open"></i> Student Ledger Sheet
+              </button>
+            </div>
+          </div>
+
+          <!-- SUB-NAV PILLS -->
+          <div class="subnav-pills">
+            <button class="subnav-btn active" id="btnSubnavFeeLedger" onclick="switchFeesSubTab('ledger')">📋 Monthly Billing & Ledger</button>
+            <button class="subnav-btn" id="btnSubnavFeeStructure" onclick="switchFeesSubTab('structure')">⚙️ Class Standard Fee Rates</button>
+          </div>
+        </div>
+
+        <!-- SUB-TAB 1: MONTHLY LEDGER & RECORD PAYMENTS -->
+        <div class="fees-subtab active" id="fees-subtab-ledger">
+          <div class="card">
+            <div class="card-header-flex" style="align-items: flex-end;">
+              <div class="form-row" style="flex: 1; gap: 12px; margin: 0; flex-wrap: wrap;">
+                <div class="form-group" style="min-width: 160px; margin: 0;">
+                  <label style="font-weight: 600; font-size: 12px;">Billing Month</label>
+                  <input type="month" id="feeFilterMonth" onchange="loadFeeLedger()">
+                </div>
+                <div class="form-group" style="min-width: 160px; margin: 0;">
+                  <label style="font-weight: 600; font-size: 12px;">Filter Class</label>
+                  <select id="feeFilterClass" onchange="loadFeeLedger()">
+                    <option value="">All Classes</option>
+                  </select>
+                </div>
+                <div class="form-group" style="min-width: 140px; margin: 0;">
+                  <label style="font-weight: 600; font-size: 12px;">Payment Status</label>
+                  <select id="feeFilterStatus" onchange="filterFeeLedgerRows()">
+                    <option value="">All Statuses</option>
+                    <option value="Paid">Paid</option>
+                    <option value="Partial">Partial</option>
+                    <option value="Unpaid">Unpaid</option>
+                  </select>
+                </div>
+                <div class="form-group" style="min-width: 180px; flex: 1; margin: 0;">
+                  <label style="font-weight: 600; font-size: 12px;">Search Student</label>
+                  <input type="text" id="feeSearchInput" placeholder="Search by name or roll..." oninput="filterFeeLedgerRows()">
+                </div>
+              </div>
+
+              <div style="display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap;">
+                <button class="btn btn-secondary" onclick="handleGenerateMonthlyFees()" title="Initialize / Sync fee dues for selected month based on student roster & class rates">
+                  <i class="fa-solid fa-arrows-rotate"></i> Sync Month Dues
+                </button>
+                <button class="btn btn-accent" onclick="handleDispatchBulkReminders()" title="Send WhatsApp fee notices to all pending / partial students in this list">
+                  <i class="fa-brands fa-whatsapp"></i> WhatsApp Reminders to Unpaid
+                </button>
+              </div>
+            </div>
+
+            <div class="table-container" style="margin-top: 18px;">
+              <table class="data-table" id="feeLedgerTable">
+                <thead>
+                  <tr>
+                    <th>Roll / Student</th>
+                    <th>Class</th>
+                    <th>Parent WhatsApp</th>
+                    <th>Base Fee</th>
+                    <th>Concession</th>
+                    <th>Net Payable</th>
+                    <th>Paid</th>
+                    <th>Balance Due</th>
+                    <th>Status</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="feeLedgerTableBody">
+                  <tr>
+                    <td colspan="10" class="text-center text-muted">Loading fee ledger records...</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <!-- SUB-TAB 2: CLASS BASE FEE CONFIGURATION -->
+        <div class="fees-subtab" id="fees-subtab-structure" style="display: none;">
+          <div class="card">
+            <div class="card-header-flex">
+              <div>
+                <h3><i class="fa-solid fa-sliders"></i> Standard Monthly Fee per Class</h3>
+                <p>Set default monthly tuition fee for each grade level. When generating monthly fees, new student bills automatically adopt these rates.</p>
+              </div>
+            </div>
+            <div id="feeStructureListContainer" class="grid-2-col" style="margin-top: 15px;">
+              <p class="text-muted">Loading class fee rates...</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- TAB 4: WHATSAPP BROADCAST CENTER -->
       <section class="tab-content" id="tab-broadcast">
         <div class="grid-2-col">
           <!-- BROADCAST COMPOSER -->
@@ -762,6 +913,123 @@
         <div class="modal-actions">
           <button type="button" class="btn btn-secondary" onclick="closeModal('editStudentModal')">Cancel</button>
           <button type="submit" class="btn btn-primary">Save Changes</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- MODAL: RECORD FEE PAYMENT -->
+  <div class="modal" id="feePaymentModal">
+    <div class="modal-dialog" style="max-width: 540px;">
+      <div class="modal-header">
+        <div>
+          <h3><i class="fa-solid fa-cash-register"></i> Collect Student Tuition Fee</h3>
+          <p id="feeModalStudentSub" class="text-muted" style="font-size: 13px; margin-top: 2px;">Record collection & generate WhatsApp receipt</p>
+        </div>
+        <button class="modal-close" onclick="closeModal('feePaymentModal')">&times;</button>
+      </div>
+      <form id="feePaymentForm" onsubmit="handleSubmitFeePayment(event)">
+        <input type="hidden" id="payFeeId">
+        <input type="hidden" id="payStudentPhone">
+        
+        <!-- Summary Banner in Modal -->
+        <div style="background: rgba(15, 23, 42, 0.7); border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 14px 16px; margin-bottom: 16px; display: flex; justify-content: space-between; align-items: center;">
+          <div>
+            <div id="payStudentName" style="font-weight: 700; font-size: 15px; color: #fff;">Student Name</div>
+            <div id="payStudentClassRoll" style="font-size: 12px; color: var(--text-muted);">Class 9th - Roll #12</div>
+          </div>
+          <div style="text-align: right;">
+            <div style="font-size: 11px; color: var(--text-muted); font-weight: 600;">CURRENT BALANCE DUE</div>
+            <div id="payCurrentBalance" style="font-size: 18px; font-weight: 800; color: #f59e0b;">PKR 0</div>
+          </div>
+        </div>
+
+        <div class="form-row">
+          <div class="form-group" style="flex: 1;">
+            <label>Amount Paying Now (PKR) *</label>
+            <input type="number" id="payAmountInput" min="1" step="1" required style="font-size: 16px; font-weight: 700; color: #10b981;">
+          </div>
+          <div class="form-group" style="flex: 1;">
+            <label>Payment Method *</label>
+            <select id="payMethodInput" required>
+              <option value="Cash">💵 Cash</option>
+              <option value="JazzCash">📱 JazzCash</option>
+              <option value="EasyPaisa">📱 EasyPaisa</option>
+              <option value="Bank Transfer">🏦 Bank Transfer</option>
+              <option value="Cheque">📜 Cheque</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label>Notes / Transaction Reference (Optional)</label>
+          <input type="text" id="payNotesInput" placeholder="e.g. Trx ID, Receipt #1042, Paid by Father">
+        </div>
+
+        <div class="form-group" style="background: rgba(16, 185, 129, 0.08); border: 1px solid rgba(16, 185, 129, 0.25); border-radius: var(--radius-sm); padding: 10px 14px; display: flex; align-items: center; gap: 10px; margin-top: 10px;">
+          <input type="checkbox" id="paySendReceiptWa" checked style="width: 18px; height: 18px; accent-color: #10b981; cursor: pointer;">
+          <label for="paySendReceiptWa" style="margin: 0; font-size: 13px; font-weight: 600; cursor: pointer; color: #34d399;">
+            <i class="fa-brands fa-whatsapp"></i> Send Instant Official WhatsApp Receipt to Parent
+          </label>
+        </div>
+
+        <div class="modal-actions" style="margin-top: 20px;">
+          <button type="button" class="btn btn-secondary" onclick="closeModal('feePaymentModal')">Cancel</button>
+          <button type="submit" class="btn btn-success" id="btnSubmitPayment">
+            <i class="fa-solid fa-check"></i> Record Payment
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- MODAL: CONCESSION / SCHOLARSHIP DISCOUNT -->
+  <div class="modal" id="feeConcessionModal">
+    <div class="modal-dialog" style="max-width: 480px;">
+      <div class="modal-header">
+        <div>
+          <h3><i class="fa-solid fa-hand-holding-heart"></i> Student Concession / Scholarship</h3>
+          <p class="text-muted" style="font-size: 13px; margin-top: 2px;">Apply monthly discount or fee exemption</p>
+        </div>
+        <button class="modal-close" onclick="closeModal('feeConcessionModal')">&times;</button>
+      </div>
+      <form id="feeConcessionForm" onsubmit="handleSubmitConcession(event)">
+        <input type="hidden" id="concessionStudentId">
+        <input type="hidden" id="concessionMonth">
+
+        <div style="background: rgba(15, 23, 42, 0.7); border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 12px 16px; margin-bottom: 16px;">
+          <div id="concessionStudentName" style="font-weight: 700; font-size: 15px; color: #fff;">Student Name</div>
+          <div id="concessionClassBaseFee" style="font-size: 12px; color: var(--text-muted); margin-top: 2px;">Standard Class Base Fee: PKR 3,500</div>
+        </div>
+
+        <div class="form-group">
+          <label>Concession / Discount Amount (PKR) *</label>
+          <input type="number" id="concessionAmountInput" min="0" step="50" required placeholder="e.g. 500 or 1000" style="font-weight: 700; font-size: 15px;">
+          <small class="text-muted">Enter 0 to remove concession and restore standard fee.</small>
+        </div>
+
+        <div class="form-group">
+          <label>Concession Reason / Category</label>
+          <select id="concessionReasonPreset" onchange="applyConcessionReasonPreset()">
+            <option value="Sibling Discount">Sibling Discount</option>
+            <option value="Orphan / Need-based Aid">Orphan / Need-based Aid</option>
+            <option value="Merit Scholarship">Merit Scholarship</option>
+            <option value="Staff Child Concession">Staff Child Concession</option>
+            <option value="Special Concession">Special Principal Discretion</option>
+            <option value="Other">Other (Custom Reason)</option>
+          </select>
+        </div>
+
+        <div class="form-group" id="concessionCustomReasonGroup" style="display: none;">
+          <label>Custom Reason Description</label>
+          <input type="text" id="concessionReasonInput" placeholder="Specify concession details...">
+        </div>
+
+        <div class="modal-actions" style="margin-top: 20px;">
+          <button type="button" class="btn btn-secondary" onclick="closeModal('feeConcessionModal')">Cancel</button>
+          <button type="submit" class="btn btn-primary">
+            <i class="fa-solid fa-floppy-disk"></i> Apply Concession
+          </button>
         </div>
       </form>
     </div>
