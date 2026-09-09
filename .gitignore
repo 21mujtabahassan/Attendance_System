@@ -20,3 +20,5 @@ backend/.env*
 *.log
 scratch/
 .qodo/
+dump*
+
