@@ -337,9 +337,12 @@ async function loadMarksEntryGrid() {
 
   try {
     // 1. Fetch subjects for class & term
-    const subRes = await fetch(`${API_BASE}/admin/results/subjects?schoolId=${CURRENT_SCHOOL_ID}&classId=${classId}&termId=${termId}`);
+    const subRes = await fetch(`${API_BASE}/admin/results/subjects?schoolId=${CURRENT_SCHOOL_ID}&classId=${encodeURIComponent(classId)}&termId=${encodeURIComponent(termId)}`);
     const subData = await subRes.json();
-    const subjects = subData.subjects || ['Mathematics', 'English Literature', 'Urdu', 'Physics', 'Chemistry'];
+    const rawSubjects = subData.subjects || [];
+    const subjects = rawSubjects.length > 0
+      ? rawSubjects.map(s => typeof s === 'string' ? s : (s.name || s.subject_name || '')).filter(Boolean)
+      : ['Mathematics', 'English Literature', 'Urdu', 'Physics', 'Chemistry'];
 
     // 2. Fetch students for class
     const stuRes = await fetch(`${API_BASE}/schools/${CURRENT_SCHOOL_ID}/students?class=${encodeURIComponent(classId)}`);
@@ -601,16 +604,44 @@ async function loadTermsAndSubjectsConfig() {
 }
 
 async function loadClassSubjectsForConfig() {
-  const termId = document.getElementById('subjectTermSelect')?.value || (globalTerms[0] ? globalTerms[0].id : '');
-  const classId = document.getElementById('subjectClassSelect')?.value || (globalClasses[0] ? globalClasses[0].id : '');
+  const termSelect = document.getElementById('subjectTermSelect');
+  const classSelect = document.getElementById('subjectClassSelect');
   const inp = document.getElementById('subjectListInput');
+  const pillsContainer = document.getElementById('activeSubjectPills');
+
+  const termId = termSelect?.value || (globalTerms[0] ? globalTerms[0].id : '');
+  const classId = classSelect?.value || (globalClasses[0] ? globalClasses[0].id : '');
+
+  if (termSelect && termId && !termSelect.value) termSelect.value = termId;
+  if (classSelect && classId && !classSelect.value) classSelect.value = classId;
 
   if (!termId || !classId || !inp) return;
 
   try {
-    const res = await fetch(`${API_BASE}/admin/results/subjects?schoolId=${CURRENT_SCHOOL_ID}&classId=${classId}&termId=${termId}`);
+    const res = await fetch(`${API_BASE}/admin/results/subjects?schoolId=${CURRENT_SCHOOL_ID}&classId=${encodeURIComponent(classId)}&termId=${encodeURIComponent(termId)}`);
     const data = await res.json();
-    inp.value = (data.subjects || []).join(', ');
+    const rawSubjects = data.subjects || [];
+
+    // Extract clean subject names (avoid [object Object])
+    const subjectNames = rawSubjects
+      .map(s => typeof s === 'string' ? s : (s.name || s.subject_name || ''))
+      .map(s => s.trim())
+      .filter(Boolean);
+
+    inp.value = subjectNames.join(', ');
+
+    // Render active subject chips / pills for immediate visual feedback
+    if (pillsContainer) {
+      if (subjectNames.length > 0) {
+        pillsContainer.innerHTML = subjectNames.map(name => `
+          <span style="display: inline-flex; align-items: center; gap: 6px; background: rgba(56, 189, 248, 0.15); color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.3); padding: 5px 12px; border-radius: 16px; font-size: 12px; font-weight: 500;">
+            📖 ${name}
+          </span>
+        `).join('');
+      } else {
+        pillsContainer.innerHTML = '<span style="font-size: 12px; color: #94a3b8; font-style: italic;">No subjects configured yet for this class & term. Type subjects above and hit Save.</span>';
+      }
+    }
   } catch (e) {
     console.error('Error fetching subjects config:', e);
   }
@@ -618,11 +649,32 @@ async function loadClassSubjectsForConfig() {
 
 async function handleSaveSubjects(e) {
   e.preventDefault();
-  const termId = document.getElementById('subjectTermSelect').value;
-  const classId = document.getElementById('subjectClassSelect').value;
-  const rawText = document.getElementById('subjectListInput').value;
+  const termSelect = document.getElementById('subjectTermSelect');
+  const classSelect = document.getElementById('subjectClassSelect');
+  const inp = document.getElementById('subjectListInput');
 
-  const subjects = rawText.split(',').map(s => s.trim()).filter(s => s.length > 0);
+  const termId = termSelect?.value;
+  const classId = classSelect?.value;
+  const rawText = (inp?.value || '').trim();
+
+  if (!termId) {
+    showToast('Please select an Exam Term first.');
+    return;
+  }
+  if (!classId) {
+    showToast('Please select a Class first.');
+    return;
+  }
+
+  const subjects = rawText
+    .split(',')
+    .map(s => s.trim())
+    .filter(s => s.length > 0);
+
+  if (subjects.length === 0) {
+    showToast('Please enter at least one subject name (separated by commas).');
+    return;
+  }
 
   try {
     const res = await fetch(`${API_BASE}/admin/results/subjects`, {
@@ -632,12 +684,19 @@ async function handleSaveSubjects(e) {
     });
     const data = await res.json();
     if (data.success) {
-      showToast('Subject configuration saved! 📚');
+      showToast(`Subject configuration saved (${subjects.length} subjects)! 📚`);
+      await loadClassSubjectsForConfig();
+      // If marks entry tab has this class and term open, refresh its marks grid
+      const marksTerm = document.getElementById('marksTermSelect')?.value;
+      const marksClass = document.getElementById('marksClassSelect')?.value;
+      if (marksTerm === termId && marksClass === classId && typeof loadMarksEntryGrid === 'function') {
+        loadMarksEntryGrid();
+      }
     } else {
       showToast(data.error || 'Failed to save subjects.');
     }
   } catch (e) {
-    showToast('Error saving subjects.');
+    showToast(`Error saving subjects: ${e.message}`);
   }
 }
 

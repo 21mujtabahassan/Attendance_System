@@ -667,13 +667,34 @@ async function addResultTerm(schoolId = 'unique_scholars', termData) {
 async function deleteResultTerm(schoolId = 'unique_scholars', termId) {
   if (isPostgresConfigured()) {
     const db = getDb();
-    await db('result_terms').where({ school_id: schoolId, id: termId }).del();
-    return true;
+    await db('class_term_subjects').where({ school_id: schoolId, term_id: termId }).del();
+    await db('student_results').where({ school_id: schoolId, term_id: termId }).del();
+    const count = await db('result_terms').where({ school_id: schoolId, id: termId }).del();
+
+    // Mirror to JSON
+    try {
+      const jDb = readJsonDb();
+      if (jDb.resultTerms) {
+        jDb.resultTerms = jDb.resultTerms.filter(t => !(t.schoolId === schoolId && t.id === termId));
+      }
+      if (jDb.classSubjects) {
+        jDb.classSubjects = jDb.classSubjects.filter(s => !(s.schoolId === schoolId && s.termId === termId));
+      }
+      if (jDb.studentResults) {
+        jDb.studentResults = jDb.studentResults.filter(r => !(r.schoolId === schoolId && r.termId === termId));
+      }
+      writeJsonDb(jDb);
+    } catch (e) {}
+
+    return count > 0;
   }
   const db = readJsonDb();
   const idx = (db.resultTerms || []).findIndex(t => t.schoolId === schoolId && t.id === termId);
   if (idx >= 0) {
     db.resultTerms.splice(idx, 1);
+    if (db.classSubjects) {
+      db.classSubjects = db.classSubjects.filter(s => !(s.schoolId === schoolId && s.termId === termId));
+    }
     writeJsonDb(db);
     return true;
   }
@@ -683,9 +704,11 @@ async function deleteResultTerm(schoolId = 'unique_scholars', termId) {
 async function getClassSubjects(schoolId = 'unique_scholars', classId, termId) {
   if (isPostgresConfigured()) {
     const db = getDb();
-    const rows = await db('class_term_subjects')
-      .where({ school_id: schoolId, class_id: classId, term_id: termId })
-      .orderBy('display_order', 'asc');
+    const query = db('class_term_subjects').where({ school_id: schoolId });
+    if (classId) query.andWhere({ class_id: classId });
+    if (termId) query.andWhere({ term_id: termId });
+
+    const rows = await query.orderBy('display_order', 'asc');
 
     return rows.map(r => ({
       id: r.id,
@@ -699,46 +722,106 @@ async function getClassSubjects(schoolId = 'unique_scholars', classId, termId) {
   }
 
   const db = readJsonDb();
-  return (db.classSubjects || []).filter(s => s.schoolId === schoolId && s.classId === classId && s.termId === termId);
+  return (db.classSubjects || []).filter(s => s.schoolId === schoolId && (!classId || s.classId === classId) && (!termId || s.termId === termId));
 }
 
-async function saveClassSubjects(schoolId = 'unique_scholars', payload) {
-  const { classId, termId, subjects } = payload;
+async function saveClassSubjects(schoolId = 'unique_scholars', classIdOrPayload, maybeTermId, maybeSubjects) {
+  let classId, termId, subjects;
+  if (typeof classIdOrPayload === 'object' && classIdOrPayload !== null) {
+    classId = classIdOrPayload.classId;
+    termId = classIdOrPayload.termId;
+    subjects = classIdOrPayload.subjects;
+  } else {
+    classId = classIdOrPayload;
+    termId = maybeTermId;
+    subjects = maybeSubjects;
+  }
+
+  if (!classId || !termId) {
+    throw new Error('classId and termId are required to save subjects.');
+  }
+
+  if (!Array.isArray(subjects)) {
+    subjects = [];
+  }
+
+  // Normalize subjects: accept strings (e.g. 'Mathematics') or objects ({ name: 'Math', totalMarks: 100 })
+  const normalized = subjects
+    .map((sub, idx) => {
+      let name = '';
+      let maxMarks = 100;
+      let order = idx + 1;
+      if (typeof sub === 'string') {
+        name = sub.trim();
+      } else if (typeof sub === 'object' && sub !== null) {
+        name = (sub.name || sub.subject_name || '').trim();
+        const parsedMarks = Number(sub.totalMarks || sub.max_marks || 100);
+        maxMarks = isNaN(parsedMarks) || parsedMarks <= 0 ? 100 : parsedMarks;
+        if (sub.displayOrder) order = sub.displayOrder;
+      }
+      if (!name) return null;
+      return {
+        name,
+        totalMarks: maxMarks,
+        displayOrder: order
+      };
+    })
+    .filter(Boolean);
+
   if (isPostgresConfigured()) {
     const db = getDb();
-    return await db.transaction(async trx => {
+    const created = await db.transaction(async trx => {
       await trx('class_term_subjects').where({ school_id: schoolId, class_id: classId, term_id: termId }).del();
 
-      const created = [];
-      for (let i = 0; i < subjects.length; i++) {
-        const sub = subjects[i];
-        const subId = `SUB-${classId}-${termId}-${encodeURIComponent(sub.name || i)}`;
+      const list = [];
+      for (let i = 0; i < normalized.length; i++) {
+        const item = normalized[i];
+        const subId = `SUB-${classId}-${termId}-${encodeURIComponent(item.name)}`;
         await trx('class_term_subjects').insert({
           id: subId,
           school_id: schoolId,
           class_id: classId,
           term_id: termId,
-          subject_name: sub.name,
-          max_marks: sub.totalMarks || 100,
-          display_order: i + 1
+          subject_name: item.name,
+          max_marks: item.totalMarks,
+          display_order: item.displayOrder
         });
-        created.push({ id: subId, schoolId, classId, termId, name: sub.name, totalMarks: sub.totalMarks || 100, displayOrder: i + 1 });
+        list.push({
+          id: subId,
+          schoolId,
+          classId,
+          termId,
+          name: item.name,
+          totalMarks: item.totalMarks,
+          displayOrder: item.displayOrder
+        });
       }
-      return created;
+      return list;
     });
+
+    // Mirror to JSON
+    try {
+      const jDb = readJsonDb();
+      if (!jDb.classSubjects) jDb.classSubjects = [];
+      jDb.classSubjects = jDb.classSubjects.filter(s => !(s.schoolId === schoolId && s.classId === classId && s.termId === termId));
+      jDb.classSubjects.push(...created);
+      writeJsonDb(jDb);
+    } catch (e) {}
+
+    return created;
   }
 
   const db = readJsonDb();
   if (!db.classSubjects) db.classSubjects = [];
   db.classSubjects = db.classSubjects.filter(s => !(s.schoolId === schoolId && s.classId === classId && s.termId === termId));
-  const created = subjects.map((sub, idx) => ({
-    id: `SUB-${Date.now()}-${idx}`,
+  const created = normalized.map((item, idx) => ({
+    id: `SUB-${classId}-${termId}-${encodeURIComponent(item.name)}`,
     schoolId,
     classId,
     termId,
-    name: sub.name,
-    totalMarks: sub.totalMarks || 100,
-    displayOrder: idx + 1
+    name: item.name,
+    totalMarks: item.totalMarks,
+    displayOrder: item.displayOrder
   }));
   db.classSubjects.push(...created);
   writeJsonDb(db);

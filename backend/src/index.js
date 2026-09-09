@@ -555,37 +555,63 @@ app.get('/api/attendance/logs', async (req, res) => {
 // -------------------------------------------------------------
 
 app.get('/api/admin/results/terms', async (req, res) => {
-  const { schoolId = 'unique_scholars' } = req.query;
-  res.json({ success: true, terms: await getResultTerms(schoolId) });
+  try {
+    const { schoolId = 'unique_scholars' } = req.query;
+    const terms = await getResultTerms(schoolId);
+    res.json({ success: true, terms });
+  } catch (err) {
+    console.error('Error fetching result terms:', err);
+    res.status(500).json({ success: false, error: err.message, terms: [] });
+  }
 });
 
 app.post('/api/admin/results/terms', async (req, res) => {
-  const { schoolId = 'unique_scholars', name, date, description, status } = req.body;
-  if (!name) return res.status(400).json({ success: false, error: 'Term name is required.' });
-  const term = await addResultTerm(schoolId, { name, date, description, status });
-  res.json({ success: true, term });
+  try {
+    const { schoolId = 'unique_scholars', name, date, description, status } = req.body;
+    if (!name) return res.status(400).json({ success: false, error: 'Term name is required.' });
+    const term = await addResultTerm(schoolId, { name, date, description, status });
+    res.json({ success: true, term });
+  } catch (err) {
+    console.error('Error adding result term:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
 });
 
 app.delete('/api/admin/results/terms/:termId', async (req, res) => {
-  const { schoolId = 'unique_scholars' } = req.query;
-  const { termId } = req.params;
-  await deleteResultTerm(schoolId, termId);
-  res.json({ success: true, message: 'Term deleted successfully.' });
+  try {
+    const { schoolId = 'unique_scholars' } = req.query;
+    const { termId } = req.params;
+    await deleteResultTerm(schoolId, termId);
+    res.json({ success: true, message: 'Term deleted successfully.' });
+  } catch (err) {
+    console.error('Error deleting result term:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
 });
 
 app.get('/api/admin/results/subjects', async (req, res) => {
-  const { schoolId = 'unique_scholars', classId, termId } = req.query;
-  const subjects = await getClassSubjects(schoolId, classId, termId);
-  res.json({ success: true, subjects });
+  try {
+    const { schoolId = 'unique_scholars', classId, termId } = req.query;
+    const subjects = await getClassSubjects(schoolId, classId, termId);
+    res.json({ success: true, subjects });
+  } catch (err) {
+    console.error('Error fetching subjects:', err);
+    res.status(500).json({ success: false, error: err.message, subjects: [] });
+  }
 });
 
 app.post('/api/admin/results/subjects', async (req, res) => {
-  const { schoolId = 'unique_scholars', classId, termId, subjects } = req.body;
-  if (!classId || !termId || !Array.isArray(subjects)) {
-    return res.status(400).json({ success: false, error: 'classId, termId, and subjects array are required.' });
+  try {
+    const { schoolId = 'unique_scholars', classId, termId, subjects } = req.body;
+    if (!classId || !termId || !Array.isArray(subjects)) {
+      return res.status(400).json({ success: false, error: 'classId, termId, and subjects array are required.' });
+    }
+    const result = await saveClassSubjects(schoolId, classId, termId, subjects);
+    res.json({ success: true, record: result, subjects: result });
+  } catch (err) {
+    console.error('Error saving class subjects:', err);
+    res.status(500).json({ success: false, error: err.message });
   }
-  const result = await saveClassSubjects(schoolId, classId, termId, subjects);
-  res.json({ success: true, record: result });
 });
 
 app.get('/api/admin/results/marks', async (req, res) => {
