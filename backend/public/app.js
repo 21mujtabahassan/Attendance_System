@@ -1925,14 +1925,8 @@ function filterFeeLedgerRows() {
       </td>
       <td>
         <div style="display: flex; gap: 6px; align-items: center;">
-          <button class="btn btn-sm btn-success" onclick="openFeePaymentModal('${item.id}')" title="Set Fee & Record Payment">
-            <i class="fa-solid fa-pen-to-square"></i> Set Fee / Pay
-          </button>
-          <button class="btn btn-sm btn-secondary" onclick="openFeeConcessionModal('${item.studentId}', '${encodeURIComponent(item.studentName || '')}', '${item.classId}', ${item.discountAmount || 0}, ${item.baseFee || 0}, '${encodeURIComponent(item.discountReason || '')}')" title="Set Scholarship / Concession">
-            <i class="fa-solid fa-hand-holding-heart"></i>
-          </button>
-          <button class="btn btn-sm btn-primary" onclick="handleDispatchSingleReminder('${item.id}')" title="${item.status === 'Paid' ? 'Send WhatsApp Receipt' : 'Send WhatsApp Reminder'}">
-            <i class="fa-brands fa-whatsapp"></i>
+          <button class="btn btn-sm btn-whatsapp" onclick="handleDispatchSingleReminder('${item.id}')" title="${item.status === 'Paid' ? 'Send WhatsApp Receipt Notice' : 'Send WhatsApp Reminder to Parent'}">
+            <i class="fa-brands fa-whatsapp"></i> ${item.status === 'Paid' ? 'Receipt' : 'Send Reminder'}
           </button>
         </div>
       </td>
@@ -2090,6 +2084,13 @@ function openFeePaymentModal(feeId) {
   document.getElementById('payMethodInput').value = item.paymentMethod || 'Cash';
 
   openModal('feePaymentModal');
+}
+
+function handleDispatchReminderFromModal() {
+  const feeId = document.getElementById('payFeeId')?.value;
+  if (feeId) {
+    handleDispatchSingleReminder(feeId);
+  }
 }
 
 async function handleSubmitFeePayment(event) {
