@@ -1733,7 +1733,7 @@ async function generateMonthlyFeeLedger(schoolId = 'unique_scholars', month, cla
     for (const student of students) {
       if (!existingMap.has(student.id)) {
         const feeStruct = structures.find(s => s.class_id === student.class_id);
-        const baseFee = feeStruct ? parseFloat(feeStruct.base_fee) : 0;
+        const baseFee = feeStruct && parseFloat(feeStruct.base_fee) > 0 ? parseFloat(feeStruct.base_fee) : 3000;
         const discountAmount = 0;
         const totalAmount = Math.max(0, baseFee - discountAmount);
 
@@ -1745,7 +1745,7 @@ async function generateMonthlyFeeLedger(schoolId = 'unique_scholars', month, cla
           discount_amount: discountAmount,
           paid_amount: 0,
           due_amount: totalAmount,
-          pay_later_status: totalAmount === 0 ? 'Paid' : 'Unpaid',
+          pay_later_status: 'Unpaid',
           payment_method: 'Cash',
           created_at: new Date()
         });
@@ -1758,20 +1758,19 @@ async function generateMonthlyFeeLedger(schoolId = 'unique_scholars', month, cla
   const db = readJsonDb();
   if (!db.studentFeeDues) db.studentFeeDues = [];
   if (!db.classFeeStructures) db.classFeeStructures = [];
-
   const students = (db.students || []).filter(s => s.schoolId === schoolId && s.isActive !== false && (!classId || s.classId === classId));
   let count = 0;
 
   for (const student of students) {
-    const exists = db.studentFeeDues.find(d => d.schoolId === schoolId && d.studentId === student.id && d.termOrMonth === month);
-    if (!exists) {
+    const existing = db.studentFeeDues.find(d => d.schoolId === schoolId && d.studentId === student.id && d.termOrMonth === month);
+    if (!existing) {
       const feeStruct = db.classFeeStructures.find(s => s.schoolId === schoolId && s.classId === student.classId);
-      const baseFee = feeStruct ? parseFloat(feeStruct.baseFee) : 0;
+      const baseFee = feeStruct && parseFloat(feeStruct.baseFee) > 0 ? parseFloat(feeStruct.baseFee) : 3000;
       const discountAmount = 0;
       const totalAmount = Math.max(0, baseFee - discountAmount);
 
       db.studentFeeDues.push({
-        id: `DUE-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
+        id: `fee-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
         schoolId,
         studentId: student.id,
         termOrMonth: month,
@@ -1779,7 +1778,7 @@ async function generateMonthlyFeeLedger(schoolId = 'unique_scholars', month, cla
         discountAmount,
         paidAmount: 0,
         dueAmount: totalAmount,
-        payLaterStatus: totalAmount === 0 ? 'Paid' : 'Unpaid',
+        payLaterStatus: 'Unpaid',
         paymentMethod: 'Cash',
         createdAt: new Date().toISOString()
       });
@@ -1788,6 +1787,141 @@ async function generateMonthlyFeeLedger(schoolId = 'unique_scholars', month, cla
   }
   writeJsonDb(db);
   return { success: true, count, month };
+}
+
+async function updateStudentFeeStatus(schoolId = 'unique_scholars', feeId, data) {
+  const { status, totalAmount, paidAmount, paymentMethod = 'Cash', notes = '' } = data;
+  if (!['Paid', 'Partial', 'Unpaid', 'Pending'].includes(status)) {
+    throw new Error('Invalid status. Must be Paid, Partial, or Unpaid.');
+  }
+
+  if (isPostgresConfigured()) {
+    const db = getDb();
+    const record = await db('student_fee_dues').where({ id: feeId, school_id: schoolId }).first();
+    if (!record) return { success: false, error: 'Fee record not found' };
+
+    const student = await db('students').where({ id: record.student_id }).first();
+    const cls = student ? await db('classes').where({ id: student.class_id }).first() : null;
+
+    let finalTotal = totalAmount !== undefined && !isNaN(totalAmount) ? Math.max(0, parseFloat(totalAmount)) : parseFloat(record.total_amount);
+    if (finalTotal <= 0) {
+      const struct = await db('class_fee_structures').where({ school_id: schoolId, class_id: student?.class_id }).first();
+      finalTotal = struct && parseFloat(struct.base_fee) > 0 ? parseFloat(struct.base_fee) : 3000;
+    }
+
+    let finalPaid = 0;
+    let finalDue = finalTotal;
+
+    if (status === 'Paid') {
+      finalPaid = finalTotal;
+      finalDue = 0;
+    } else if (status === 'Unpaid') {
+      finalPaid = 0;
+      finalDue = finalTotal;
+    } else if (status === 'Partial') {
+      if (paidAmount !== undefined && !isNaN(paidAmount)) {
+        finalPaid = Math.max(0, parseFloat(paidAmount));
+      } else {
+        const cur = parseFloat(record.paid_amount) || 0;
+        finalPaid = cur > 0 ? cur : Math.round(finalTotal / 2);
+      }
+      finalPaid = Math.min(finalPaid, finalTotal);
+      finalDue = Math.max(0, finalTotal - finalPaid);
+    }
+
+    const payload = {
+      total_amount: finalTotal,
+      paid_amount: finalPaid,
+      due_amount: finalDue,
+      pay_later_status: status,
+      payment_method: paymentMethod
+    };
+    if (notes) payload.notes = notes;
+    payload.paid_at = (status === 'Paid' || status === 'Partial') ? new Date() : null;
+
+    await db('student_fee_dues').where({ id: feeId }).update(payload);
+
+    return {
+      success: true,
+      id: feeId,
+      studentId: record.student_id,
+      studentName: student ? student.name : 'Student',
+      rollNo: student && (student.roll_number || student.rollNumber) ? Number(student.roll_number || student.rollNumber) : String(record.student_id).replace('STU-', ''),
+      classId: cls ? cls.name : (student ? student.class_id : '-'),
+      parentPhone: student ? student.parent_phone : '',
+      month: record.term_or_month,
+      baseFee: finalTotal + (parseFloat(record.discount_amount) || 0),
+      discountAmount: parseFloat(record.discount_amount) || 0,
+      netFee: finalTotal,
+      totalAmount: finalTotal,
+      paidAmount: finalPaid,
+      balanceDue: finalDue,
+      dueAmount: finalDue,
+      status,
+      paymentMethod,
+      notes: payload.notes || record.notes || ''
+    };
+  }
+
+  // JSON DB Fallback
+  const db = readJsonDb();
+  if (!db.studentFeeDues) db.studentFeeDues = [];
+  const record = db.studentFeeDues.find(d => d.id === feeId && d.schoolId === schoolId);
+  if (!record) return { success: false, error: 'Fee record not found' };
+
+  const student = (db.students || []).find(s => s.id === record.studentId);
+  const cls = (db.classes || []).find(c => c.id === student?.classId);
+
+  let finalTotal = totalAmount !== undefined && !isNaN(totalAmount) ? Math.max(0, parseFloat(totalAmount)) : (parseFloat(record.totalAmount) || 3000);
+  let finalPaid = 0;
+  let finalDue = finalTotal;
+
+  if (status === 'Paid') {
+    finalPaid = finalTotal;
+    finalDue = 0;
+  } else if (status === 'Unpaid') {
+    finalPaid = 0;
+    finalDue = finalTotal;
+  } else if (status === 'Partial') {
+    if (paidAmount !== undefined && !isNaN(paidAmount)) {
+      finalPaid = Math.max(0, parseFloat(paidAmount));
+    } else {
+      const cur = parseFloat(record.paidAmount) || 0;
+      finalPaid = cur > 0 ? cur : Math.round(finalTotal / 2);
+    }
+    finalPaid = Math.min(finalPaid, finalTotal);
+    finalDue = Math.max(0, finalTotal - finalPaid);
+  }
+
+  record.totalAmount = finalTotal;
+  record.paidAmount = finalPaid;
+  record.dueAmount = finalDue;
+  record.payLaterStatus = status;
+  record.paymentMethod = paymentMethod;
+  if (notes) record.notes = notes;
+  record.paidAt = (status === 'Paid' || status === 'Partial') ? new Date().toISOString() : null;
+
+  writeJsonDb(db);
+  return {
+    success: true,
+    id: feeId,
+    studentId: record.studentId,
+    studentName: student ? student.name : 'Student',
+    rollNo: student ? student.rollNumber : '-',
+    classId: cls ? cls.name : (student ? student.classId : '-'),
+    parentPhone: student ? student.parentPhone : '',
+    month: record.termOrMonth,
+    baseFee: finalTotal + (parseFloat(record.discountAmount) || 0),
+    discountAmount: record.discountAmount || 0,
+    netFee: finalTotal,
+    totalAmount: finalTotal,
+    paidAmount: finalPaid,
+    balanceDue: finalDue,
+    dueAmount: finalDue,
+    status,
+    paymentMethod,
+    notes: record.notes || ''
+  };
 }
 
 async function recordFeePayment(schoolId = 'unique_scholars', feeId, paymentData) {
@@ -1966,5 +2100,6 @@ module.exports = {
   getStudentFeeLedger,
   generateMonthlyFeeLedger,
   recordFeePayment,
+  updateStudentFeeStatus,
   updateStudentConcession
 };

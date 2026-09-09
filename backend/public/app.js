@@ -1915,17 +1915,23 @@ function filterFeeLedgerRows() {
         PKR ${Number(item.balanceDue || 0).toLocaleString()}
       </td>
       <td>
-        <span class="badge ${badgeClass}">${item.status}</span>
+        <select class="fee-status-select fee-status-${(item.status || 'Unpaid').toLowerCase()}" 
+                onchange="handleQuickFeeStatusChange('${item.id}', this.value)"
+                title="Quickly toggle fee status for this student">
+          <option value="Paid" ${item.status === 'Paid' ? 'selected' : ''}>🟢 Paid</option>
+          <option value="Partial" ${item.status === 'Partial' ? 'selected' : ''}>🟡 Partial</option>
+          <option value="Unpaid" ${item.status === 'Unpaid' ? 'selected' : ''}>🔴 Unpaid</option>
+        </select>
       </td>
       <td>
         <div style="display: flex; gap: 6px; align-items: center;">
-          <button class="btn btn-sm btn-success" onclick="openFeePaymentModal(${item.id})" title="Collect & Record Fee Payment">
-            <i class="fa-solid fa-cash-register"></i> Pay
+          <button class="btn btn-sm btn-success" onclick="openFeePaymentModal('${item.id}')" title="Set Fee & Record Payment">
+            <i class="fa-solid fa-pen-to-square"></i> Set Fee / Pay
           </button>
-          <button class="btn btn-sm btn-secondary" onclick="openFeeConcessionModal(${item.studentId}, '${encodeURIComponent(item.studentName || '')}', '${item.classId}', ${item.discountAmount || 0}, ${item.baseFee || 0}, '${encodeURIComponent(item.discountReason || '')}')" title="Set Scholarship / Concession">
+          <button class="btn btn-sm btn-secondary" onclick="openFeeConcessionModal('${item.studentId}', '${encodeURIComponent(item.studentName || '')}', '${item.classId}', ${item.discountAmount || 0}, ${item.baseFee || 0}, '${encodeURIComponent(item.discountReason || '')}')" title="Set Scholarship / Concession">
             <i class="fa-solid fa-hand-holding-heart"></i>
           </button>
-          <button class="btn btn-sm btn-primary" onclick="handleDispatchSingleReminder(${item.id})" title="${item.status === 'Paid' ? 'Send WhatsApp Receipt' : 'Send WhatsApp Reminder'}">
+          <button class="btn btn-sm btn-primary" onclick="handleDispatchSingleReminder('${item.id}')" title="${item.status === 'Paid' ? 'Send WhatsApp Receipt' : 'Send WhatsApp Reminder'}">
             <i class="fa-brands fa-whatsapp"></i>
           </button>
         </div>
@@ -1933,6 +1939,36 @@ function filterFeeLedgerRows() {
     `;
     tbody.appendChild(tr);
   });
+}
+
+async function handleQuickFeeStatusChange(feeId, newStatus) {
+  const item = globalFeeLedger.find(f => f.id === feeId);
+  const studentName = item ? item.studentName : 'Student';
+  showToast(`Updating ${studentName} fee to ${newStatus}...`);
+
+  try {
+    const res = await fetch(`${API_BASE}/admin/fees/set-status`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        schoolId: CURRENT_SCHOOL_ID,
+        feeId,
+        status: newStatus,
+        totalAmount: item ? (item.netFee || item.baseFee || 3000) : 3000
+      })
+    });
+    const data = await res.json();
+    if (data.success) {
+      showToast(`Fee status for "${studentName}" set to ${newStatus}! ✅`);
+      loadFeeLedger();
+    } else {
+      showToast(`Failed to update status: ${data.error || 'Server error'}`);
+      loadFeeLedger();
+    }
+  } catch (err) {
+    showToast(`Error updating fee status: ${err.message}`);
+    loadFeeLedger();
+  }
 }
 
 async function handleGenerateMonthlyFees() {
@@ -1969,6 +2005,71 @@ async function handleGenerateMonthlyFees() {
   }
 }
 
+function setFeeModalStatusUI(status, totalAmount, currentPaid) {
+  ['Paid', 'Partial', 'Unpaid'].forEach(s => {
+    const btn = document.getElementById(`btnRadioStatus${s}`);
+    const radio = document.getElementById(`radio${s}`);
+    if (btn && radio) {
+      if (s === status) {
+        btn.classList.add('active');
+        radio.checked = true;
+      } else {
+        btn.classList.remove('active');
+        radio.checked = false;
+      }
+    }
+  });
+
+  const payAmountInput = document.getElementById('payAmountInput');
+  if (status === 'Paid') {
+    payAmountInput.value = totalAmount;
+  } else if (status === 'Unpaid') {
+    payAmountInput.value = 0;
+  } else if (status === 'Partial') {
+    const partialVal = (currentPaid !== undefined && currentPaid > 0 && currentPaid < totalAmount)
+      ? currentPaid
+      : Math.round(totalAmount / 2);
+    payAmountInput.value = partialVal;
+  }
+  onFeeModalAmountChange();
+}
+
+function onFeeModalStatusChange(newStatus) {
+  const total = Math.max(0, parseFloat(document.getElementById('payTotalAmountInput')?.value) || 3000);
+  setFeeModalStatusUI(newStatus, total);
+}
+
+function onFeeModalAmountChange() {
+  const total = Math.max(0, parseFloat(document.getElementById('payTotalAmountInput')?.value) || 0);
+  const paid = Math.max(0, parseFloat(document.getElementById('payAmountInput')?.value) || 0);
+  const remaining = Math.max(0, total - paid);
+
+  const previewEl = document.getElementById('payRemainingBalancePreview');
+  if (previewEl) {
+    previewEl.innerText = `PKR ${remaining.toLocaleString()}`;
+    previewEl.style.color = remaining > 0 ? '#f59e0b' : '#10b981';
+  }
+
+  // Update button active states based on current numbers
+  let detected = 'Unpaid';
+  if (paid >= total && total > 0) detected = 'Paid';
+  else if (paid > 0) detected = 'Partial';
+
+  ['Paid', 'Partial', 'Unpaid'].forEach(s => {
+    const btn = document.getElementById(`btnRadioStatus${s}`);
+    const radio = document.getElementById(`radio${s}`);
+    if (btn && radio) {
+      if (s === detected) {
+        btn.classList.add('active');
+        radio.checked = true;
+      } else {
+        btn.classList.remove('active');
+        radio.checked = false;
+      }
+    }
+  });
+}
+
 function openFeePaymentModal(feeId) {
   const item = globalFeeLedger.find(f => f.id === feeId);
   if (!item) return;
@@ -1979,42 +2080,52 @@ function openFeePaymentModal(feeId) {
   document.getElementById('payStudentClassRoll').innerText = `Class: ${item.classId} | Roll #${item.rollNo || '-'}`;
   document.getElementById('payCurrentBalance').innerText = `PKR ${Number(item.balanceDue).toLocaleString()}`;
 
-  // Prefill pay amount with balance due (or net fee if zero)
-  const defaultPay = item.balanceDue > 0 ? item.balanceDue : item.netFee;
-  document.getElementById('payAmountInput').value = defaultPay;
-  document.getElementById('payNotesInput').value = '';
-  document.getElementById('payMethodInput').value = 'Cash';
+  const totalFee = item.netFee > 0 ? item.netFee : (item.baseFee > 0 ? item.baseFee : 3000);
+  document.getElementById('payTotalAmountInput').value = totalFee;
+
+  const currentStatus = item.status === 'Paid' ? 'Paid' : (item.status === 'Partial' ? 'Partial' : 'Unpaid');
+  setFeeModalStatusUI(currentStatus, totalFee, item.paidAmount);
+
+  document.getElementById('payNotesInput').value = item.notes || '';
+  document.getElementById('payMethodInput').value = item.paymentMethod || 'Cash';
 
   openModal('feePaymentModal');
 }
 
 async function handleSubmitFeePayment(event) {
   event.preventDefault();
-  const feeId = parseInt(document.getElementById('payFeeId').value, 10);
-  const paidAmount = parseFloat(document.getElementById('payAmountInput').value);
+  const feeId = document.getElementById('payFeeId').value;
+  const totalAmount = parseFloat(document.getElementById('payTotalAmountInput').value) || 0;
+  const paidAmount = parseFloat(document.getElementById('payAmountInput').value) || 0;
   const paymentMethod = document.getElementById('payMethodInput').value;
   const notes = document.getElementById('payNotesInput').value;
   const sendReceipt = document.getElementById('paySendReceiptWa').checked;
 
-  if (isNaN(paidAmount) || paidAmount <= 0) {
-    alert('Please enter a valid payment amount.');
-    return;
+  let status = 'Unpaid';
+  const selectedRadio = document.querySelector('input[name="feeModalStatus"]:checked');
+  if (selectedRadio) {
+    status = selectedRadio.value;
+  } else {
+    if (paidAmount >= totalAmount && totalAmount > 0) status = 'Paid';
+    else if (paidAmount > 0) status = 'Partial';
   }
 
   const btn = document.getElementById('btnSubmitPayment');
   if (btn) {
     btn.disabled = true;
-    btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Processing...';
+    btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Saving...';
   }
 
   try {
     const gwUrl = await getWaGatewayBase();
-    const res = await fetch(`${API_BASE}/admin/fees/collect`, {
+    const res = await fetch(`${API_BASE}/admin/fees/set-status`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         schoolId: CURRENT_SCHOOL_ID,
         feeId,
+        status,
+        totalAmount,
         paidAmount,
         paymentMethod,
         notes,
@@ -2026,17 +2137,17 @@ async function handleSubmitFeePayment(event) {
     if (data.success) {
       closeModal('feePaymentModal');
       const receiptMsg = data.receiptSent ? ' & WhatsApp receipt sent! ✅' : '';
-      showToast(`Payment of PKR ${paidAmount.toLocaleString()} recorded${receiptMsg}`);
+      showToast(`Fee status saved as ${status} (PKR ${paidAmount.toLocaleString()} paid)${receiptMsg}`);
       loadFeeLedger();
     } else {
-      alert(`Error recording payment: ${data.error}`);
+      alert(`Error updating fee: ${data.error || 'Server error'}`);
     }
   } catch (error) {
     alert(`Network error: ${error.message}`);
   } finally {
     if (btn) {
       btn.disabled = false;
-      btn.innerHTML = '<i class="fa-solid fa-check"></i> Record Payment';
+      btn.innerHTML = '<i class="fa-solid fa-floppy-disk"></i> Save & Update Status';
     }
   }
 }
@@ -2079,7 +2190,7 @@ function applyConcessionReasonPreset() {
 
 async function handleSubmitConcession(event) {
   event.preventDefault();
-  const studentId = parseInt(document.getElementById('concessionStudentId').value, 10);
+  const studentId = document.getElementById('concessionStudentId').value;
   const month = document.getElementById('concessionMonth').value;
   const discountAmount = parseFloat(document.getElementById('concessionAmountInput').value) || 0;
   const preset = document.getElementById('concessionReasonPreset').value;

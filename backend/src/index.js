@@ -50,6 +50,7 @@ const {
   getStudentFeeLedger,
   generateMonthlyFeeLedger,
   recordFeePayment,
+  updateStudentFeeStatus,
   updateStudentConcession
 } = require('./services/store');
 const { getDb, isPostgresConfigured } = require('./db');
@@ -1119,6 +1120,74 @@ Thank you for your timely payment!`;
     });
   } catch (error) {
     console.error('Error recording fee payment:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Explicitly set fee status (Paid, Partial, Unpaid) and custom payment details
+app.post('/api/admin/fees/set-status', async (req, res) => {
+  try {
+    const {
+      schoolId = 'unique_scholars',
+      feeId,
+      status,
+      totalAmount,
+      paidAmount,
+      paymentMethod = 'Cash',
+      notes = '',
+      sendReceipt = false,
+      gatewayUrl
+    } = req.body;
+
+    if (!feeId) return res.status(400).json({ success: false, error: 'feeId is required' });
+    if (!status) return res.status(400).json({ success: false, error: 'status is required (Paid, Partial, or Unpaid)' });
+
+    const updated = await updateStudentFeeStatus(schoolId, feeId, {
+      status,
+      totalAmount: totalAmount !== undefined ? Number(totalAmount) : undefined,
+      paidAmount: paidAmount !== undefined ? Number(paidAmount) : undefined,
+      paymentMethod,
+      notes
+    });
+
+    if (!updated.success && updated.error) {
+      return res.status(400).json(updated);
+    }
+
+    let receiptSent = false;
+    if (sendReceipt && (status === 'Paid' || status === 'Partial') && updated.parentPhone) {
+      const receiptNo = `USHS-${String(updated.id).slice(-6)}`;
+      const dateStr = new Date().toLocaleDateString('en-PK', { day: '2-digit', month: 'short', year: 'numeric' });
+      const receiptMsg = 
+`🎓 *UNIQUE SCHOLARS HIGH SCHOOL*
+*Official Fee Payment Receipt*
+-----------------------------------
+Receipt No: *${receiptNo}*
+Student: *${updated.studentName}* (Roll #${updated.rollNo || '-'})
+Class: *${updated.classId}*
+Billing Month: *${updated.month}*
+
+📊 Total Fee: PKR ${Number(updated.netFee).toLocaleString()}
+💵 Amount Paid: *PKR ${Number(updated.paidAmount).toLocaleString()}*
+⚠️ Balance Remaining: *PKR ${Number(updated.balanceDue).toLocaleString()}*
+Payment Status: *${updated.status.toUpperCase()}*
+Payment Method: ${paymentMethod}
+📅 Date: ${dateStr}
+-----------------------------------
+Thank you!`;
+
+      try {
+        const waRes = await sendWhatsAppMessage(updated.parentPhone, receiptMsg, schoolId, gatewayUrl);
+        receiptSent = waRes.success;
+      } catch (waErr) {
+        console.warn('Receipt WhatsApp error:', waErr.message);
+      }
+    }
+
+    if (io) io.emit('fees_updated', { schoolId, fee: updated });
+    res.json({ success: true, fee: updated, receiptSent });
+  } catch (error) {
+    console.error('Error setting fee status:', error);
     res.status(500).json({ success: false, error: error.message });
   }
 });

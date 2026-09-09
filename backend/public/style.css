@@ -933,6 +933,80 @@ body {
   border: 1px solid rgba(239, 68, 68, 0.4);
 }
 
+.fee-status-select {
+  padding: 6px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  outline: none;
+  transition: all 0.2s ease;
+  border: 1px solid transparent;
+}
+.fee-status-select.fee-status-paid {
+  background: rgba(16, 185, 129, 0.18);
+  color: #34d399;
+  border-color: rgba(16, 185, 129, 0.45);
+}
+.fee-status-select.fee-status-partial {
+  background: rgba(245, 158, 11, 0.18);
+  color: #fbbf24;
+  border-color: rgba(245, 158, 11, 0.45);
+}
+.fee-status-select.fee-status-unpaid {
+  background: rgba(239, 68, 68, 0.18);
+  color: #f87171;
+  border-color: rgba(239, 68, 68, 0.45);
+}
+.fee-status-select option {
+  background: #1e293b;
+  color: #f8fafc;
+}
+
+.fee-status-toggle-group {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+.fee-status-btn {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 10px 8px;
+  border-radius: 8px;
+  border: 2px solid var(--border-color);
+  background: rgba(30, 41, 59, 0.6);
+  cursor: pointer;
+  font-weight: 700;
+  font-size: 13px;
+  transition: all 0.2s ease;
+  color: var(--text-muted);
+  user-select: none;
+}
+.fee-status-btn input[type="radio"] {
+  display: none;
+}
+.fee-status-btn:hover {
+  background: rgba(51, 65, 85, 0.6);
+}
+.fee-status-btn.active.status-btn-paid {
+  background: rgba(16, 185, 129, 0.25);
+  border-color: #10b981;
+  color: #34d399;
+}
+.fee-status-btn.active.status-btn-partial {
+  background: rgba(245, 158, 11, 0.25);
+  border-color: #f59e0b;
+  color: #fbbf24;
+}
+.fee-status-btn.active.status-btn-unpaid {
+  background: rgba(239, 68, 68, 0.25);
+  border-color: #ef4444;
+  color: #f87171;
+}
+
 .fees-subtab {
   display: none;
 }

@@ -940,13 +940,13 @@
     </div>
   </div>
 
-  <!-- MODAL: RECORD FEE PAYMENT -->
+  <!-- MODAL: RECORD FEE PAYMENT / SET STATUS -->
   <div class="modal" id="feePaymentModal">
-    <div class="modal-dialog" style="max-width: 540px;">
+    <div class="modal-dialog" style="max-width: 560px;">
       <div class="modal-header">
         <div>
-          <h3><i class="fa-solid fa-cash-register"></i> Collect Student Tuition Fee</h3>
-          <p id="feeModalStudentSub" class="text-muted" style="font-size: 13px; margin-top: 2px;">Record collection & generate WhatsApp receipt</p>
+          <h3><i class="fa-solid fa-file-invoice-dollar"></i> Set Fee & Payment Status</h3>
+          <p id="feeModalStudentSub" class="text-muted" style="font-size: 13px; margin-top: 2px;">Set status to Paid, Partial, or Unpaid and record payments</p>
         </div>
         <button class="modal-close" onclick="closeModal('feePaymentModal')">&times;</button>
       </div>
@@ -966,10 +966,50 @@
           </div>
         </div>
 
+        <!-- PAYMENT STATUS TOGGLES (Paid / Partial / Unpaid) -->
+        <div class="form-group" style="margin-bottom: 16px;">
+          <label style="font-size: 12px; font-weight: 700; text-transform: uppercase; color: var(--text-muted); display: block; margin-bottom: 8px;">
+            Select Payment Status *
+          </label>
+          <div class="fee-status-toggle-group">
+            <label class="fee-status-btn status-btn-paid" id="btnRadioStatusPaid" onclick="onFeeModalStatusChange('Paid')">
+              <input type="radio" name="feeModalStatus" value="Paid" id="radioPaid">
+              <i class="fa-solid fa-circle-check"></i> Paid (Full)
+            </label>
+            <label class="fee-status-btn status-btn-partial" id="btnRadioStatusPartial" onclick="onFeeModalStatusChange('Partial')">
+              <input type="radio" name="feeModalStatus" value="Partial" id="radioPartial">
+              <i class="fa-solid fa-adjust"></i> Partial
+            </label>
+            <label class="fee-status-btn status-btn-unpaid" id="btnRadioStatusUnpaid" onclick="onFeeModalStatusChange('Unpaid')">
+              <input type="radio" name="feeModalStatus" value="Unpaid" id="radioUnpaid">
+              <i class="fa-solid fa-circle-xmark"></i> Unpaid
+            </label>
+          </div>
+        </div>
+
+        <!-- AMOUNTS ROW -->
         <div class="form-row">
           <div class="form-group" style="flex: 1;">
-            <label>Amount Paying Now (PKR) *</label>
-            <input type="number" id="payAmountInput" min="1" step="1" required style="font-size: 16px; font-weight: 700; color: #10b981;">
+            <label>Total Fee Amount (PKR) *</label>
+            <input type="number" id="payTotalAmountInput" min="0" step="50" required
+              oninput="onFeeModalAmountChange()" style="font-size: 15px; font-weight: 700; color: #38bdf8;">
+            <small class="text-muted">Net fee billed for this month</small>
+          </div>
+          <div class="form-group" style="flex: 1;">
+            <label>Amount Paid (PKR) *</label>
+            <input type="number" id="payAmountInput" min="0" step="50" required
+              oninput="onFeeModalAmountChange()" style="font-size: 15px; font-weight: 700; color: #10b981;">
+            <small class="text-muted">Total collected from parent</small>
+          </div>
+        </div>
+
+        <!-- REMAINING BALANCE & METHOD -->
+        <div class="form-row" style="margin-top: 4px;">
+          <div class="form-group" style="flex: 1;">
+            <label>Remaining Balance (PKR)</label>
+            <div id="payRemainingBalancePreview" style="padding: 10px 14px; background: rgba(30, 41, 59, 0.6); border: 1px solid var(--border-color); border-radius: var(--radius-sm); font-size: 15px; font-weight: 800; color: #f59e0b;">
+              PKR 0
+            </div>
           </div>
           <div class="form-group" style="flex: 1;">
             <label>Payment Method *</label>
@@ -985,20 +1025,20 @@
 
         <div class="form-group">
           <label>Notes / Transaction Reference (Optional)</label>
-          <input type="text" id="payNotesInput" placeholder="e.g. Trx ID, Receipt #1042, Paid by Father">
+          <input type="text" id="payNotesInput" placeholder="e.g. Paid in full, Trx #1024, Father requested partial">
         </div>
 
         <div class="form-group" style="background: rgba(16, 185, 129, 0.08); border: 1px solid rgba(16, 185, 129, 0.25); border-radius: var(--radius-sm); padding: 10px 14px; display: flex; align-items: center; gap: 10px; margin-top: 10px;">
           <input type="checkbox" id="paySendReceiptWa" checked style="width: 18px; height: 18px; accent-color: #10b981; cursor: pointer;">
           <label for="paySendReceiptWa" style="margin: 0; font-size: 13px; font-weight: 600; cursor: pointer; color: #34d399;">
-            <i class="fa-brands fa-whatsapp"></i> Send Instant Official WhatsApp Receipt to Parent
+            <i class="fa-brands fa-whatsapp"></i> Send WhatsApp Receipt / Status Notice to Parent
           </label>
         </div>
 
         <div class="modal-actions" style="margin-top: 20px;">
           <button type="button" class="btn btn-secondary" onclick="closeModal('feePaymentModal')">Cancel</button>
-          <button type="submit" class="btn btn-success" id="btnSubmitPayment">
-            <i class="fa-solid fa-check"></i> Record Payment
+          <button type="submit" class="btn btn-primary" id="btnSubmitPayment">
+            <i class="fa-solid fa-floppy-disk"></i> Save & Update Status
           </button>
         </div>
       </form>
