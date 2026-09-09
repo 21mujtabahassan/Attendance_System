@@ -52,6 +52,7 @@ const {
   recordFeePayment,
   updateStudentConcession
 } = require('./services/store');
+const { getDb, isPostgresConfigured } = require('./db');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -360,38 +361,82 @@ app.delete('/api/admin/classes/:classId', async (req, res) => {
   res.json({ success: true, message: 'Class deleted successfully.' });
 });
 
+app.get('/api/system/status', async (req, res) => {
+  const isPg = isPostgresConfigured();
+  let dbConnected = false;
+  let dbError = null;
+  if (isPg) {
+    try {
+      const db = getDb();
+      if (db) {
+        await db.raw('SELECT 1 as ping');
+        dbConnected = true;
+      }
+    } catch (e) {
+      dbError = e.message;
+    }
+  }
+  res.json({
+    success: true,
+    configured: isPg,
+    database: isPg ? 'PostgreSQL (Neon Cloud)' : 'Local JSON Fallback',
+    connected: isPg ? dbConnected : true,
+    error: dbError
+  });
+});
+
 app.get('/api/schools/:schoolId/students', async (req, res) => {
-  const { schoolId } = req.params;
-  const classId = req.query.class;
-  const students = await getStudents(schoolId, classId);
-  res.json({ students });
+  try {
+    const { schoolId } = req.params;
+    const classId = req.query.class;
+    const students = await getStudents(schoolId, classId);
+    res.json({ success: true, students });
+  } catch (err) {
+    console.error('Error getting students:', err);
+    res.status(500).json({ success: false, error: err.message, students: [] });
+  }
 });
 
 app.post('/api/schools/:schoolId/students', async (req, res) => {
-  const { schoolId } = req.params;
-  const { name, classId, section, parentPhone, parentEmail } = req.body;
-  if (!name || !classId) {
-    return res.status(400).json({ error: 'Student name and classId are required.' });
+  try {
+    const { schoolId } = req.params;
+    const { name, classId, section, parentPhone, parentEmail } = req.body;
+    if (!name) {
+      return res.status(400).json({ success: false, error: 'Student name is required.' });
+    }
+    const student = await addStudent(schoolId, { name, classId, section, parentPhone, parentEmail });
+    if (io) io.emit('students_updated', { action: 'create', schoolId, student });
+    res.json({ success: true, student });
+  } catch (err) {
+    console.error('Error adding student:', err);
+    res.status(500).json({ success: false, error: err.message || 'Failed to add student.' });
   }
-  const student = await addStudent(schoolId, { name, classId, section, parentPhone, parentEmail });
-  if (io) io.emit('students_updated', { action: 'create', schoolId, student });
-  res.json({ success: true, student });
 });
 
 app.put('/api/admin/students/:studentId', async (req, res) => {
-  const { schoolId = 'unique_scholars' } = req.query;
-  const { studentId } = req.params;
-  const updated = await updateStudent(schoolId, studentId, req.body);
-  if (updated && io) io.emit('students_updated', { action: 'update', schoolId, student: updated });
-  res.status(updated ? 200 : 400).json({ success: !!updated, student: updated });
+  try {
+    const { schoolId = 'unique_scholars' } = req.query;
+    const { studentId } = req.params;
+    const updated = await updateStudent(schoolId, studentId, req.body);
+    if (updated && io) io.emit('students_updated', { action: 'update', schoolId, student: updated });
+    res.status(updated ? 200 : 400).json({ success: !!updated, student: updated });
+  } catch (err) {
+    console.error('Error updating student:', err);
+    res.status(500).json({ success: false, error: err.message || 'Failed to update student.' });
+  }
 });
 
 app.delete('/api/admin/students/:studentId', async (req, res) => {
-  const { schoolId = 'unique_scholars' } = req.query;
-  const { studentId } = req.params;
-  await deleteStudent(schoolId, studentId);
-  if (io) io.emit('students_updated', { action: 'delete', schoolId, studentId });
-  res.json({ success: true, message: 'Student deleted successfully.' });
+  try {
+    const { schoolId = 'unique_scholars' } = req.query;
+    const { studentId } = req.params;
+    const deleted = await deleteStudent(schoolId, studentId);
+    if (io) io.emit('students_updated', { action: 'delete', schoolId, studentId });
+    res.json({ success: true, deleted, message: 'Student permanently deleted from database.' });
+  } catch (err) {
+    console.error('Error deleting student:', err);
+    res.status(500).json({ success: false, error: err.message || 'Failed to delete student.' });
+  }
 });
 
 // -------------------------------------------------------------

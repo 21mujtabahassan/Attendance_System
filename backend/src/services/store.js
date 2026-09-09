@@ -210,23 +210,37 @@ async function getStudents(schoolId = 'unique_scholars', classId = null) {
 }
 
 async function addStudent(schoolId = 'unique_scholars', studentData) {
+  if (!studentData.name) {
+    throw new Error('Student name is required.');
+  }
+
+  const id = `STU-${Date.now().toString().slice(-6)}`;
+  const secName = studentData.section || 'Section A';
+
   if (isPostgresConfigured()) {
     const db = getDb();
-    const id = `STU-${Date.now().toString().slice(-6)}`;
-    const secName = studentData.section || 'Section A';
 
     // Resolve class ID from either classId or className
-    const cls = await db('classes')
-      .where({ school_id: schoolId })
-      .andWhere(function() {
-        this.where('id', studentData.classId).orWhere('name', studentData.classId);
-      })
-      .first();
+    let cls = null;
+    if (studentData.classId) {
+      cls = await db('classes')
+        .where({ school_id: schoolId })
+        .andWhere(function() {
+          this.where('id', studentData.classId).orWhere('name', studentData.classId);
+        })
+        .first();
+    }
+    if (!cls) {
+      cls = await db('classes').where({ school_id: schoolId }).first();
+    }
+    if (!cls) {
+      throw new Error('No valid class found in school to enroll student.');
+    }
 
-    const resolvedClassId = cls ? cls.id : studentData.classId;
+    const resolvedClassId = cls.id;
 
     let secRow = await db('class_sections').where({ class_id: resolvedClassId, section_name: secName }).first();
-    if (!secRow && cls) {
+    if (!secRow) {
       try {
         await db('class_sections').insert({
           class_id: resolvedClassId,
@@ -242,21 +256,43 @@ async function addStudent(schoolId = 'unique_scholars', studentData) {
       class_id: resolvedClassId,
       section_id: secRow?.id || null,
       section_name: secName,
-      name: studentData.name,
+      name: studentData.name.trim(),
       parent_phone: studentData.parentPhone || '',
       parent_email: studentData.parentEmail || '',
       is_active: true
     });
 
-    return { id, schoolId, ...studentData, classId: resolvedClassId, section: secName };
+    const newStudent = {
+      id,
+      schoolId,
+      name: studentData.name.trim(),
+      classId: resolvedClassId,
+      section: secName,
+      parentPhone: studentData.parentPhone || '',
+      parentEmail: studentData.parentEmail || ''
+    };
+
+    // Mirror to JSON file for offline/fallback consistency
+    try {
+      const jDb = readJsonDb();
+      if (!jDb.students) jDb.students = [];
+      jDb.students.push(newStudent);
+      writeJsonDb(jDb);
+    } catch (e) {}
+
+    return newStudent;
   }
 
   const db = readJsonDb();
   if (!db.students) db.students = [];
   const newStudent = {
-    id: `STU-${Date.now().toString().slice(-6)}`,
+    id,
     schoolId,
-    ...studentData
+    name: studentData.name.trim(),
+    classId: studentData.classId || 'Class-Play',
+    section: secName,
+    parentPhone: studentData.parentPhone || '',
+    parentEmail: studentData.parentEmail || ''
   };
   db.students.push(newStudent);
   writeJsonDb(db);
@@ -267,7 +303,7 @@ async function updateStudent(schoolId = 'unique_scholars', studentId, updates) {
   if (isPostgresConfigured()) {
     const db = getDb();
     const payload = {};
-    if (updates.name !== undefined) payload.name = updates.name;
+    if (updates.name !== undefined) payload.name = updates.name.trim();
     if (updates.classId !== undefined) {
       const cls = await db('classes')
         .where({ school_id: schoolId })
@@ -285,7 +321,8 @@ async function updateStudent(schoolId = 'unique_scholars', studentId, updates) {
     await db('students').where({ school_id: schoolId, id: studentId }).update(payload);
     const updated = await db('students').where({ school_id: schoolId, id: studentId }).first();
     if (!updated) return null;
-    return {
+
+    const result = {
       id: updated.id,
       schoolId: updated.school_id,
       classId: updated.class_id,
@@ -294,6 +331,18 @@ async function updateStudent(schoolId = 'unique_scholars', studentId, updates) {
       parentPhone: updated.parent_phone || '',
       parentEmail: updated.parent_email || ''
     };
+
+    // Mirror to JSON
+    try {
+      const jDb = readJsonDb();
+      const idx = (jDb.students || []).findIndex(s => s.id === studentId);
+      if (idx >= 0) {
+        jDb.students[idx] = { ...jDb.students[idx], ...result };
+        writeJsonDb(jDb);
+      }
+    } catch (e) {}
+
+    return result;
   }
 
   const db = readJsonDb();
@@ -309,11 +358,23 @@ async function updateStudent(schoolId = 'unique_scholars', studentId, updates) {
 async function deleteStudent(schoolId = 'unique_scholars', studentId) {
   if (isPostgresConfigured()) {
     const db = getDb();
-    // Cleanly delete child records first to satisfy foreign keys
+    // Cleanly unlink/delete child records first to satisfy foreign keys
     await db('attendance_logs').where({ school_id: schoolId, student_id: studentId }).del();
     await db('student_results').where({ school_id: schoolId, student_id: studentId }).del();
     await db('student_fee_dues').where({ school_id: schoolId, student_id: studentId }).del();
+    await db('dispatch_messages').where({ student_id: studentId }).update({ student_id: null });
     const deleted = await db('students').where({ school_id: schoolId, id: studentId }).del();
+
+    // Mirror delete to JSON
+    try {
+      const jDb = readJsonDb();
+      const idx = (jDb.students || []).findIndex(s => s.id === studentId);
+      if (idx >= 0) {
+        jDb.students.splice(idx, 1);
+        writeJsonDb(jDb);
+      }
+    } catch (e) {}
+
     return deleted > 0;
   }
 

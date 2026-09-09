@@ -21,17 +21,32 @@ document.addEventListener('DOMContentLoaded', () => {
   loadInitialData();
 });
 
-function initServerBadge() {
+async function initServerBadge() {
   const badge = document.getElementById('serverBadgeText');
   const dot = document.getElementById('serverStatusDot');
   if (!badge) return;
   const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' || window.location.hostname.startsWith('192.168.');
-  if (isLocal) {
-    badge.innerText = `Local Server (${window.location.host})`;
-    if (dot) dot.style.background = '#10b981';
-  } else {
-    badge.innerText = `Cloud Server (${window.location.host})`;
-    if (dot) dot.style.background = '#38bdf8';
+  
+  try {
+    const res = await fetch(`${API_BASE}/system/status`);
+    const data = await res.json();
+    const envLabel = isLocal ? 'Local Server' : 'Cloud Server';
+    if (data.configured && data.connected) {
+      badge.innerText = `${envLabel} • PostgreSQL Connected 🟢`;
+      if (dot) dot.style.background = '#10b981';
+      badge.title = `Database: ${data.database}`;
+    } else {
+      badge.innerText = `${envLabel} • Local Fallback`;
+      if (dot) dot.style.background = '#f59e0b';
+    }
+  } catch (e) {
+    if (isLocal) {
+      badge.innerText = `Local Server (${window.location.host})`;
+      if (dot) dot.style.background = '#10b981';
+    } else {
+      badge.innerText = `Cloud Server (${window.location.host})`;
+      if (dot) dot.style.background = '#38bdf8';
+    }
   }
 }
 
@@ -1004,11 +1019,26 @@ function filterStudentTable() {
 
 async function handleCreateStudent(e) {
   e.preventDefault();
-  const name = document.getElementById('studentNameInput').value;
-  const classId = document.getElementById('studentClassSelect').value;
-  const section = document.getElementById('studentSectionSelect').value;
-  const parentPhone = document.getElementById('parentPhoneInput').value;
-  const parentEmail = document.getElementById('parentEmailInput').value;
+  const nameInput = document.getElementById('studentNameInput');
+  const classSelect = document.getElementById('studentClassSelect');
+  const sectionSelect = document.getElementById('studentSectionSelect');
+  const phoneInput = document.getElementById('parentPhoneInput');
+  const emailInput = document.getElementById('parentEmailInput');
+
+  const name = (nameInput?.value || '').trim();
+  const classId = classSelect?.value;
+  const section = sectionSelect?.value || 'Section A';
+  const parentPhone = (phoneInput?.value || '').trim();
+  const parentEmail = (emailInput?.value || '').trim();
+
+  if (!name) {
+    showToast('Please enter the student\'s full name.');
+    return;
+  }
+  if (!classId) {
+    showToast('Please select a class for this student.');
+    return;
+  }
 
   try {
     const res = await fetch(`${API_BASE}/schools/${CURRENT_SCHOOL_ID}/students`, {
@@ -1017,12 +1047,14 @@ async function handleCreateStudent(e) {
       body: JSON.stringify({ name, classId, section, parentPhone, parentEmail })
     });
     const data = await res.json();
-    if (data.success) {
-      showToast('Student added successfully! 🎓');
+    if (data.success && data.student) {
+      showToast(`Student "${name}" added successfully to database! 🎓`);
       closeModal('addStudentModal');
       document.getElementById('addStudentForm').reset();
       await fetchStudents();
       filterStudentTable();
+      if (typeof loadOverviewData === 'function') loadOverviewData();
+      if (typeof loadFeeLedger === 'function') loadFeeLedger();
     } else {
       showToast(data.error || 'Failed to create student.');
     }
@@ -1076,12 +1108,19 @@ async function handleEditStudentSubmit(e) {
 }
 
 async function handleDeleteStudent(studentId) {
-  if (!confirm('Are you sure you want to permanently delete this student record?')) return;
+  const stu = globalStudents.find(s => s.id === studentId);
+  const displayName = stu ? stu.name : studentId;
+  if (!confirm(`Are you sure you want to permanently delete "${displayName}" from the database?\n\nThis will also remove related exam results, attendance logs, and fee ledgers permanently.`)) return;
+
   try {
     const res = await fetch(`${API_BASE}/admin/students/${studentId}?schoolId=${CURRENT_SCHOOL_ID}`, { method: 'DELETE' });
     const data = await res.json();
     if (data.success) {
-      showToast('Student permanently deleted from database. 🗑️');
+      showToast(`Student "${displayName}" permanently deleted from database. 🗑️`);
+      // Optimistically update table immediately
+      globalStudents = globalStudents.filter(s => s.id !== studentId);
+      filterStudentTable();
+      // Re-fetch from DB to verify consistency
       await fetchStudents();
       filterStudentTable();
       if (typeof loadOverviewData === 'function') loadOverviewData();
@@ -2095,6 +2134,13 @@ async function handleDispatchBulkReminders() {
 function openModal(modalId) {
   const el = document.getElementById(modalId);
   if (el) el.classList.add('active');
+
+  if (modalId === 'addStudentModal') {
+    populateClassDropdowns();
+    populateSectionDropdown('studentClassSelect', 'studentSectionSelect');
+    const nameInput = document.getElementById('studentNameInput');
+    if (nameInput) nameInput.focus();
+  }
 }
 
 function closeModal(modalId) {

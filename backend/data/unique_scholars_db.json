@@ -64,57 +64,39 @@
   "students": [
     {
       "id": "STU-101",
+      "schoolId": "unique_scholars",
       "name": "Muhammad Ali",
       "classId": "Class-9",
       "section": "Section A",
-      "schoolId": "unique_scholars",
       "parentPhone": "03353838306",
       "parentEmail": "parent.ali@gmail.com"
     },
     {
       "id": "STU-102",
+      "schoolId": "unique_scholars",
       "name": "Fatima Zahra",
       "classId": "Class-9",
       "section": "Section A",
-      "schoolId": "unique_scholars",
       "parentPhone": "03314751995",
       "parentEmail": "parent.fatima@gmail.com"
     },
     {
       "id": "STU-103",
+      "schoolId": "unique_scholars",
       "name": "Usman Ahmed",
       "classId": "Class-9",
       "section": "Section B",
-      "schoolId": "unique_scholars",
       "parentPhone": "03314751995",
       "parentEmail": "parent.usman@gmail.com"
     },
     {
       "id": "STU-104",
+      "schoolId": "unique_scholars",
       "name": "Zainab Bibi",
       "classId": "Class-10",
       "section": "Section A",
-      "schoolId": "unique_scholars",
       "parentPhone": "03314751998",
       "parentEmail": "parent.zainab@gmail.com"
-    },
-    {
-      "id": "STU-105",
-      "name": "Hamza Khan",
-      "classId": "Class-10",
-      "section": "Section B",
-      "schoolId": "unique_scholars",
-      "parentPhone": "03314751998",
-      "parentEmail": "parent.hamza@gmail.com"
-    },
-    {
-      "id": "STU-106",
-      "name": "Muhammad Ameer Hadi",
-      "classId": "Class-Play",
-      "section": "Section A",
-      "schoolId": "unique_scholars",
-      "parentPhone": "03334751998",
-      "parentEmail": "parent.hadi@gmail.com"
     }
   ],
   "attendanceLogs": [
