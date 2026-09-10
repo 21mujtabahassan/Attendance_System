@@ -101,7 +101,7 @@ function startCloudDispatchWorker() {
         if (Array.isArray(localBatches) && localBatches.length > 0) {
           batchesToProcess = localBatches;
         }
-      } catch (dbErr) {}
+      } catch (dbErr) { }
 
       // 2. Also poll Vercel cloud endpoint in case Vercel ran on ephemeral JSON fallback
       if (batchesToProcess.length === 0) {
@@ -118,7 +118,7 @@ function startCloudDispatchWorker() {
               batchesToProcess = data.batches;
             }
           }
-        } catch (fetchErr) {}
+        } catch (fetchErr) { }
       }
 
       if (batchesToProcess.length === 0) {
@@ -143,7 +143,7 @@ function startCloudDispatchWorker() {
         // Mark complete locally in database
         try {
           await markPendingDispatchComplete(batch.schoolId || 'unique_scholars', batch.id, deliveryResults);
-        } catch (e) {}
+        } catch (e) { }
 
         // Notify cloud endpoint if applicable
         try {
@@ -152,7 +152,7 @@ function startCloudDispatchWorker() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ schoolId: batch.schoolId || 'unique_scholars', batchId: batch.id, results: deliveryResults })
           });
-        } catch (e) {}
+        } catch (e) { }
 
         console.log(`✅ [Cloud Sync Worker] Successfully telecasted batch ${batch.id} (${deliveryResults.filter(r => r.success).length}/${batch.messages.length} sent).`);
       }
@@ -480,8 +480,8 @@ app.post('/api/attendance/submit', async (req, res) => {
     const pendingBatch = [];
 
     for (const item of absentStudentsToAlert) {
-      const message = 
-`Assalam-o-Alaikum! 📢
+      const message =
+        `Assalam-o-Alaikum! 📢
 ${school.name} Attendance Alert
 
 Student Name: ${item.name}
@@ -661,8 +661,8 @@ app.post('/api/admin/results/submit', async (req, res) => {
 
       const reportLink = `${baseUrl}/api/admin/results/pdf/${item.id}`;
 
-      const message = 
-`Assalam-o-Alaikum! 🎓
+      const message =
+        `Assalam-o-Alaikum! 🎓
 ${school.name} - Official Result Announcement
 
 Student Name: ${item.studentName}
@@ -821,8 +821,8 @@ app.post('/api/admin/results/dispatch-individual', async (req, res) => {
       }
     }
 
-    const message = 
-`🎓 *${school.name.toUpperCase()}*
+    const message =
+      `🎓 *${school.name.toUpperCase()}*
 *Official Academic Result Card*
 -----------------------------------
 Assalam-o-Alaikum!
@@ -1634,8 +1634,8 @@ app.post('/api/admin/fees/collect', async (req, res) => {
     if (sendReceipt && updatedFee.parentPhone) {
       const receiptNo = `USHS-${String(updatedFee.id).slice(-6)}`;
       const dateStr = new Date().toLocaleDateString('en-PK', { day: '2-digit', month: 'short', year: 'numeric' });
-      const receiptMsg = 
-`🎓 *UNIQUE SCHOLARS HIGH SCHOOL*
+      const receiptMsg =
+        `🎓 *UNIQUE SCHOLARS HIGH SCHOOL*
 *Official Fee Payment Receipt*
 -----------------------------------
 Receipt No: *${receiptNo}*
@@ -1709,8 +1709,8 @@ app.post('/api/admin/fees/set-status', async (req, res) => {
     if (sendReceipt && (status === 'Paid' || status === 'Partial') && updated.parentPhone) {
       const receiptNo = `USHS-${String(updated.id).slice(-6)}`;
       const dateStr = new Date().toLocaleDateString('en-PK', { day: '2-digit', month: 'short', year: 'numeric' });
-      const receiptMsg = 
-`🎓 *UNIQUE SCHOLARS HIGH SCHOOL*
+      const receiptMsg =
+        `🎓 *UNIQUE SCHOLARS HIGH SCHOOL*
 *Official Fee Payment Receipt*
 -----------------------------------
 Receipt No: *${receiptNo}*
@@ -1764,7 +1764,7 @@ app.post('/api/admin/fees/concession', async (req, res) => {
 app.post('/api/admin/fees/dispatch-reminder', async (req, res) => {
   try {
     const { schoolId = 'unique_scholars', feeId, feeIds, month, classId, gatewayUrl } = req.body;
-    
+
     // Fetch ledger records to send reminders for
     const { ledger } = await getStudentFeeLedger(schoolId, month, classId);
     let targetDues = [];
@@ -1786,7 +1786,7 @@ app.post('/api/admin/fees/dispatch-reminder', async (req, res) => {
       if (!item.parentPhone) continue;
 
       const reminderMsg =
-`🎓 *UNIQUE SCHOLARS HIGH SCHOOL*
+        `🎓 *UNIQUE SCHOLARS HIGH SCHOOL*
 *Monthly Tuition Fee Reminder*
 -----------------------------------
 Respected Parents of *${item.studentName}* (Class ${item.classId}, Roll #${item.rollNo || '-'}),
