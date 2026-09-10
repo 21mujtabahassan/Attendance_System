@@ -725,7 +725,7 @@ ${school.name}`;
     });
   } catch (error) {
     console.error('Error submitting final results:', error);
-    res.status(500).json({ success: false, error: 'Failed to submit final results.' });
+    res.status(500).json({ success: false, error: error.message || 'Failed to submit final results.' });
   }
 });
 

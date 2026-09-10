@@ -1018,8 +1018,11 @@ async function saveDraftResults(schoolId = 'unique_scholars', payload) {
 
     await db.transaction(async trx => {
       for (const item of results) {
-        const resId = `RES-${item.studentId}-${termId}`;
-        const existing = await trx('student_results').where({ id: resId }).first();
+        const existing = await trx('student_results')
+          .where({ school_id: schoolId, term_id: termId, student_id: item.studentId })
+          .first();
+
+        const resId = existing ? existing.id : `RES-${item.studentId}-${termId}`;
 
         // Business rule: Once FINALIZED, do not overwrite with draft
         if (existing && existing.state === 'FINALIZED') {
@@ -1105,8 +1108,9 @@ async function saveDraftResults(schoolId = 'unique_scholars', payload) {
       parentPhone: item.parentPhone, marks: item.marks, totalObtained, totalMax, percentage, grade, passStatus,
       remarks: item.remarks || '', state: 'DRAFT'
     };
-    const idx = db.studentResults.findIndex(r => r.id === resId);
+    const idx = db.studentResults.findIndex(r => r.id === resId || (r.termId === termId && r.studentId === item.studentId));
     if (idx >= 0) {
+      record.id = db.studentResults[idx].id;
       if (db.studentResults[idx].state !== 'FINALIZED') db.studentResults[idx] = record;
     } else {
       db.studentResults.push(record);
@@ -1141,7 +1145,11 @@ async function submitFinalResults(schoolId = 'unique_scholars', payload) {
 
     await db.transaction(async trx => {
       for (const item of studentList) {
-        const resId = `RES-${item.studentId}-${termId}`;
+        const existing = await trx('student_results')
+          .where({ school_id: schoolId, term_id: termId, student_id: item.studentId })
+          .first();
+
+        const resId = existing ? existing.id : `RES-${item.studentId}-${termId}`;
         const { grade, passStatus } = computeGradeAndStatus(item.percentage);
 
         await trx('student_results')
@@ -1211,9 +1219,13 @@ async function submitFinalResults(schoolId = 'unique_scholars', payload) {
       totalMax: item.totalMax, percentage: item.percentage, grade, passStatus, rank: item.rank,
       remarks: item.remarks || 'Result Finalized & Locked.', state: 'FINALIZED', submittedAt: new Date().toISOString()
     };
-    const idx = db.studentResults.findIndex(r => r.id === resId);
-    if (idx >= 0) db.studentResults[idx] = record;
-    else db.studentResults.push(record);
+    const idx = db.studentResults.findIndex(r => r.id === resId || (r.termId === termId && r.studentId === item.studentId));
+    if (idx >= 0) {
+      record.id = db.studentResults[idx].id;
+      db.studentResults[idx] = record;
+    } else {
+      db.studentResults.push(record);
+    }
     finalizedList.push(record);
   });
   writeJsonDb(db);
