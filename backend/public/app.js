@@ -408,7 +408,7 @@ async function loadMarksEntryGrid() {
     subjects.forEach(sub => {
       headersHtml += `<th style="text-align: center;">${sub} (100)</th>`;
     });
-    headersHtml += `<th style="text-align: center;">Total (Max ${subjects.length * 100})</th><th style="text-align: center;">%</th><th style="text-align: center;">Grade</th><th style="text-align: center;">Status</th><th>Remarks</th>`;
+    headersHtml += `<th style="text-align: center;">Total (Max ${subjects.length * 100})</th><th style="text-align: center;">%</th><th style="text-align: center;">Grade</th><th style="text-align: center;">Status</th><th>Remarks</th><th style="text-align: center;">Telecast</th>`;
 
     let rowsHtml = '';
     currentMarksGridData = [];
@@ -464,6 +464,11 @@ async function loadMarksEntryGrid() {
           <td style="text-align: center;" id="rowStatus_${sIdx}">${statusPill}</td>
           <td>
             <input type="text" style="width: 130px; padding: 4px 8px; font-size: 11px;" id="rowRemarks_${sIdx}" value="${existing.remarks || ''}" placeholder="Teacher remarks...">
+          </td>
+          <td style="text-align: center;">
+            <button type="button" class="btn btn-sm btn-whatsapp" onclick="openResultTelecastFromGrid(${sIdx})" title="Telecast Result via WhatsApp">
+              <i class="fa-brands fa-whatsapp"></i> Telecast
+            </button>
           </td>
         </tr>
       `;
@@ -799,6 +804,7 @@ async function loadFinalizedResultsHistory() {
     const res = await fetch(`${API_BASE}/admin/results/marks?schoolId=${CURRENT_SCHOOL_ID}&termId=${termId || ''}&classId=${classId || ''}`);
     const data = await res.json();
     const results = (data.results || []).filter(r => r.state === 'FINALIZED');
+    globalFinalizedResults = results;
 
     if (results.length === 0) {
       tbody.innerHTML = '<tr><td colspan="10" class="text-center text-muted">No finalized academic records found.</td></tr>';
@@ -817,14 +823,306 @@ async function loadFinalizedResultsHistory() {
         <td><strong style="color: #f59e0b;">#${r.rank}</strong></td>
         <td>${r.passStatus === 'PASS' ? '<span class="pass-pill">PASS</span>' : '<span class="fail-pill">FAIL</span>'}</td>
         <td>
-          <a href="/api/admin/results/pdf/${r.id}" target="_blank" class="btn btn-secondary btn-sm" style="text-decoration: none;">
-            📄 View PDF
-          </a>
+          <div style="display: flex; gap: 6px; align-items: center;">
+            <a href="/api/admin/results/pdf/${r.id}" target="_blank" class="btn btn-secondary btn-sm" style="text-decoration: none;" title="View PDF Result Card">
+              📄 PDF
+            </a>
+            <button class="btn btn-sm btn-whatsapp" onclick="openResultTelecastModal('${r.id}')" title="Telecast Result via WhatsApp">
+              <i class="fa-brands fa-whatsapp"></i> Telecast
+            </button>
+          </div>
         </td>
       </tr>
     `).join('');
   } catch (e) {
     console.error('Error loading finalized history:', e);
+  }
+}
+
+// -------------------------------------------------------------
+// INDIVIDUAL ACADEMIC RESULT TELECAST MODAL & DISPATCH
+// -------------------------------------------------------------
+let globalFinalizedResults = [];
+let currentTelecastContext = null;
+
+async function openResultTelecastModal(resultId) {
+  let item = globalFinalizedResults.find(r => r.id === resultId);
+
+  if (!item) {
+    try {
+      const res = await fetch(`${API_BASE}/admin/results/marks?schoolId=${CURRENT_SCHOOL_ID}&resultId=${resultId}`);
+      const data = await res.json();
+      if (data.results && data.results.length > 0) {
+        item = data.results[0];
+      }
+    } catch (e) {
+      console.error('Error fetching result for telecast:', e);
+    }
+  }
+
+  if (!item) {
+    showToast('Could not load academic result details.');
+    return;
+  }
+
+  currentTelecastContext = {
+    resultId: item.id,
+    studentId: item.studentId,
+    studentName: item.studentName,
+    classId: item.classId,
+    termId: item.termId,
+    parentPhone: item.parentPhone,
+    totalObtained: item.totalObtained,
+    totalMax: item.totalMax,
+    percentage: item.percentage,
+    grade: item.grade,
+    passStatus: item.passStatus,
+    rank: item.rank,
+    marks: item.marks || {},
+    remarks: item.remarks || ''
+  };
+
+  populateResultTelecastModal(currentTelecastContext);
+  openModal('resultTelecastModal');
+}
+
+function openResultTelecastFromGrid(sIdx) {
+  if (!currentMarksGridData || !currentMarksGridData[sIdx]) {
+    showToast('Student row data not found.');
+    return;
+  }
+
+  recalculateRowMarks(sIdx);
+  const student = currentMarksGridData[sIdx];
+  const termId = document.getElementById('marksTermSelect')?.value || '';
+  const classId = document.getElementById('marksClassSelect')?.value || '';
+  const termName = document.getElementById('marksTermSelect')?.selectedOptions[0]?.text || termId;
+  const remarks = document.getElementById(`rowRemarks_${sIdx}`)?.value || '';
+
+  let totalObtained = 0;
+  let totalMax = 0;
+  const marksMap = {};
+
+  const rowInputs = document.querySelectorAll(`[data-stu-idx="${sIdx}"]`);
+  rowInputs.forEach(inp => {
+    const sub = inp.getAttribute('data-subject');
+    const val = Number(inp.value || 0);
+    totalObtained += val;
+    totalMax += 100;
+    marksMap[sub] = { obtained: val, total: 100 };
+  });
+
+  const percentage = totalMax > 0 ? Number(((totalObtained / totalMax) * 100).toFixed(1)) : 0;
+  let grade = 'F'; let passStatus = 'FAIL';
+  if (percentage >= 85) { grade = 'A+'; passStatus = 'PASS'; }
+  else if (percentage >= 75) { grade = 'A'; passStatus = 'PASS'; }
+  else if (percentage >= 65) { grade = 'B'; passStatus = 'PASS'; }
+  else if (percentage >= 55) { grade = 'C'; passStatus = 'PASS'; }
+  else if (percentage >= 40) { grade = 'D'; passStatus = 'PASS'; }
+
+  currentTelecastContext = {
+    resultId: `RES-${student.studentId}-${termId}`,
+    studentId: student.studentId,
+    studentName: student.studentName,
+    classId: classId,
+    termId: termId,
+    termName: termName,
+    parentPhone: student.parentPhone,
+    totalObtained,
+    totalMax,
+    percentage,
+    grade,
+    passStatus,
+    rank: '-',
+    marks: marksMap,
+    remarks
+  };
+
+  populateResultTelecastModal(currentTelecastContext);
+  openModal('resultTelecastModal');
+}
+
+function populateResultTelecastModal(ctx) {
+  document.getElementById('telecastResultId').value = ctx.resultId || '';
+  document.getElementById('telecastStudentId').value = ctx.studentId || '';
+  document.getElementById('telecastTermId').value = ctx.termId || '';
+  document.getElementById('telecastClassId').value = ctx.classId || '';
+
+  document.getElementById('telecastStudentName').innerText = ctx.studentName || 'Student';
+  document.getElementById('telecastStudentMeta').innerText = `Class: ${ctx.classId} | ID: ${ctx.studentId} | ${ctx.termName || ctx.termId}`;
+
+  const phoneEl = document.getElementById('telecastParentPhoneDisplay');
+  if (ctx.parentPhone) {
+    phoneEl.innerText = ctx.parentPhone;
+    phoneEl.style.color = '#34d399';
+  } else {
+    phoneEl.innerText = 'No Phone Registered';
+    phoneEl.style.color = '#ef4444';
+  }
+
+  document.getElementById('telecastScoreDisplay').innerText = `${ctx.totalObtained} / ${ctx.totalMax}`;
+
+  const badgeEl = document.getElementById('telecastGradeBadge');
+  const isPass = ctx.passStatus === 'PASS';
+  badgeEl.innerHTML = `<span class="badge ${isPass ? 'badge-success' : 'badge-danger'}" style="font-size: 12px; font-weight: 700;">${ctx.grade} (${ctx.percentage}%) - ${ctx.passStatus}</span>`;
+
+  // PDF link
+  const pdfBtn = document.getElementById('telecastPdfBtn');
+  if (pdfBtn) {
+    pdfBtn.href = `/api/admin/results/pdf/${ctx.resultId}`;
+  }
+
+  // Populate subjects table
+  const tbody = document.getElementById('telecastSubjectsTableBody');
+  if (tbody) {
+    const entries = Object.entries(ctx.marks || {});
+    if (entries.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="4" class="text-center text-muted">No marks configured.</td></tr>';
+    } else {
+      tbody.innerHTML = entries.map(([subName, m]) => {
+        const obt = typeof m === 'object' ? m.obtained : m;
+        const tot = typeof m === 'object' && m.total ? m.total : 100;
+        const subPct = tot > 0 ? (obt / tot) * 100 : 0;
+        let subGrade = 'F';
+        if (subPct >= 85) subGrade = 'A+';
+        else if (subPct >= 75) subGrade = 'A';
+        else if (subPct >= 65) subGrade = 'B';
+        else if (subPct >= 55) subGrade = 'C';
+        else if (subPct >= 40) subGrade = 'D';
+
+        return `
+          <tr>
+            <td><strong>${subName}</strong></td>
+            <td style="text-align: right; color: #94a3b8;">${tot}</td>
+            <td style="text-align: right; font-weight: 700; color: #38bdf8;">${obt}</td>
+            <td style="text-align: center;"><span style="font-weight: 700;">${subGrade}</span></td>
+          </tr>
+        `;
+      }).join('');
+    }
+  }
+
+  document.getElementById('telecastRemarksInput').value = ctx.remarks || '';
+  updateTelecastMessagePreview();
+}
+
+function updateTelecastMessagePreview() {
+  if (!currentTelecastContext) return;
+  const remarks = document.getElementById('telecastRemarksInput')?.value || currentTelecastContext.remarks || 'Result Finalized & Announced.';
+  currentTelecastContext.remarks = remarks;
+
+  let subjectsText = '';
+  const entries = Object.entries(currentTelecastContext.marks || {});
+  if (entries.length > 0) {
+    subjectsText = '\n📋 *Subject Breakdown:*\n' + entries.map(([name, m]) => {
+      const obt = typeof m === 'object' ? m.obtained : m;
+      const tot = typeof m === 'object' && m.total ? m.total : 100;
+      return `• ${name}: ${obt}/${tot}`;
+    }).join('\n') + '\n';
+  }
+
+  const pdfUrl = `${window.location.origin}/api/admin/results/pdf/${currentTelecastContext.resultId}`;
+
+  const preview = 
+`🎓 *UNIQUE SCHOLARS ACADEMY*
+*Official Academic Result Card*
+-----------------------------------
+Assalam-o-Alaikum!
+Respected Parents of *${currentTelecastContext.studentName}*,
+
+The official examination statement of marks for *${currentTelecastContext.termName || currentTelecastContext.termId}* has been generated.
+
+👤 *Student ID:* ${currentTelecastContext.studentId}
+🏫 *Class:* ${currentTelecastContext.classId}
+📅 *Exam Term:* ${currentTelecastContext.termName || currentTelecastContext.termId}
+${subjectsText}
+📊 *Performance Summary:*
+• Total Marks: *${currentTelecastContext.totalObtained} / ${currentTelecastContext.totalMax}*
+• Percentage: *${currentTelecastContext.percentage}%*
+• Final Grade: *${currentTelecastContext.grade}*
+• Result Status: *${currentTelecastContext.passStatus}*
+• Class Position: *#${currentTelecastContext.rank || '-'}*
+
+📝 *Teacher Remarks:* "${remarks}"
+
+📄 *Official Digital Marksheet (PDF):*
+${pdfUrl}
+
+-----------------------------------
+Unique Scholars High School`;
+
+  const previewEl = document.getElementById('telecastMessagePreview');
+  if (previewEl) previewEl.value = preview;
+}
+
+function copyTelecastMessagePreview() {
+  const text = document.getElementById('telecastMessagePreview')?.value;
+  if (!text) return;
+  navigator.clipboard.writeText(text).then(() => {
+    showToast('Message text copied to clipboard! 📋');
+  }).catch(() => {
+    showToast('Failed to copy text.');
+  });
+}
+
+async function handleDispatchResultFromModal() {
+  if (!currentTelecastContext) return;
+
+  if (!currentTelecastContext.parentPhone) {
+    alert('This student does not have a parent WhatsApp phone number registered.');
+    return;
+  }
+
+  const btn = document.getElementById('btnTelecastFromModal');
+  const btnSub = document.getElementById('btnSubmitTelecastModal');
+  const origBtn = btn ? btn.innerHTML : '';
+  const origSub = btnSub ? btnSub.innerHTML : '';
+
+  if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Telecasting...'; }
+  if (btnSub) { btnSub.disabled = true; btnSub.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Sending...'; }
+
+  showToast(`Telecasting WhatsApp result to parent (${currentTelecastContext.parentPhone})...`);
+
+  try {
+    const gwUrl = await getWaGatewayBase();
+    const remarks = document.getElementById('telecastRemarksInput')?.value || currentTelecastContext.remarks || '';
+
+    const res = await fetch(`${API_BASE}/admin/results/dispatch-individual`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        schoolId: CURRENT_SCHOOL_ID,
+        resultId: currentTelecastContext.resultId,
+        studentId: currentTelecastContext.studentId,
+        termId: currentTelecastContext.termId,
+        classId: currentTelecastContext.classId,
+        marks: currentTelecastContext.marks,
+        remarks,
+        gatewayUrl: gwUrl
+      })
+    });
+
+    const data = await res.json();
+    if (data.success) {
+      closeModal('resultTelecastModal');
+      if (data.delivered) {
+        showToast(`🎉 WhatsApp result card delivered to parent of ${data.studentName}! ✅`);
+      } else if (data.queued) {
+        showToast(`⚡ WhatsApp result queued for gateway telecast! (${data.studentName})`);
+      } else {
+        showToast(`Result prepared! Notice sent via ${data.routedVia || 'system'}.`);
+      }
+      // If finalized results tab is active, refresh it
+      loadFinalizedResultsHistory();
+    } else {
+      alert(`Telecast failed: ${data.error || 'Unknown error'}`);
+    }
+  } catch (err) {
+    console.error('Error dispatching individual result:', err);
+    alert(`Network error: ${err.message}`);
+  } finally {
+    if (btn) { btn.disabled = false; btn.innerHTML = origBtn; }
+    if (btnSub) { btnSub.disabled = false; btnSub.innerHTML = origSub; }
   }
 }
 

@@ -730,6 +730,147 @@ ${school.name}`;
 });
 
 // -------------------------------------------------------------
+// INDIVIDUAL ACADEMIC RESULT WHATSAPP TELECAST
+// -------------------------------------------------------------
+app.post('/api/admin/results/dispatch-individual', async (req, res) => {
+  try {
+    const { schoolId = 'unique_scholars', resultId, studentId, termId, classId, marks, remarks: customRemarks } = req.body;
+
+    const gatewayUrl = req.headers['x-whatsapp-gateway-url'] || req.body.gatewayUrl || process.env.WHATSAPP_GATEWAY_URL || process.env.PERSISTENT_BACKEND_URL;
+
+    let item = null;
+
+    // Case 1: Look up by resultId
+    if (resultId) {
+      const found = await getStudentResults(schoolId, { resultId });
+      if (found && found.length > 0) item = found[0];
+    }
+
+    // Case 2: Look up by studentId + termId
+    if (!item && studentId && termId) {
+      const found = await getStudentResults(schoolId, { studentId, termId });
+      if (found && found.length > 0) item = found[0];
+    }
+
+    // Case 3: If not found in store but marks passed from grid, save draft so it has a persistent ID
+    if (!item && studentId && termId && marks) {
+      const saved = await saveDraftResults(schoolId, {
+        termId,
+        classId,
+        results: [{
+          studentId,
+          marks,
+          remarks: customRemarks || 'Academic Progress Statement'
+        }]
+      });
+      if (saved && saved.length > 0) {
+        item = saved[0];
+      }
+    }
+
+    if (!item) {
+      return res.status(404).json({ success: false, error: 'Academic result record not found for this student.' });
+    }
+
+    const schools = await getSchools();
+    const school = schools.find(s => s.id === schoolId) || { name: 'Unique Scholars Academy' };
+    const terms = await getResultTerms(schoolId);
+    const term = terms.find(t => t.id === (item.termId || termId)) || { name: item.termId || termId };
+    const classes = await getClasses(schoolId);
+    const targetClass = classes.find(c => c.id === (item.classId || classId)) || { name: item.classId || classId };
+
+    const allStudents = await getStudents(schoolId);
+    const student = allStudents.find(s => s.id === (item.studentId || studentId));
+
+    const studentName = item.studentName || (student ? student.name : 'Student');
+    const parentPhone = item.parentPhone || (student ? student.parentPhone : '');
+    const rollNo = student && student.rollNumber != null ? student.rollNumber : '-';
+
+    if (!parentPhone) {
+      return res.status(400).json({ success: false, error: 'This student does not have a parent WhatsApp phone number registered.' });
+    }
+
+    const hostHeader = req.get('host') || `localhost:${PORT}`;
+    const protocol = req.protocol || 'http';
+    const baseUrl = `${protocol}://${hostHeader}`;
+    const reportLink = `${baseUrl}/api/admin/results/pdf/${item.id}`;
+
+    const teacherRemarks = customRemarks !== undefined ? customRemarks : (item.remarks || 'Result Finalized & Announced.');
+
+    let subjectsSummary = '';
+    if (item.marks && typeof item.marks === 'object') {
+      const entries = Object.entries(item.marks);
+      if (entries.length > 0) {
+        subjectsSummary = '\n📋 *Subject Breakdown:*\n' + entries.map(([subName, sData]) => {
+          const obt = typeof sData === 'object' ? sData.obtained : sData;
+          const max = (typeof sData === 'object' && sData.total) ? sData.total : 100;
+          return `• ${subName}: ${obt}/${max}`;
+        }).join('\n') + '\n';
+      }
+    }
+
+    const message = 
+`🎓 *${school.name.toUpperCase()}*
+*Official Academic Result Card*
+-----------------------------------
+Assalam-o-Alaikum!
+Respected Parents of *${studentName}* (Roll #${rollNo}),
+
+The official examination statement of marks for *${term.name}* has been generated.
+
+👤 *Student ID:* ${item.studentId || studentId}
+🏫 *Class:* ${targetClass.name}
+📅 *Exam Term:* ${term.name}
+${subjectsSummary}
+📊 *Performance Summary:*
+• Total Marks: *${item.totalObtained} / ${item.totalMax}*
+• Percentage: *${item.percentage}%*
+• Final Grade: *${item.grade}*
+• Result Status: *${item.passStatus || 'PASS'}*
+• Class Position: *#${item.rank || '-'}*
+
+📝 *Teacher Remarks:* "${teacherRemarks}"
+
+📄 *Official Digital Marksheet (PDF):*
+${reportLink}
+
+-----------------------------------
+Unique Scholars High School`;
+
+    const pendingBatch = [{
+      studentId: item.studentId || studentId,
+      studentName,
+      phone: parentPhone,
+      message
+    }];
+
+    const waRes = await sendWhatsAppMessage(parentPhone, message, schoolId, gatewayUrl);
+
+    let queuedRecord = null;
+    if (!waRes.success) {
+      queuedRecord = await addPendingDispatches(schoolId, pendingBatch, 'result_card');
+      console.log(`Queued individual result marksheet for ${studentName} (${parentPhone})`);
+    }
+
+    res.json({
+      success: true,
+      delivered: waRes.success,
+      queued: !waRes.success && !!queuedRecord,
+      sentCount: waRes.success ? 1 : 0,
+      queuedCount: (!waRes.success && queuedRecord) ? 1 : 0,
+      parentPhone,
+      studentName,
+      reportLink,
+      message,
+      routedVia: waRes.routedVia || 'gateway'
+    });
+  } catch (error) {
+    console.error('Error dispatching individual result:', error);
+    res.status(500).json({ success: false, error: error.message || 'Failed to telecast individual result.' });
+  }
+});
+
+// -------------------------------------------------------------
 // BRANDED PDF / PRINT REPORT CARD VIEW
 // -------------------------------------------------------------
 app.get('/api/admin/results/pdf/:resultId', async (req, res) => {
