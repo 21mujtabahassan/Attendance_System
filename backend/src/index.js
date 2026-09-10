@@ -822,7 +822,7 @@ app.get('/api/admin/results/pdf/:resultId', async (req, res) => {
       position: relative; width: 100%; max-width: 800px; background: #ffffff;
       border: 1px solid #dcdfe4; border-radius: 4px;
       box-shadow: 0 12px 35px -4px rgba(15, 23, 42, 0.12), 0 4px 10px -2px rgba(15, 23, 42, 0.04);
-      overflow: hidden;
+      overflow: hidden; box-sizing: border-box;
     }
     .card-watermark {
       position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
@@ -860,17 +860,18 @@ app.get('/api/admin/results/pdf/:resultId', async (req, res) => {
     .info-row { display: flex; align-items: baseline; }
     .info-label { width: 110px; font-weight: 600; color: #475569; text-transform: uppercase; font-size: 11px; letter-spacing: 0.4px; }
     .info-value { flex: 1; font-weight: 700; color: #0f172a; }
-    .marks-table-wrapper { margin-bottom: 24px; }
-    .marks-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+    .marks-table-wrapper { margin-bottom: 24px; width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+    .marks-table { width: 100%; border-collapse: collapse; font-size: 12.5px; table-layout: auto; }
     .marks-table th {
       background-color: #0f172a; color: #ffffff; font-weight: 600; text-transform: uppercase;
-      letter-spacing: 0.5px; font-size: 11px; padding: 10px 14px; border: 1px solid #0f172a; text-align: center;
+      letter-spacing: 0.5px; font-size: 11px; padding: 10px 14px; border: 1px solid #0f172a;
     }
-    .marks-table th.col-subject { text-align: left; width: 52%; }
+    .marks-table th.col-subject, .marks-table td.col-subject { text-align: left; width: 48%; }
+    .marks-table th.col-max, .marks-table td.col-max { text-align: right; width: 17%; font-variant-numeric: tabular-nums; font-weight: 600; }
+    .marks-table th.col-obtained, .marks-table td.col-obtained { text-align: right; width: 20%; font-variant-numeric: tabular-nums; font-weight: 600; }
+    .marks-table th.col-grade, .marks-table td.col-grade { text-align: center; width: 15%; font-weight: 700; }
     .marks-table td { padding: 9px 14px; border: 1px solid #cbd5e1; color: #1e293b; }
     .marks-table td.col-subject { font-weight: 500; }
-    .marks-table td.numeric { text-align: right; font-variant-numeric: tabular-nums; font-weight: 600; }
-    .marks-table td.center { text-align: center; font-weight: 700; }
     .marks-table tbody tr:nth-child(even) { background-color: #f8fafc; }
     .marks-table tr.summary-row td {
       background-color: #f1f5f9; border-top: 2px solid #0f172a; font-weight: 700; color: #0f172a;
@@ -892,14 +893,91 @@ app.get('/api/admin/results/pdf/:resultId', async (req, res) => {
     .signature-item { text-align: center; width: 150px; }
     .signature-space { height: 48px; border-bottom: 1.5px dashed #475569; margin-bottom: 6px; }
     .signature-title { font-size: 11px; font-weight: 600; color: #334155; text-transform: uppercase; letter-spacing: 0.5px; }
-    @media (max-width: 820px) {
-      body { padding: 12px; }
-      .card-content { padding: 20px; }
-      .academic-frame { padding: 16px; }
-      .school-name { font-size: 18px; }
-      .student-info-grid { grid-template-columns: 1fr; gap: 8px; }
-      .metrics-bar { grid-template-columns: 1fr 1fr; }
+
+    /* -------------------------------------------------------------
+       RESPONSIVE RULES (DOWN TO 375PX AND 320PX SCREEN WIDTH)
+    ------------------------------------------------------------- */
+    @media (max-width: 600px) {
+      body { padding: 8px 4px; }
+      .action-bar { margin-bottom: 12px; gap: 8px; }
+      .action-group { width: 100%; display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+      .btn { padding: 8px 10px; font-size: 12px; justify-content: center; width: 100%; }
+      .card-content { padding: 12px 8px; }
+      .academic-frame { padding: 10px 6px; }
+      .academic-frame::before { top: 2px; left: 2px; right: 2px; bottom: 2px; }
+      .card-header { gap: 8px; padding-bottom: 12px; margin-bottom: 14px; }
+      .header-logo { width: 48px; height: 48px; }
+      .header-logo-placeholder { display: none !important; }
+      .school-name { font-size: 15px; letter-spacing: 0.3px; }
+      .school-address { font-size: 9.5px; margin-bottom: 6px; }
+      .badge-statement { font-size: 9.5px; letter-spacing: 1px; padding: 2px 8px; }
+      .term-title { font-size: 10.5px; margin-top: 4px; }
+      .student-info-grid {
+        grid-template-columns: 1fr;
+        gap: 5px;
+        padding: 8px 10px;
+        margin-bottom: 14px;
+        font-size: 11px;
+      }
+      .info-label { width: 90px; font-size: 9.5px; }
+      .info-value { font-size: 11px; }
+
+      /* Marks Table responsive fit for 375px screens */
+      .marks-table { font-size: 10.5px; }
+      .marks-table th {
+        padding: 6px 3px;
+        font-size: 9px;
+        letter-spacing: 0.1px;
+        line-height: 1.2;
+      }
+      .marks-table td {
+        padding: 6px 3px;
+        font-size: 10.5px;
+      }
+      .marks-table th.col-subject, .marks-table td.col-subject {
+        width: auto;
+        max-width: 110px;
+        word-break: break-word;
+      }
+      .marks-table th.col-max, .marks-table td.col-max { width: 44px; }
+      .marks-table th.col-obtained, .marks-table td.col-obtained { width: 50px; }
+      .marks-table th.col-grade, .marks-table td.col-grade { width: 38px; }
+
+      /* Summary Cards 2x2 */
+      .metrics-bar {
+        grid-template-columns: 1fr 1fr;
+        gap: 6px;
+        margin-bottom: 16px;
+      }
+      .metric-card { padding: 6px 4px; }
+      .metric-title { font-size: 8.5px; }
+      .metric-value { font-size: 13px; }
+      .status-badge { font-size: 10px; padding: 1px 6px; }
+
+      /* Footer Signatures */
+      .card-footer {
+        flex-direction: column;
+        align-items: center;
+        gap: 12px;
+        padding-top: 10px;
+        margin-top: 6px;
+        text-align: center;
+      }
+      .signatures-box {
+        width: 100%;
+        display: flex;
+        justify-content: space-around;
+        gap: 10px;
+      }
+      .signature-item {
+        width: 115px;
+        max-width: 48%;
+      }
+      .signature-space { height: 32px; margin-bottom: 4px; }
+      .signature-title { font-size: 9.5px; }
+      .issue-date-box { font-size: 10px; }
     }
+
     @page { size: A4 portrait; margin: 10mm; }
     @media print {
       body { background: #ffffff !important; padding: 0 !important; display: block !important; }
@@ -951,7 +1029,7 @@ app.get('/api/admin/results/pdf/:resultId', async (req, res) => {
             <div><span class="badge-statement">Statement of Marks</span></div>
             <p class="term-title">${term.name}</p>
           </div>
-          <div style="width: 76px; height: 76px;"></div>
+          <div style="width: 76px; height: 76px;" class="header-logo-placeholder"></div>
         </header>
 
         <section class="student-info-grid">
@@ -966,9 +1044,9 @@ app.get('/api/admin/results/pdf/:resultId', async (req, res) => {
             <thead>
               <tr>
                 <th class="col-subject">Subject Description</th>
-                <th style="width: 16%;">Max Marks</th>
-                <th style="width: 18%;">Marks Obtained</th>
-                <th style="width: 14%;">Grade</th>
+                <th class="col-max">Max Marks</th>
+                <th class="col-obtained">Marks Obtained</th>
+                <th class="col-grade">Grade</th>
               </tr>
             </thead>
             <tbody>
@@ -977,9 +1055,9 @@ app.get('/api/admin/results/pdf/:resultId', async (req, res) => {
             <tfoot>
               <tr class="summary-row">
                 <td class="col-subject summary-label">Grand Total</td>
-                <td class="numeric">${r.totalMax}</td>
-                <td class="numeric">${r.totalObtained}</td>
-                <td class="center">${r.grade}</td>
+                <td class="numeric col-max">${r.totalMax}</td>
+                <td class="numeric col-obtained">${r.totalObtained}</td>
+                <td class="center col-grade">${r.grade}</td>
               </tr>
             </tfoot>
           </table>
@@ -1027,15 +1105,57 @@ app.get('/api/admin/results/pdf/:resultId', async (req, res) => {
 
   <script>
     async function createPdfInstance() {
+      const jspdfModule = window.jspdf;
+      if (!jspdfModule || !jspdfModule.jsPDF) {
+        throw new Error('PDF generator library (jsPDF) is loading. Please check your internet connection.');
+      }
+      if (typeof html2canvas !== 'function') {
+        throw new Error('Canvas renderer (html2canvas) is not loaded. Please try again.');
+      }
+
       const cardElement = document.getElementById('resultCardSheet');
-      const canvas = await html2canvas(cardElement, {
-        scale: 2,
-        useCORS: true,
-        allowTaint: true,
-        backgroundColor: '#ffffff',
-        logging: false
-      });
-      const { jsPDF } = window.jspdf;
+
+      // Clone card into fixed 800px off-screen container so the captured PDF
+      // is ALWAYS crisp desktop proportions regardless of current mobile viewport!
+      const cloneWrapper = document.createElement('div');
+      cloneWrapper.style.position = 'fixed';
+      cloneWrapper.style.left = '-9999px';
+      cloneWrapper.style.top = '0';
+      cloneWrapper.style.width = '800px';
+      cloneWrapper.style.zIndex = '-9999';
+      cloneWrapper.style.backgroundColor = '#ffffff';
+
+      const clonedCard = cardElement.cloneNode(true);
+      clonedCard.style.width = '800px';
+      clonedCard.style.maxWidth = '800px';
+      clonedCard.style.margin = '0';
+      clonedCard.style.boxShadow = 'none';
+
+      // Ensure desktop padding on capture
+      const clonedContent = clonedCard.querySelector('.card-content');
+      if (clonedContent) clonedContent.style.padding = '48px';
+      const clonedFrame = clonedCard.querySelector('.academic-frame');
+      if (clonedFrame) clonedFrame.style.padding = '30px';
+
+      cloneWrapper.appendChild(clonedCard);
+      document.body.appendChild(cloneWrapper);
+
+      let canvas;
+      try {
+        canvas = await html2canvas(clonedCard, {
+          scale: 2,
+          useCORS: true,
+          allowTaint: true,
+          backgroundColor: '#ffffff',
+          logging: false,
+          width: 800,
+          windowWidth: 800
+        });
+      } finally {
+        document.body.removeChild(cloneWrapper);
+      }
+
+      const { jsPDF } = jspdfModule;
       const pdf = new jsPDF('p', 'mm', 'a4');
       const pageWidth = 210;
       const pageHeight = 297;
@@ -1045,6 +1165,7 @@ app.get('/api/admin/results/pdf/:resultId', async (req, res) => {
       const yOffset = imgHeight < (pageHeight - (margin * 2))
         ? margin + ((pageHeight - (margin * 2) - imgHeight) / 2)
         : margin;
+
       const imgData = canvas.toDataURL('image/jpeg', 0.98);
       pdf.addImage(imgData, 'JPEG', margin, yOffset, printWidth, imgHeight);
       const filename = 'result_${r.studentId}_${r.studentName.replace(/\\s+/g, '_')}.pdf';
@@ -1058,8 +1179,23 @@ app.get('/api/admin/results/pdf/:resultId', async (req, res) => {
       btn.innerHTML = 'Generating PDF...';
       try {
         const { pdf, filename } = await createPdfInstance();
-        pdf.save(filename);
+
+        // Direct download using Blob object URL to prevent opening new tab across all devices
+        const blob = pdf.output('blob');
+        const blobUrl = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.style.display = 'none';
+        link.href = blobUrl;
+        link.download = filename;
+        document.body.appendChild(link);
+        link.click();
+
+        setTimeout(() => {
+          document.body.removeChild(link);
+          URL.revokeObjectURL(blobUrl);
+        }, 2000);
       } catch (err) {
+        console.error('Download error:', err);
         alert('Could not generate PDF: ' + err.message);
       } finally {
         btn.disabled = false;
@@ -1074,7 +1210,21 @@ app.get('/api/admin/results/pdf/:resultId', async (req, res) => {
       btn.innerHTML = 'Preparing...';
       try {
         const { pdf, filename } = await createPdfInstance();
-        pdf.save(filename);
+
+        // Download file for email attachment
+        const blob = pdf.output('blob');
+        const blobUrl = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.style.display = 'none';
+        link.href = blobUrl;
+        link.download = filename;
+        document.body.appendChild(link);
+        link.click();
+        setTimeout(() => {
+          document.body.removeChild(link);
+          URL.revokeObjectURL(blobUrl);
+        }, 2000);
+
         document.getElementById('toastBanner').style.display = 'block';
         const toEmail = encodeURIComponent('${r.parentEmail || ''}');
         const subject = encodeURIComponent('Official Result Card - ${r.studentName} (${term.name})');
