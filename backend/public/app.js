@@ -992,6 +992,7 @@ function populateResultTelecastModal(ctx) {
   badgeEl.innerHTML = `
     <span class="badge ${isPass ? 'badge-success' : 'badge-danger'}" style="font-size: 12px; font-weight: 700;">${ctx.grade} (${ctx.percentage}%) - ${ctx.passStatus}</span>
     <span class="badge" style="font-size: 11px; margin-left: 6px; background: rgba(56, 189, 248, 0.15); color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.3); padding: 4px 8px;"><i class="fa-solid fa-cloud-arrow-up"></i> Live Synced to DB</span>
+    <span class="badge" style="font-size: 11px; margin-left: 6px; background: rgba(34, 197, 94, 0.15); color: #22c55e; border: 1px solid rgba(34, 197, 94, 0.3); padding: 4px 8px;"><i class="fa-solid fa-file-pdf"></i> PDF Attached to WhatsApp</span>
   `;
 
   // PDF link
@@ -1049,8 +1050,6 @@ function updateTelecastMessagePreview() {
     }).join('\n') + '\n';
   }
 
-  const pdfUrl = `${window.location.origin}/api/admin/results/pdf/${currentTelecastContext.resultId}`;
-
   const preview = 
 `🎓 *UNIQUE SCHOLARS ACADEMY*
 *Official Academic Result Card*
@@ -1072,9 +1071,6 @@ ${subjectsText}
 • Class Position: *#${currentTelecastContext.rank || '-'}*
 
 📝 *Teacher Remarks:* "${remarks}"
-
-📄 *Official Digital Marksheet (PDF):*
-${pdfUrl}
 
 -----------------------------------
 Unique Scholars High School`;

@@ -55,6 +55,7 @@ const {
   computeGradeAndStatus
 } = require('./services/store');
 const { getDb, isPostgresConfigured } = require('./db');
+const { generateAcademicResultPdf } = require('./services/pdfGenerator');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -132,7 +133,55 @@ function startCloudDispatchWorker() {
         const deliveryResults = [];
         for (const item of batch.messages) {
           if (!item.phone || !item.message) continue;
-          const waRes = await sendWhatsAppMessage(item.phone, item.message, batch.schoolId || 'unique_scholars');
+
+          let media = item.media || null;
+          // Generate PDF document attachment on the fly for queued result batches
+          if (!media && (batch.source === 'results' || item.resultId || item.studentId)) {
+            try {
+              const resId = item.resultId || `RES-${item.studentId}-TERM-MID-2026`;
+              const found = await getStudentResults(batch.schoolId || 'unique_scholars', { resultId: resId, studentId: item.studentId });
+              if (found && found.length > 0) {
+                const rItem = found[0];
+                const schools = await getSchools();
+                const school = schools.find(s => s.id === (batch.schoolId || 'unique_scholars')) || { name: 'Unique Scholars Academy' };
+                const terms = await getResultTerms(batch.schoolId || 'unique_scholars');
+                const term = terms.find(t => t.id === rItem.termId) || { name: rItem.termId };
+                const classes = await getClasses(batch.schoolId || 'unique_scholars');
+                const targetClass = classes.find(c => c.id === rItem.classId) || { name: rItem.classId };
+                const allStudents = await getStudents(batch.schoolId || 'unique_scholars');
+                const student = allStudents.find(s => s.id === rItem.studentId);
+                const rollNo = student && student.rollNumber != null ? student.rollNumber : '-';
+
+                const pdfBuf = generateAcademicResultPdf({
+                  schoolName: school.name,
+                  schoolAddress: school.address || 'Main Campus, Phalia Road',
+                  termName: term.name,
+                  studentId: rItem.studentId,
+                  studentName: rItem.studentName,
+                  rollNo,
+                  className: targetClass.name,
+                  marks: rItem.marks,
+                  totalObtained: rItem.totalObtained,
+                  totalMax: rItem.totalMax,
+                  percentage: rItem.percentage,
+                  grade: rItem.grade,
+                  passStatus: rItem.passStatus,
+                  rank: rItem.rank,
+                  remarks: rItem.remarks
+                });
+
+                media = {
+                  buffer: pdfBuf,
+                  mimetype: 'application/pdf',
+                  fileName: `Result_Card_${String(rItem.studentName || 'Student').replace(/\s+/g, '_')}.pdf`
+                };
+              }
+            } catch (errPdf) {
+              console.warn('Worker could not generate PDF for queued result card:', errPdf.message);
+            }
+          }
+
+          const waRes = await sendWhatsAppMessage(item.phone, item.message, batch.schoolId || 'unique_scholars', null, media);
           deliveryResults.push({
             studentId: item.studentId,
             phone: item.phone,
@@ -255,11 +304,11 @@ app.post('/api/admin/pending-dispatches/complete', async (req, res) => {
 
 app.post('/api/whatsapp/send', async (req, res) => {
   try {
-    const { phone, message, schoolId = 'unique_scholars', gatewayUrl } = req.body;
+    const { phone, message, schoolId = 'unique_scholars', gatewayUrl, media } = req.body;
     if (!phone || !message) {
       return res.status(400).json({ success: false, error: 'phone and message are required' });
     }
-    const result = await sendWhatsAppMessage(phone, message, schoolId, gatewayUrl);
+    const result = await sendWhatsAppMessage(phone, message, schoolId, gatewayUrl, media);
     res.json(result);
   } catch (e) {
     res.status(500).json({ success: false, error: e.message });
@@ -276,7 +325,7 @@ app.post('/api/whatsapp/dispatch-batch', async (req, res) => {
     const results = [];
     for (const item of messages) {
       if (!item.phone || !item.message) continue;
-      const waRes = await sendWhatsAppMessage(item.phone, item.message, schoolId, gatewayUrl);
+      const waRes = await sendWhatsAppMessage(item.phone, item.message, schoolId, gatewayUrl, item.media);
       results.push({
         studentId: item.studentId || null,
         studentName: item.studentName || null,
@@ -660,8 +709,6 @@ app.post('/api/admin/results/submit', async (req, res) => {
     for (const item of finalizedResults) {
       if (!item.parentPhone) continue;
 
-      const reportLink = `${baseUrl}/api/admin/results/pdf/${item.id}`;
-
       const message =
         `Assalam-o-Alaikum! 🎓
 ${school.name} - Official Result Announcement
@@ -677,20 +724,49 @@ Class Rank: #${item.rank}
 
 Teacher Remarks: "${item.remarks}"
 
-📄 Download/View Branded Marksheet PDF:
-${reportLink}
-
 Congratulations & Best Regards,
 ${school.name}`;
+
+      let pdfBuffer = null;
+      try {
+        pdfBuffer = generateAcademicResultPdf({
+          schoolName: school.name,
+          schoolAddress: school.address || 'Main Campus, Phalia Road',
+          termName: term.name,
+          studentId: item.studentId,
+          studentName: item.studentName,
+          rollNo: item.rollNumber != null ? item.rollNumber : '-',
+          className: targetClass.name,
+          marks: item.marks,
+          totalObtained: item.totalObtained,
+          totalMax: item.totalMax,
+          percentage: item.percentage,
+          grade: item.grade,
+          passStatus: item.passStatus,
+          rank: item.rank,
+          remarks: item.remarks
+        });
+      } catch (pdfErr) {
+        console.error('Error generating PDF in bulk submit:', pdfErr);
+      }
+
+      const pdfMedia = pdfBuffer ? {
+        buffer: pdfBuffer,
+        base64: pdfBuffer.toString('base64'),
+        mimetype: 'application/pdf',
+        fileName: `Result_Card_${String(item.studentName || 'Student').replace(/\s+/g, '_')}.pdf`
+      } : null;
 
       pendingBatch.push({
         studentId: item.studentId,
         studentName: item.studentName,
         phone: item.parentPhone,
-        message
+        message,
+        resultId: item.id,
+        media: pdfMedia ? { base64: pdfMedia.base64, mimetype: pdfMedia.mimetype, fileName: pdfMedia.fileName } : null
       });
 
-      const waRes = await sendWhatsAppMessage(item.parentPhone, message, schoolId, gatewayUrl);
+      const waRes = await sendWhatsAppMessage(item.parentPhone, message, schoolId, gatewayUrl, pdfMedia);
       whatsappDetails.push({
         studentId: item.studentId,
         studentName: item.studentName,
@@ -898,20 +974,50 @@ ${subjectsSummary}
 
 📝 *Teacher Remarks:* "${teacherRemarks}"
 
-📄 *Official Digital Marksheet (PDF):*
-${reportLink}
-
 -----------------------------------
 Unique Scholars High School`;
+
+    // Generate official result card PDF attachment
+    let pdfBuffer = null;
+    try {
+      pdfBuffer = generateAcademicResultPdf({
+        schoolName: school.name,
+        schoolAddress: school.address || 'Main Campus, Phalia Road',
+        termName: term.name,
+        studentId: item.studentId || studentId,
+        studentName,
+        rollNo,
+        className: targetClass.name,
+        marks: item.marks,
+        totalObtained: item.totalObtained,
+        totalMax: item.totalMax,
+        percentage: item.percentage,
+        grade: item.grade,
+        passStatus: item.passStatus,
+        rank: item.rank,
+        remarks: teacherRemarks
+      });
+    } catch (pdfErr) {
+      console.error('Error generating result card PDF in dispatch-individual:', pdfErr);
+    }
+
+    const pdfMedia = pdfBuffer ? {
+      buffer: pdfBuffer,
+      base64: pdfBuffer.toString('base64'),
+      mimetype: 'application/pdf',
+      fileName: `Result_Card_${studentName.replace(/\s+/g, '_')}_${term.name.replace(/\s+/g, '_')}.pdf`
+    } : null;
 
     const pendingBatch = [{
       studentId: item.studentId || studentId,
       studentName,
       phone: parentPhone,
-      message
+      message,
+      resultId: item.id,
+      media: pdfMedia ? { base64: pdfMedia.base64, mimetype: pdfMedia.mimetype, fileName: pdfMedia.fileName } : null
     }];
 
-    const waRes = await sendWhatsAppMessage(parentPhone, message, schoolId, gatewayUrl);
+    const waRes = await sendWhatsAppMessage(parentPhone, message, schoolId, gatewayUrl, pdfMedia);
 
     let queuedRecord = null;
     if (!waRes.success) {

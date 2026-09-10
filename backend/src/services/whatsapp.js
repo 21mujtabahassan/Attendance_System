@@ -402,8 +402,20 @@ function formatPhoneToJid(phone) {
   return `${cleaned}@s.whatsapp.net`;
 }
 
-async function sendWhatsAppMessage(phone, message, schoolId = 'unique_scholars', gatewayUrlOverride = null) {
+async function sendWhatsAppMessage(phone, message, schoolId = 'unique_scholars', gatewayUrlOverride = null, media = null) {
   const sess = getSessionState(schoolId);
+
+  // Normalize media document buffer if provided
+  let docBuffer = null;
+  if (media) {
+    if (Buffer.isBuffer(media.buffer)) {
+      docBuffer = media.buffer;
+    } else if (typeof media.buffer === 'string') {
+      docBuffer = Buffer.from(media.buffer, 'base64');
+    } else if (media.base64) {
+      docBuffer = Buffer.from(media.base64, 'base64');
+    }
+  }
 
   // 1. If local session is active, send directly via Baileys socket
   if (sess.status === 'connected' && sess.sock) {
@@ -416,12 +428,25 @@ async function sendWhatsAppMessage(phone, message, schoolId = 'unique_scholars',
     }
 
     try {
-      const result = await sess.sock.sendMessage(jid, { text: message });
-      console.log(`📩 [${schoolId}] WhatsApp message sent to parent at ${phone} (JID: ${jid})`);
+      let msgPayload;
+      if (docBuffer) {
+        msgPayload = {
+          document: docBuffer,
+          mimetype: media.mimetype || 'application/pdf',
+          fileName: media.fileName || 'Academic_Result_Card.pdf',
+          caption: message
+        };
+      } else {
+        msgPayload = { text: message };
+      }
+
+      const result = await sess.sock.sendMessage(jid, msgPayload);
+      console.log(`📩 [${schoolId}] WhatsApp ${docBuffer ? 'PDF Document + Caption' : 'Message'} sent to parent at ${phone} (JID: ${jid})`);
       return {
         success: true,
         messageId: result?.key?.id || `MSG-${Date.now()}`,
         recipient: jid,
+        hasAttachment: !!docBuffer,
         routedVia: 'local_socket'
       };
     } catch (error) {
@@ -451,11 +476,23 @@ async function sendWhatsAppMessage(phone, message, schoolId = 'unique_scholars',
       const targetUrl = `${cleanUrl}/api/whatsapp/send`;
       console.log(`Forwarding WhatsApp dispatch to remote gateway: ${targetUrl}`);
       const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), 10000);
+      const timer = setTimeout(() => controller.abort(), 15000);
+
+      const fwdPayload = { phone, message, schoolId };
+      if (docBuffer) {
+        fwdPayload.media = {
+          base64: docBuffer.toString('base64'),
+          mimetype: media.mimetype || 'application/pdf',
+          fileName: media.fileName || 'Academic_Result_Card.pdf'
+        };
+      } else if (media && media.base64) {
+        fwdPayload.media = media;
+      }
+
       const res = await fetch(targetUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ phone, message, schoolId }),
+        body: JSON.stringify(fwdPayload),
         signal: controller.signal
       });
       clearTimeout(timer);
