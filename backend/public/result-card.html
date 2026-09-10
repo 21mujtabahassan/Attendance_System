@@ -1,0 +1,927 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Student Result Card</title>
+
+  <!-- Google Fonts for official academic typography -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@600;700;800&family=Inter:wght@400;500;600;700;800&family=Merriweather:ital,wght@0,400;0,700;1,400&display=swap" rel="stylesheet">
+
+  <!-- Client-side PDF Generation Dependencies (CDNs) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+
+  <style>
+    /* -------------------------------------------------------------
+       1. GLOBAL RESET & FLEXBOX CENTERING
+    ------------------------------------------------------------- */
+    *, *::before, *::after {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      min-height: 100vh;
+      background-color: #ebedf0;
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      color: #1e293b;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      padding: 32px 16px;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+    }
+
+    /* -------------------------------------------------------------
+       2. ACTION TOOLBAR (Hidden in Print)
+    ------------------------------------------------------------- */
+    .action-bar {
+      width: 100%;
+      max-width: 800px;
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 20px;
+    }
+
+    .action-group {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 18px;
+      font-size: 13px;
+      font-weight: 600;
+      letter-spacing: 0.3px;
+      border-radius: 6px;
+      border: 1px solid transparent;
+      cursor: pointer;
+      transition: all 0.18s ease-in-out;
+      text-decoration: none;
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+    }
+
+    .btn:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+    }
+
+    .btn-primary {
+      background-color: #0f172a;
+      color: #ffffff;
+    }
+    .btn-primary:hover:not(:disabled) {
+      background-color: #1e293b;
+      transform: translateY(-1px);
+    }
+
+    .btn-accent {
+      background-color: #0284c7;
+      color: #ffffff;
+    }
+    .btn-accent:hover:not(:disabled) {
+      background-color: #0369a1;
+      transform: translateY(-1px);
+    }
+
+    .btn-outline {
+      background-color: #ffffff;
+      color: #334155;
+      border-color: #cbd5e1;
+    }
+    .btn-outline:hover:not(:disabled) {
+      background-color: #f8fafc;
+      border-color: #94a3b8;
+    }
+
+    /* Notification Banner */
+    .toast-banner {
+      display: none;
+      width: 100%;
+      max-width: 800px;
+      padding: 12px 16px;
+      margin-bottom: 16px;
+      border-radius: 6px;
+      font-size: 13px;
+      font-weight: 500;
+      background-color: #ecfdf5;
+      color: #065f46;
+      border: 1px solid #a7f3d0;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.04);
+      animation: fadeIn 0.25s ease-in-out;
+    }
+
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(-4px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    /* -------------------------------------------------------------
+       3. RESULT CARD CONTAINER & WATERMARK
+    ------------------------------------------------------------- */
+    .result-sheet {
+      position: relative;
+      width: 100%;
+      max-width: 800px;
+      background: #ffffff;
+      border: 1px solid #dcdfe4;
+      border-radius: 4px;
+      box-shadow: 0 12px 35px -4px rgba(15, 23, 42, 0.12),
+                  0 4px 10px -2px rgba(15, 23, 42, 0.04);
+      overflow: hidden;
+    }
+
+    /* Watermark - Placed absolutely behind all card text */
+    .card-watermark {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      width: 65%;
+      max-width: 480px;
+      opacity: 0.08; /* Requirement: between 0.06 and 0.12 */
+      z-index: 0;
+      pointer-events: none;
+      user-select: none;
+    }
+
+    .card-watermark img {
+      width: 100%;
+      height: auto;
+      display: block;
+      filter: grayscale(100%);
+    }
+
+    /* Foreground Content Layer */
+    .card-content {
+      position: relative;
+      z-index: 1; /* Sits cleanly on top of watermark */
+      padding: 48px; /* Requirement: at least 40px */
+    }
+
+    /* Decorative Inner Academic Border */
+    .academic-frame {
+      border: 1.5px solid #0f172a;
+      padding: 30px;
+      position: relative;
+    }
+
+    .academic-frame::before {
+      content: "";
+      position: absolute;
+      top: 3px;
+      left: 3px;
+      right: 3px;
+      bottom: 3px;
+      border: 0.5px solid #64748b;
+      pointer-events: none;
+    }
+
+    /* -------------------------------------------------------------
+       4. HEADER SECTION
+    ------------------------------------------------------------- */
+    .card-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 20px;
+      border-bottom: 2px solid #0f172a;
+      padding-bottom: 20px;
+      margin-bottom: 24px;
+    }
+
+    .header-logo {
+      width: 76px;
+      height: 76px;
+      flex-shrink: 0;
+      object-fit: contain;
+    }
+
+    .header-titles {
+      flex: 1;
+      text-align: center;
+    }
+
+    .school-name {
+      font-family: 'Cinzel', 'Merriweather', serif;
+      font-size: 24px;
+      font-weight: 700;
+      letter-spacing: 0.8px;
+      color: #0f172a;
+      text-transform: uppercase;
+      margin-bottom: 4px;
+    }
+
+    .school-address {
+      font-size: 11.5px;
+      color: #475569;
+      font-weight: 500;
+      margin-bottom: 12px;
+    }
+
+    .badge-statement {
+      display: inline-block;
+      background: #0f172a;
+      color: #ffffff;
+      font-family: 'Cinzel', serif;
+      font-size: 12.5px;
+      letter-spacing: 2px;
+      padding: 4px 18px;
+      text-transform: uppercase;
+      font-weight: 700;
+    }
+
+    .term-title {
+      font-size: 12px;
+      color: #334155;
+      font-weight: 600;
+      margin-top: 6px;
+      letter-spacing: 0.4px;
+    }
+
+    /* -------------------------------------------------------------
+       5. STUDENT INFO GRID
+    ------------------------------------------------------------- */
+    .student-info-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      column-gap: 32px;
+      row-gap: 10px;
+      background-color: #f8fafc;
+      border: 1px solid #e2e8f0;
+      padding: 14px 20px;
+      margin-bottom: 24px;
+      font-size: 12.5px;
+    }
+
+    .info-row {
+      display: flex;
+      align-items: baseline;
+    }
+
+    .info-label {
+      width: 110px;
+      font-weight: 600;
+      color: #475569;
+      text-transform: uppercase;
+      font-size: 11px;
+      letter-spacing: 0.4px;
+    }
+
+    .info-value {
+      flex: 1;
+      font-weight: 700;
+      color: #0f172a;
+    }
+
+    /* -------------------------------------------------------------
+       6. MARKS TABLE
+    ------------------------------------------------------------- */
+    .marks-table-wrapper {
+      margin-bottom: 24px;
+    }
+
+    .marks-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 12.5px;
+    }
+
+    .marks-table th {
+      background-color: #0f172a;
+      color: #ffffff;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      font-size: 11px;
+      padding: 10px 14px;
+      border: 1px solid #0f172a;
+      text-align: center;
+    }
+
+    .marks-table th.col-subject {
+      text-align: left;
+      width: 52%;
+    }
+
+    .marks-table td {
+      padding: 9px 14px;
+      border: 1px solid #cbd5e1;
+      color: #1e293b;
+    }
+
+    .marks-table td.col-subject {
+      font-weight: 500;
+    }
+
+    .marks-table td.numeric {
+      text-align: right;
+      font-variant-numeric: tabular-nums;
+      font-weight: 600;
+    }
+
+    .marks-table td.center {
+      text-align: center;
+      font-weight: 700;
+    }
+
+    /* Subtle row shading */
+    .marks-table tbody tr:nth-child(even) {
+      background-color: #f8fafc;
+    }
+
+    /* Summary Row Styling */
+    .marks-table tr.summary-row td {
+      background-color: #f1f5f9;
+      border-top: 2px solid #0f172a;
+      font-weight: 700;
+      color: #0f172a;
+    }
+
+    .marks-table tr.summary-row td.summary-label {
+      font-family: 'Cinzel', serif;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      font-size: 11.5px;
+    }
+
+    /* Key Performance Metric Badges */
+    .metrics-bar {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 12px;
+      margin-bottom: 30px;
+    }
+
+    .metric-card {
+      background: #f8fafc;
+      border: 1px solid #e2e8f0;
+      padding: 10px 12px;
+      text-align: center;
+      border-radius: 3px;
+    }
+
+    .metric-title {
+      font-size: 10px;
+      font-weight: 600;
+      color: #64748b;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 2px;
+    }
+
+    .metric-value {
+      font-size: 16px;
+      font-weight: 800;
+      color: #0f172a;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .status-badge {
+      display: inline-block;
+      padding: 2px 10px;
+      border-radius: 3px;
+      font-size: 12px;
+      font-weight: 800;
+      letter-spacing: 0.6px;
+    }
+
+    .status-passed {
+      background: #dcfce7;
+      color: #15803d;
+      border: 1px solid #bbf7d0;
+    }
+
+    .status-failed {
+      background: #fee2e2;
+      color: #b91c1c;
+      border: 1px solid #fecaca;
+    }
+
+    /* -------------------------------------------------------------
+       7. FOOTER & SIGNATURE LINES
+    ------------------------------------------------------------- */
+    .card-footer {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-end;
+      padding-top: 20px;
+      margin-top: 10px;
+    }
+
+    .issue-date-box {
+      font-size: 11px;
+      color: #475569;
+      font-weight: 500;
+    }
+
+    .issue-date-box strong {
+      color: #0f172a;
+    }
+
+    .signatures-box {
+      display: flex;
+      gap: 48px;
+    }
+
+    .signature-item {
+      text-align: center;
+      width: 150px;
+    }
+
+    .signature-space {
+      height: 48px; /* Space for manual or digital signing */
+      border-bottom: 1.5px dashed #475569;
+      margin-bottom: 6px;
+    }
+
+    .signature-title {
+      font-size: 11px;
+      font-weight: 600;
+      color: #334155;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    /* -------------------------------------------------------------
+       8. RESPONSIVENESS (Mobile Viewport Shrinking)
+    ------------------------------------------------------------- */
+    @media (max-width: 820px) {
+      body {
+        padding: 12px;
+      }
+      .card-content {
+        padding: 20px;
+      }
+      .academic-frame {
+        padding: 16px;
+      }
+      .school-name {
+        font-size: 18px;
+      }
+      .student-info-grid {
+        grid-template-columns: 1fr;
+        gap: 8px;
+      }
+      .metrics-bar {
+        grid-template-columns: 1fr 1fr;
+      }
+      .signatures-box {
+        gap: 16px;
+      }
+      .signature-item {
+        width: 110px;
+      }
+    }
+
+    /* -------------------------------------------------------------
+       9. PRINT STYLESHEET (A4 Clean Single Page)
+    ------------------------------------------------------------- */
+    @page {
+      size: A4 portrait;
+      margin: 10mm;
+    }
+
+    @media print {
+      body {
+        background: #ffffff !important;
+        padding: 0 !important;
+        min-height: auto !important;
+        display: block !important;
+      }
+
+      .action-bar,
+      .toast-banner {
+        display: none !important;
+      }
+
+      .result-sheet {
+        box-shadow: none !important;
+        border: none !important;
+        max-width: 100% !important;
+        width: 100% !important;
+        margin: 0 !important;
+        page-break-inside: avoid !important;
+      }
+
+      .card-content {
+        padding: 0 !important;
+      }
+
+      /* Force background images & colors to render on physical print */
+      *, *::before, *::after {
+        -webkit-print-color-adjust: exact !important;
+        print-color-adjust: exact !important;
+      }
+
+      .card-watermark {
+        opacity: 0.08 !important;
+      }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- ============================================================
+       TOP ACTION BAR
+  ============================================================ -->
+  <div class="action-bar" id="actionBar">
+    <div class="action-group">
+      <button class="btn btn-primary" id="btnDownloadPdf" onclick="downloadResultPdf()">
+        <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+        Download PDF
+      </button>
+
+      <button class="btn btn-accent" id="btnSendResult" onclick="sendResultViaEmail()">
+        <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg>
+        Send Result
+      </button>
+
+      <button class="btn btn-outline" id="btnCopySummary" onclick="copyPlainSummary()">
+        <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3"/></svg>
+        Copy Summary (WhatsApp)
+      </button>
+    </div>
+
+    <button class="btn btn-outline" onclick="window.print()">
+      <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z"/></svg>
+      Print View
+    </button>
+  </div>
+
+  <!-- Instruction Notice for Email Attachment Flow -->
+  <div class="toast-banner" id="toastBanner">
+    <strong>Notice:</strong> PDF downloaded successfully. Please attach the downloaded file to your email message that was just prepared!
+  </div>
+
+  <!-- ============================================================
+       RESULT CARD SHEET (Captured by html2canvas)
+  ============================================================ -->
+  <div class="result-sheet" id="resultCardSheet">
+    
+    <!-- Watermark Layer (Background) -->
+    <div class="card-watermark" id="cardWatermark">
+      <img id="watermarkImg" src="logo.png" alt="Watermark" crossorigin="anonymous" />
+    </div>
+
+    <!-- Foreground Content Layer -->
+    <div class="card-content">
+      <div class="academic-frame">
+        
+        <!-- Header -->
+        <header class="card-header">
+          <img class="header-logo" id="headerLogoImg" src="logo.png" alt="School Logo" crossorigin="anonymous" />
+          <div class="header-titles">
+            <h1 class="school-name" id="schoolNameDisplay">School Name</h1>
+            <p class="school-address" id="schoolAddressDisplay">School Address</p>
+            <div><span class="badge-statement">Statement of Marks</span></div>
+            <p class="term-title" id="termDisplay">Academic Session</p>
+          </div>
+          <div style="width: 76px; height: 76px;" class="header-logo-placeholder"></div>
+        </header>
+
+        <!-- Student Information Grid -->
+        <section class="student-info-grid">
+          <div class="info-row">
+            <span class="info-label">Student Name:</span>
+            <span class="info-value" id="dispStudentName">-</span>
+          </div>
+          <div class="info-row">
+            <span class="info-label">Roll / ID No:</span>
+            <span class="info-value" id="dispRollNumber">-</span>
+          </div>
+          <div class="info-row">
+            <span class="info-label">Class / Grade:</span>
+            <span class="info-value" id="dispClassName">-</span>
+          </div>
+          <div class="info-row">
+            <span class="info-label">Section:</span>
+            <span class="info-value" id="dispSection">-</span>
+          </div>
+        </section>
+
+        <!-- Marks Table -->
+        <section class="marks-table-wrapper">
+          <table class="marks-table">
+            <thead>
+              <tr>
+                <th class="col-subject">Subject Description</th>
+                <th style="width: 16%;">Max Marks</th>
+                <th style="width: 18%;">Marks Obtained</th>
+                <th style="width: 14%;">Grade</th>
+              </tr>
+            </thead>
+            <tbody id="marksTableBody">
+              <!-- Dynamically populated from RESULT_DATA -->
+            </tbody>
+            <tfoot>
+              <tr class="summary-row">
+                <td class="col-subject summary-label">Grand Total</td>
+                <td class="numeric" id="dispMaxTotal">-</td>
+                <td class="numeric" id="dispTotalMarks">-</td>
+                <td class="center" id="dispGrandGrade">-</td>
+              </tr>
+            </tfoot>
+          </table>
+        </section>
+
+        <!-- KPI Performance Cards -->
+        <section class="metrics-bar">
+          <div class="metric-card">
+            <div class="metric-title">Total Score</div>
+            <div class="metric-value"><span id="dispScoreFraction">0 / 0</span></div>
+          </div>
+          <div class="metric-card">
+            <div class="metric-title">Percentage</div>
+            <div class="metric-value" id="dispPercentage">0%</div>
+          </div>
+          <div class="metric-card">
+            <div class="metric-title">Final Grade</div>
+            <div class="metric-value" id="dispOverallGrade">-</div>
+          </div>
+          <div class="metric-card">
+            <div class="metric-title">Result Status</div>
+            <div class="metric-value" style="margin-top: 2px;">
+              <span class="status-badge" id="dispStatusBadge">PASSED</span>
+            </div>
+          </div>
+        </section>
+
+        <!-- Footer & Signature Lines -->
+        <footer class="card-footer">
+          <div class="issue-date-box">
+            Date of Issue: <strong id="dispIssueDate">March 15, 2026</strong>
+          </div>
+          <div class="signatures-box">
+            <div class="signature-item">
+              <div class="signature-space"></div>
+              <div class="signature-title">Class Teacher</div>
+            </div>
+            <div class="signature-item">
+              <div class="signature-space"></div>
+              <div class="signature-title">Principal</div>
+            </div>
+          </div>
+        </footer>
+
+      </div>
+    </div>
+  </div>
+
+  <!-- ============================================================
+       SCRIPT: DATA OBJECT & CONTROLLER LOGIC
+  ============================================================ -->
+  <script>
+    /* -------------------------------------------------------------
+       DATA OBJECT (Edit values here directly)
+    ------------------------------------------------------------- */
+    const RESULT_DATA = {
+      // School Details
+      schoolName: "Unique Scholars High School",
+      schoolAddress: "Main Campus, Education Boulevard",
+      schoolLogoUrl: "logo.png", // Path to school crest (e.g. logo.png or {{SCHOOL_LOGO_URL}})
+
+      // Academic Term
+      term: "Annual Examination Session 2025 - 2026",
+
+      // Student Profile
+      studentName: "Muhammad Ali Raza",
+      rollNumber: "STU-000001",
+      className: "Class 10th",
+      section: "Section A",
+      parentEmail: "parent.guardian@example.com", // Used to pre-fill email client
+
+      // Subjects List
+      subjects: [
+        { name: "English Language & Literature", maxMarks: 100, marksObtained: 88, grade: "A+" },
+        { name: "Mathematics (Advanced)", maxMarks: 100, marksObtained: 94, grade: "A+" },
+        { name: "Physics & Lab Practical", maxMarks: 100, marksObtained: 85, grade: "A" },
+        { name: "Chemistry & Lab Practical", maxMarks: 100, marksObtained: 79, grade: "B+" },
+        { name: "Computer Science & Programming", maxMarks: 100, marksObtained: 92, grade: "A+" },
+        { name: "Pakistan Studies / Social Science", maxMarks: 50, marksObtained: 44, grade: "A" }
+      ],
+
+      // Aggregates
+      totalMarks: 482,
+      maxTotalMarks: 550,
+      percentage: "87.64%",
+      overallGrade: "A+",
+      status: "PASSED", // "PASSED" or "FAILED"
+      dateOfIssue: "March 15, 2026"
+    };
+
+    /* -------------------------------------------------------------
+       FALLBACK EMBLEM (Used if logo cannot be loaded)
+    ------------------------------------------------------------- */
+    const FALLBACK_ACADEMIC_SVG = `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" fill="%230f172a"><path d="M50 8L15 26l35 18 35-18L50 8zm-28 32v18c0 14 12.5 25 28 25s28-11 28-25V40l-28 14-28-14z"/></svg>`;
+
+    /* -------------------------------------------------------------
+       HYDRATE CARD DOM WITH DATA
+    ------------------------------------------------------------- */
+    function renderResultCard(data) {
+      document.getElementById('schoolNameDisplay').innerText = data.schoolName;
+      document.getElementById('schoolAddressDisplay').innerText = data.schoolAddress;
+      document.getElementById('termDisplay').innerText = data.term;
+
+      document.getElementById('dispStudentName').innerText = data.studentName;
+      document.getElementById('dispRollNumber').innerText = data.rollNumber;
+      document.getElementById('dispClassName').innerText = data.className;
+      document.getElementById('dispSection').innerText = data.section;
+      document.getElementById('dispIssueDate').innerText = data.dateOfIssue;
+
+      // Safe logo loading with fallback
+      const effectiveLogo = (data.schoolLogoUrl && data.schoolLogoUrl !== "{{SCHOOL_LOGO_URL}}")
+        ? data.schoolLogoUrl
+        : FALLBACK_ACADEMIC_SVG;
+
+      const headerLogo = document.getElementById('headerLogoImg');
+      const watermarkLogo = document.getElementById('watermarkImg');
+      headerLogo.onerror = () => { headerLogo.src = FALLBACK_ACADEMIC_SVG; };
+      watermarkLogo.onerror = () => { watermarkLogo.src = FALLBACK_ACADEMIC_SVG; };
+      headerLogo.src = effectiveLogo;
+      watermarkLogo.src = effectiveLogo;
+
+      // Render Marks Rows
+      const tbody = document.getElementById('marksTableBody');
+      tbody.innerHTML = '';
+      data.subjects.forEach(sub => {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td class="col-subject">${sub.name}</td>
+          <td class="numeric">${sub.maxMarks}</td>
+          <td class="numeric">${sub.marksObtained}</td>
+          <td class="center">${sub.grade}</td>
+        `;
+        tbody.appendChild(tr);
+      });
+
+      // Summary & KPIs
+      document.getElementById('dispMaxTotal').innerText = data.maxTotalMarks;
+      document.getElementById('dispTotalMarks').innerText = data.totalMarks;
+      document.getElementById('dispGrandGrade').innerText = data.overallGrade;
+
+      document.getElementById('dispScoreFraction').innerText = `${data.totalMarks} / ${data.maxTotalMarks}`;
+      document.getElementById('dispPercentage').innerText = data.percentage;
+      document.getElementById('dispOverallGrade').innerText = data.overallGrade;
+
+      const badge = document.getElementById('dispStatusBadge');
+      badge.innerText = data.status;
+      badge.className = `status-badge ${data.status.toUpperCase() === 'PASSED' ? 'status-passed' : 'status-failed'}`;
+    }
+
+    /* -------------------------------------------------------------
+       PDF GENERATOR ENGINE (A4 Proportionate Single Page)
+    ------------------------------------------------------------- */
+    async function createPdfInstance() {
+      const cardElement = document.getElementById('resultCardSheet');
+
+      // Capture element with html2canvas at 2x scale for print sharpness
+      const canvas = await html2canvas(cardElement, {
+        scale: 2,
+        useCORS: true,
+        allowTaint: true,
+        backgroundColor: '#ffffff',
+        logging: false
+      });
+
+      const { jsPDF } = window.jspdf;
+      // Standard A4 portrait: 210mm x 297mm
+      const pdf = new jsPDF('p', 'mm', 'a4');
+      const pageWidth = 210;
+      const pageHeight = 297;
+
+      const margin = 10; // 10mm margins on all sides
+      const printWidth = pageWidth - (margin * 2);
+      const imgHeight = (canvas.height * printWidth) / canvas.width;
+
+      // Center vertically if there is excess space, ensuring single-page clean layout
+      const yOffset = imgHeight < (pageHeight - (margin * 2))
+        ? margin + ((pageHeight - (margin * 2) - imgHeight) / 2)
+        : margin;
+
+      const imgData = canvas.toDataURL('image/jpeg', 0.98);
+      pdf.addImage(imgData, 'JPEG', margin, yOffset, printWidth, imgHeight);
+
+      const filename = `result_${RESULT_DATA.rollNumber}_${RESULT_DATA.studentName.replace(/\s+/g, '_')}.pdf`;
+      return { pdf, filename };
+    }
+
+    /* -------------------------------------------------------------
+       ACTION 1: DIRECT DOWNLOAD
+    ------------------------------------------------------------- */
+    async function downloadResultPdf() {
+      const btn = document.getElementById('btnDownloadPdf');
+      const originalText = btn.innerHTML;
+      btn.disabled = true;
+      btn.innerHTML = 'Generating PDF...';
+
+      try {
+        const { pdf, filename } = await createPdfInstance();
+        pdf.save(filename);
+      } catch (err) {
+        console.error('PDF Generation failed:', err);
+        alert('Could not generate PDF: ' + err.message);
+      } finally {
+        btn.disabled = false;
+        btn.innerHTML = originalText;
+      }
+    }
+
+    /* -------------------------------------------------------------
+       ACTION 2: SEND RESULT VIA EMAIL (Two-Step Workflow)
+    ------------------------------------------------------------- */
+    async function sendResultViaEmail() {
+      const btn = document.getElementById('btnSendResult');
+      const originalText = btn.innerHTML;
+      btn.disabled = true;
+      btn.innerHTML = 'Preparing...';
+
+      try {
+        // Step 1: Generate & automatically download the PDF
+        const { pdf, filename } = await createPdfInstance();
+        pdf.save(filename);
+
+        // Step 2: Show clear on-screen instructions
+        const toast = document.getElementById('toastBanner');
+        toast.style.display = 'block';
+
+        // Step 3: Construct mailto link with pre-filled subject and body
+        const toEmail = encodeURIComponent(RESULT_DATA.parentEmail || '');
+        const subject = encodeURIComponent(`Official Result Card - ${RESULT_DATA.studentName} (${RESULT_DATA.term})`);
+        const bodyMessage = encodeURIComponent(
+          `Dear Parent/Guardian,\n\n` +
+          `Please find attached the official statement of marks for ${RESULT_DATA.studentName}, Roll No. ${RESULT_DATA.rollNumber}, for the ${RESULT_DATA.term}.\n\n` +
+          `Academic Summary:\n` +
+          `- Total Marks: ${RESULT_DATA.totalMarks} / ${RESULT_DATA.maxTotalMarks}\n` +
+          `- Percentage: ${RESULT_DATA.percentage}\n` +
+          `- Final Grade: ${RESULT_DATA.overallGrade}\n` +
+          `- Status: ${RESULT_DATA.status}\n\n` +
+          `Please refer to the downloaded PDF (${filename}) attached to this email for full subject-wise marks.\n\n` +
+          `Warm regards,\n` +
+          `Administration Office\n` +
+          `${RESULT_DATA.schoolName}`
+        );
+
+        // Launch user's default email client
+        window.location.href = `mailto:${toEmail}?subject=${subject}&body=${bodyMessage}`;
+      } catch (err) {
+        console.error('Send failed:', err);
+        alert('Could not complete send operation: ' + err.message);
+      } finally {
+        btn.disabled = false;
+        btn.innerHTML = originalText;
+      }
+    }
+
+    /* -------------------------------------------------------------
+       ACTION 3: COPY PLAIN TEXT SUMMARY (WhatsApp / SMS Sharing)
+    ------------------------------------------------------------- */
+    function copyPlainSummary() {
+      let text = `🎓 *${RESULT_DATA.schoolName.toUpperCase()}*\n`;
+      text += `*Official Result Card — ${RESULT_DATA.term}*\n`;
+      text += `-----------------------------------------\n`;
+      text += `Student: *${RESULT_DATA.studentName}*\n`;
+      text += `Roll Number: ${RESULT_DATA.rollNumber} | Class: ${RESULT_DATA.className} (${RESULT_DATA.section})\n\n`;
+      text += `📋 *Subject-wise Marks:*\n`;
+
+      RESULT_DATA.subjects.forEach(s => {
+        text += `• ${s.name}: ${s.marksObtained}/${s.maxMarks} (Grade ${s.grade})\n`;
+      });
+
+      text += `\n📊 *Final Result:*\n`;
+      text += `Total: ${RESULT_DATA.totalMarks}/${RESULT_DATA.maxTotalMarks} (${RESULT_DATA.percentage})\n`;
+      text += `Overall Grade: *${RESULT_DATA.overallGrade}*\n`;
+      text += `Status: *${RESULT_DATA.status}*\n`;
+      text += `Date of Issue: ${RESULT_DATA.dateOfIssue}\n`;
+      text += `-----------------------------------------`;
+
+      navigator.clipboard.writeText(text).then(() => {
+        const btn = document.getElementById('btnCopySummary');
+        const orig = btn.innerHTML;
+        btn.innerHTML = 'Summary Copied! ✓';
+        setTimeout(() => { btn.innerHTML = orig; }, 2500);
+      }).catch(err => {
+        alert('Failed to copy to clipboard: ' + err);
+      });
+    }
+
+    // Initial render on page load
+    document.addEventListener('DOMContentLoaded', () => {
+      renderResultCard(RESULT_DATA);
+    });
+  </script>
+</body>
+</html>

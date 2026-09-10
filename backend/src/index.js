@@ -762,11 +762,10 @@ app.get('/api/admin/results/pdf/:resultId', async (req, res) => {
 
     rowsHtml += `
       <tr>
-        <td style="padding: 10px; border-bottom: 1px solid #e2e8f0; font-weight: 600;">${subj}</td>
-        <td style="padding: 10px; border-bottom: 1px solid #e2e8f0; text-align: center;">${total}</td>
-        <td style="padding: 10px; border-bottom: 1px solid #e2e8f0; text-align: center; font-weight: bold; color: #1e293b;">${obtained}</td>
-        <td style="padding: 10px; border-bottom: 1px solid #e2e8f0; text-align: center;">${pct}%</td>
-        <td style="padding: 10px; border-bottom: 1px solid #e2e8f0; text-align: center;"><span style="background: #e0f2fe; color: #0369a1; padding: 3px 8px; borderRadius: 4px; font-weight: bold;">${subjGrade}</span></td>
+        <td class="col-subject">${subj}</td>
+        <td class="numeric">${total}</td>
+        <td class="numeric">${obtained}</td>
+        <td class="center">${subjGrade}</td>
       </tr>
     `;
   });
@@ -775,100 +774,349 @@ app.get('/api/admin/results/pdf/:resultId', async (req, res) => {
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Official Report Card - ${r.studentName}</title>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Official Result Card - ${r.studentName}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@600;700;800&family=Inter:wght@400;500;600;700;800&family=Merriweather:ital,wght@0,400;0,700;1,400&display=swap" rel="stylesheet">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
   <style>
-    body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #f8fafc; color: #0f172a; margin: 0; padding: 20px; }
-    .card { max-width: 800px; margin: 0 auto; background: #ffffff; padding: 35px; border-radius: 12px; box-shadow: 0 10px 25px rgba(0,0,0,0.08); border: 1px solid #e2e8f0; }
-    .header { text-align: center; border-bottom: 3px solid #2563eb; padding-bottom: 20px; margin-bottom: 25px; }
-    .header h1 { margin: 0; color: #1e3a8a; font-size: 28px; letter-spacing: 0.5px; }
-    .header p { margin: 4px 0 0 0; color: #64748b; font-size: 14px; }
-    .badge { display: inline-block; background: #2563eb; color: white; padding: 4px 14px; border-radius: 20px; font-size: 13px; font-weight: 600; margin-top: 10px; }
-    .info-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; background: #f1f5f9; padding: 15px 20px; border-radius: 8px; margin-bottom: 25px; }
-    .info-item span { font-size: 13px; color: #64748b; display: block; }
-    .info-item strong { font-size: 15px; color: #1e293b; }
-    table { width: 100%; border-collapse: collapse; margin-bottom: 25px; }
-    th { background: #1e293b; color: white; padding: 12px 10px; text-align: left; font-size: 13px; text-transform: uppercase; letter-spacing: 0.5px; }
-    .summary-box { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; text-align: center; margin-bottom: 25px; }
-    .summary-card { background: #f8fafc; border: 1fr solid #e2e8f0; padding: 12px; border-radius: 8px; }
-    .summary-card span { font-size: 12px; color: #64748b; display: block; }
-    .summary-card strong { font-size: 20px; color: #2563eb; font-weight: 800; }
-    .status-pass { color: #16a34a !important; }
-    .status-fail { color: #dc2626 !important; }
-    .remarks-box { background: #fffbe6; border-left: 4px solid #f59e0b; padding: 12px 16px; margin-bottom: 30px; border-radius: 0 8px 8px 0; }
-    .footer { display: flex; justify-content: space-between; align-items: flex-end; margin-top: 40px; padding-top: 20px; border-top: 1px dashed #cbd5e1; }
-    .signature { text-align: center; width: 200px; }
-    .signature-line { border-bottom: 1px solid #475569; margin-bottom: 5px; height: 40px; }
-    .print-btn { background: #2563eb; color: white; border: none; padding: 10px 20px; font-weight: 600; border-radius: 6px; cursor: pointer; float: right; margin-bottom: 15px; }
-    @media print { .print-btn { display: none; } body { background: white; padding: 0; } .card { box-shadow: none; border: none; } }
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      min-height: 100vh;
+      background-color: #ebedf0;
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      color: #1e293b;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      padding: 32px 16px;
+      -webkit-font-smoothing: antialiased;
+    }
+    .action-bar {
+      width: 100%; max-width: 800px; display: flex; flex-wrap: wrap;
+      justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 20px;
+    }
+    .action-group { display: flex; gap: 10px; flex-wrap: wrap; }
+    .btn {
+      display: inline-flex; align-items: center; gap: 8px; padding: 10px 18px;
+      font-size: 13px; font-weight: 600; border-radius: 6px; border: 1px solid transparent;
+      cursor: pointer; transition: all 0.18s ease-in-out; text-decoration: none;
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+    }
+    .btn-primary { background-color: #0f172a; color: #ffffff; }
+    .btn-primary:hover { background-color: #1e293b; transform: translateY(-1px); }
+    .btn-accent { background-color: #0284c7; color: #ffffff; }
+    .btn-accent:hover { background-color: #0369a1; transform: translateY(-1px); }
+    .btn-outline { background-color: #ffffff; color: #334155; border-color: #cbd5e1; }
+    .btn-outline:hover { background-color: #f8fafc; border-color: #94a3b8; }
+    .toast-banner {
+      display: none; width: 100%; max-width: 800px; padding: 12px 16px; margin-bottom: 16px;
+      border-radius: 6px; font-size: 13px; font-weight: 500; background-color: #ecfdf5;
+      color: #065f46; border: 1px solid #a7f3d0;
+    }
+    .result-sheet {
+      position: relative; width: 100%; max-width: 800px; background: #ffffff;
+      border: 1px solid #dcdfe4; border-radius: 4px;
+      box-shadow: 0 12px 35px -4px rgba(15, 23, 42, 0.12), 0 4px 10px -2px rgba(15, 23, 42, 0.04);
+      overflow: hidden;
+    }
+    .card-watermark {
+      position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+      width: 65%; max-width: 480px; opacity: 0.08; z-index: 0;
+      pointer-events: none; user-select: none;
+    }
+    .card-watermark img { width: 100%; height: auto; display: block; filter: grayscale(100%); }
+    .card-content { position: relative; z-index: 1; padding: 48px; }
+    .academic-frame { border: 1.5px solid #0f172a; padding: 30px; position: relative; }
+    .academic-frame::before {
+      content: ""; position: absolute; top: 3px; left: 3px; right: 3px; bottom: 3px;
+      border: 0.5px solid #64748b; pointer-events: none;
+    }
+    .card-header {
+      display: flex; align-items: center; justify-content: space-between; gap: 20px;
+      border-bottom: 2px solid #0f172a; padding-bottom: 20px; margin-bottom: 24px;
+    }
+    .header-logo { width: 76px; height: 76px; flex-shrink: 0; object-fit: contain; }
+    .header-titles { flex: 1; text-align: center; }
+    .school-name {
+      font-family: 'Cinzel', 'Merriweather', serif; font-size: 24px; font-weight: 700;
+      letter-spacing: 0.8px; color: #0f172a; text-transform: uppercase; margin-bottom: 4px;
+    }
+    .school-address { font-size: 11.5px; color: #475569; font-weight: 500; margin-bottom: 12px; }
+    .badge-statement {
+      display: inline-block; background: #0f172a; color: #ffffff; font-family: 'Cinzel', serif;
+      font-size: 12.5px; letter-spacing: 2px; padding: 4px 18px; text-transform: uppercase; font-weight: 700;
+    }
+    .term-title { font-size: 12px; color: #334155; font-weight: 600; margin-top: 6px; letter-spacing: 0.4px; }
+    .student-info-grid {
+      display: grid; grid-template-columns: 1fr 1fr; column-gap: 32px; row-gap: 10px;
+      background-color: #f8fafc; border: 1px solid #e2e8f0; padding: 14px 20px;
+      margin-bottom: 24px; font-size: 12.5px;
+    }
+    .info-row { display: flex; align-items: baseline; }
+    .info-label { width: 110px; font-weight: 600; color: #475569; text-transform: uppercase; font-size: 11px; letter-spacing: 0.4px; }
+    .info-value { flex: 1; font-weight: 700; color: #0f172a; }
+    .marks-table-wrapper { margin-bottom: 24px; }
+    .marks-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+    .marks-table th {
+      background-color: #0f172a; color: #ffffff; font-weight: 600; text-transform: uppercase;
+      letter-spacing: 0.5px; font-size: 11px; padding: 10px 14px; border: 1px solid #0f172a; text-align: center;
+    }
+    .marks-table th.col-subject { text-align: left; width: 52%; }
+    .marks-table td { padding: 9px 14px; border: 1px solid #cbd5e1; color: #1e293b; }
+    .marks-table td.col-subject { font-weight: 500; }
+    .marks-table td.numeric { text-align: right; font-variant-numeric: tabular-nums; font-weight: 600; }
+    .marks-table td.center { text-align: center; font-weight: 700; }
+    .marks-table tbody tr:nth-child(even) { background-color: #f8fafc; }
+    .marks-table tr.summary-row td {
+      background-color: #f1f5f9; border-top: 2px solid #0f172a; font-weight: 700; color: #0f172a;
+    }
+    .marks-table tr.summary-row td.summary-label {
+      font-family: 'Cinzel', serif; letter-spacing: 1px; text-transform: uppercase; font-size: 11.5px;
+    }
+    .metrics-bar { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 30px; }
+    .metric-card { background: #f8fafc; border: 1px solid #e2e8f0; padding: 10px 12px; text-align: center; border-radius: 3px; }
+    .metric-title { font-size: 10px; font-weight: 600; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 2px; }
+    .metric-value { font-size: 16px; font-weight: 800; color: #0f172a; font-variant-numeric: tabular-nums; }
+    .status-badge { display: inline-block; padding: 2px 10px; border-radius: 3px; font-size: 12px; font-weight: 800; letter-spacing: 0.6px; }
+    .status-passed { background: #dcfce7; color: #15803d; border: 1px solid #bbf7d0; }
+    .status-failed { background: #fee2e2; color: #b91c1c; border: 1px solid #fecaca; }
+    .card-footer { display: flex; justify-content: space-between; align-items: flex-end; padding-top: 20px; margin-top: 10px; }
+    .issue-date-box { font-size: 11px; color: #475569; font-weight: 500; }
+    .issue-date-box strong { color: #0f172a; }
+    .signatures-box { display: flex; gap: 48px; }
+    .signature-item { text-align: center; width: 150px; }
+    .signature-space { height: 48px; border-bottom: 1.5px dashed #475569; margin-bottom: 6px; }
+    .signature-title { font-size: 11px; font-weight: 600; color: #334155; text-transform: uppercase; letter-spacing: 0.5px; }
+    @media (max-width: 820px) {
+      body { padding: 12px; }
+      .card-content { padding: 20px; }
+      .academic-frame { padding: 16px; }
+      .school-name { font-size: 18px; }
+      .student-info-grid { grid-template-columns: 1fr; gap: 8px; }
+      .metrics-bar { grid-template-columns: 1fr 1fr; }
+    }
+    @page { size: A4 portrait; margin: 10mm; }
+    @media print {
+      body { background: #ffffff !important; padding: 0 !important; display: block !important; }
+      .action-bar, .toast-banner { display: none !important; }
+      .result-sheet { box-shadow: none !important; border: none !important; max-width: 100% !important; width: 100% !important; }
+      .card-content { padding: 0 !important; }
+      *, *::before, *::after { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+      .card-watermark { opacity: 0.08 !important; }
+    }
   </style>
 </head>
 <body>
-  <div style="max-width: 800px; margin: 0 auto;">
-    <button class="print-btn" onclick="window.print()">🖨️ Print / Download PDF</button>
+  <div class="action-bar" id="actionBar">
+    <div class="action-group">
+      <button class="btn btn-primary" id="btnDownloadPdf" onclick="downloadResultPdf()">
+        <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+        Download PDF
+      </button>
+      <button class="btn btn-accent" id="btnSendResult" onclick="sendResultViaEmail()">
+        <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg>
+        Send Result
+      </button>
+      <button class="btn btn-outline" id="btnCopySummary" onclick="copyPlainSummary()">
+        <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3"/></svg>
+        Copy Summary (WhatsApp)
+      </button>
+    </div>
+    <button class="btn btn-outline" onclick="window.print()">
+      <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z"/></svg>
+      Print View
+    </button>
   </div>
-  <div class="card">
-    <div class="header">
-      <h1>🎓 ${school.name}</h1>
-      <p>${school.address} | Phone: ${school.phone}</p>
-      <div class="badge">OFFICIAL ACADEMIC REPORT CARD - ${term.name}</div>
+
+  <div class="toast-banner" id="toastBanner">
+    <strong>Notice:</strong> PDF downloaded successfully. Please attach the downloaded file to your email message that was just prepared!
+  </div>
+
+  <div class="result-sheet" id="resultCardSheet">
+    <div class="card-watermark">
+      <img src="/logo.png" onerror="this.src='/admin/logo.png'" alt="Watermark" crossorigin="anonymous" />
     </div>
+    <div class="card-content">
+      <div class="academic-frame">
+        <header class="card-header">
+          <img class="header-logo" src="/logo.png" onerror="this.src='/admin/logo.png'" alt="School Logo" crossorigin="anonymous" />
+          <div class="header-titles">
+            <h1 class="school-name">${school.name}</h1>
+            <p class="school-address">${school.address} | Phone: ${school.phone || '0300-1234567'}</p>
+            <div><span class="badge-statement">Statement of Marks</span></div>
+            <p class="term-title">${term.name}</p>
+          </div>
+          <div style="width: 76px; height: 76px;"></div>
+        </header>
 
-    <div class="info-grid">
-      <div class="info-item"><span>Student Name:</span><strong>${r.studentName}</strong></div>
-      <div class="info-item"><span>Student ID / Roll:</span><strong>${r.studentId}</strong></div>
-      <div class="info-item"><span>Class & Section:</span><strong>${targetClass.name}</strong></div>
-      <div class="info-item"><span>Examination Term:</span><strong>${term.name}</strong></div>
-    </div>
+        <section class="student-info-grid">
+          <div class="info-row"><span class="info-label">Student Name:</span><span class="info-value">${r.studentName}</span></div>
+          <div class="info-row"><span class="info-label">Roll / ID No:</span><span class="info-value">${r.studentId}</span></div>
+          <div class="info-row"><span class="info-label">Class & Grade:</span><span class="info-value">${targetClass.name}</span></div>
+          <div class="info-row"><span class="info-label">Examination:</span><span class="info-value">${term.name}</span></div>
+        </section>
 
-    <table>
-      <thead>
-        <tr>
-          <th>Subject</th>
-          <th style="text-align: center;">Total Marks</th>
-          <th style="text-align: center;">Marks Obtained</th>
-          <th style="text-align: center;">Percentage</th>
-          <th style="text-align: center;">Grade</th>
-        </tr>
-      </thead>
-      <tbody>
-        ${rowsHtml}
-      </tbody>
-    </table>
+        <section class="marks-table-wrapper">
+          <table class="marks-table">
+            <thead>
+              <tr>
+                <th class="col-subject">Subject Description</th>
+                <th style="width: 16%;">Max Marks</th>
+                <th style="width: 18%;">Marks Obtained</th>
+                <th style="width: 14%;">Grade</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${rowsHtml}
+            </tbody>
+            <tfoot>
+              <tr class="summary-row">
+                <td class="col-subject summary-label">Grand Total</td>
+                <td class="numeric">${r.totalMax}</td>
+                <td class="numeric">${r.totalObtained}</td>
+                <td class="center">${r.grade}</td>
+              </tr>
+            </tfoot>
+          </table>
+        </section>
 
-    <div class="summary-box">
-      <div class="summary-card">
-        <span>Grand Total</span>
-        <strong>${r.totalObtained} / ${r.totalMax}</strong>
-      </div>
-      <div class="summary-card">
-        <span>Overall Percentage</span>
-        <strong>${r.percentage}%</strong>
-      </div>
-      <div class="summary-card">
-        <span>Grade & Status</span>
-        <strong class="${r.passStatus === 'PASS' ? 'status-pass' : 'status-fail'}">${r.grade} (${r.passStatus})</strong>
-      </div>
-      <div class="summary-card">
-        <span>Class Position</span>
-        <strong>#${r.rank}</strong>
-      </div>
-    </div>
+        <section class="metrics-bar">
+          <div class="metric-card">
+            <div class="metric-title">Total Score</div>
+            <div class="metric-value">${r.totalObtained} / ${r.totalMax}</div>
+          </div>
+          <div class="metric-card">
+            <div class="metric-title">Percentage</div>
+            <div class="metric-value">${r.percentage}%</div>
+          </div>
+          <div class="metric-card">
+            <div class="metric-title">Final Grade</div>
+            <div class="metric-value">${r.grade}</div>
+          </div>
+          <div class="metric-card">
+            <div class="metric-title">Result Status</div>
+            <div class="metric-value" style="margin-top: 2px;">
+              <span class="status-badge ${r.passStatus === 'PASS' ? 'status-passed' : 'status-failed'}">${r.passStatus}</span>
+            </div>
+          </div>
+        </section>
 
-    ${r.remarks ? `<div class="remarks-box"><strong>Teacher Remarks:</strong> "${r.remarks}"</div>` : ''}
-
-    <div class="footer">
-      <div>
-        <p style="font-size: 11px; color: #94a3b8; margin: 0;">Report Issued On: ${new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })}</p>
-        <p style="font-size: 11px; color: #94a3b8; margin: 2px 0 0 0;">System Verified Digital Marksheet</p>
-      </div>
-      <div class="signature">
-        <div class="signature-line"></div>
-        <span style="font-size: 12px; font-weight: 600; color: #334155;">Principal Signature</span>
+        <footer class="card-footer">
+          <div class="issue-date-box">
+            Date of Issue: <strong>${new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })}</strong>
+          </div>
+          <div class="signatures-box">
+            <div class="signature-item">
+              <div class="signature-space"></div>
+              <div class="signature-title">Class Teacher</div>
+            </div>
+            <div class="signature-item">
+              <div class="signature-space"></div>
+              <div class="signature-title">Principal</div>
+            </div>
+          </div>
+        </footer>
       </div>
     </div>
   </div>
+
+  <script>
+    async function createPdfInstance() {
+      const cardElement = document.getElementById('resultCardSheet');
+      const canvas = await html2canvas(cardElement, {
+        scale: 2,
+        useCORS: true,
+        allowTaint: true,
+        backgroundColor: '#ffffff',
+        logging: false
+      });
+      const { jsPDF } = window.jspdf;
+      const pdf = new jsPDF('p', 'mm', 'a4');
+      const pageWidth = 210;
+      const pageHeight = 297;
+      const margin = 10;
+      const printWidth = pageWidth - (margin * 2);
+      const imgHeight = (canvas.height * printWidth) / canvas.width;
+      const yOffset = imgHeight < (pageHeight - (margin * 2))
+        ? margin + ((pageHeight - (margin * 2) - imgHeight) / 2)
+        : margin;
+      const imgData = canvas.toDataURL('image/jpeg', 0.98);
+      pdf.addImage(imgData, 'JPEG', margin, yOffset, printWidth, imgHeight);
+      const filename = 'result_${r.studentId}_${r.studentName.replace(/\\s+/g, '_')}.pdf';
+      return { pdf, filename };
+    }
+
+    async function downloadResultPdf() {
+      const btn = document.getElementById('btnDownloadPdf');
+      const orig = btn.innerHTML;
+      btn.disabled = true;
+      btn.innerHTML = 'Generating PDF...';
+      try {
+        const { pdf, filename } = await createPdfInstance();
+        pdf.save(filename);
+      } catch (err) {
+        alert('Could not generate PDF: ' + err.message);
+      } finally {
+        btn.disabled = false;
+        btn.innerHTML = orig;
+      }
+    }
+
+    async function sendResultViaEmail() {
+      const btn = document.getElementById('btnSendResult');
+      const orig = btn.innerHTML;
+      btn.disabled = true;
+      btn.innerHTML = 'Preparing...';
+      try {
+        const { pdf, filename } = await createPdfInstance();
+        pdf.save(filename);
+        document.getElementById('toastBanner').style.display = 'block';
+        const toEmail = encodeURIComponent('${r.parentEmail || ''}');
+        const subject = encodeURIComponent('Official Result Card - ${r.studentName} (${term.name})');
+        const bodyMessage = encodeURIComponent(
+          'Dear Parent/Guardian,\\n\\n' +
+          'Please find attached the official statement of marks for ${r.studentName}, Roll No. ${r.studentId}, for ${term.name}.\\n\\n' +
+          'Academic Summary:\\n' +
+          '- Total Marks: ${r.totalObtained} / ${r.totalMax}\\n' +
+          '- Percentage: ${r.percentage}%\\n' +
+          '- Final Grade: ${r.grade}\\n' +
+          '- Status: ${r.passStatus}\\n\\n' +
+          'Please refer to the downloaded PDF (' + filename + ') attached to this email.\\n\\n' +
+          'Warm regards,\\n' +
+          '${school.name}'
+        );
+        window.location.href = 'mailto:' + toEmail + '?subject=' + subject + '&body=' + bodyMessage;
+      } catch (err) {
+        alert('Could not complete send operation: ' + err.message);
+      } finally {
+        btn.disabled = false;
+        btn.innerHTML = orig;
+      }
+    }
+
+    function copyPlainSummary() {
+      let text = '🎓 *${school.name.toUpperCase()}*\\n';
+      text += '*Official Result Card — ${term.name}*\\n';
+      text += '-----------------------------------------\\n';
+      text += 'Student: *${r.studentName}*\\n';
+      text += 'Roll Number: ${r.studentId} | Class: ${targetClass.name}\\n\\n';
+      text += 'Total: ${r.totalObtained}/${r.totalMax} (${r.percentage}%)\\n';
+      text += 'Overall Grade: *${r.grade}*\\n';
+      text += 'Status: *${r.passStatus}*\\n';
+      text += '-----------------------------------------';
+      navigator.clipboard.writeText(text).then(() => {
+        const btn = document.getElementById('btnCopySummary');
+        const orig = btn.innerHTML;
+        btn.innerHTML = 'Summary Copied! ✓';
+        setTimeout(() => { btn.innerHTML = orig; }, 2500);
+      });
+    }
+  </script>
 </body>
 </html>
   `;
