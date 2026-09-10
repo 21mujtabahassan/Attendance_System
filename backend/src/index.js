@@ -135,8 +135,13 @@ function startCloudDispatchWorker() {
           if (!item.phone || !item.message) continue;
 
           let media = item.media || null;
-          // Generate PDF document attachment on the fly for queued result batches
-          if (!media && (batch.source === 'results' || item.resultId || item.studentId)) {
+
+          // Strictly determine if this is an academic result marksheet message (NEVER attach result cards to fee reminders, attendance, or receipts)
+          const isResultCardMessage = (item.resultId && String(item.resultId).startsWith('RES-')) ||
+            (batch.source === 'results' && !item.message.includes('Fee') && !item.message.includes('Tuition') && (item.message.includes('Result Card') || item.message.includes('Result Announcement')));
+
+          // Generate PDF document attachment on the fly ONLY for academic result batches
+          if (!media && isResultCardMessage && (item.resultId || item.studentId)) {
             try {
               const resId = item.resultId || `RES-${item.studentId}-TERM-MID-2026`;
               const found = await getStudentResults(batch.schoolId || 'unique_scholars', { resultId: resId, studentId: item.studentId });

@@ -1380,8 +1380,10 @@ async function getAdminRecords(schoolId = 'unique_scholars', filters = {}) {
 // -------------------------------------------------------------
 async function addPendingDispatches(schoolId = 'unique_scholars', batch = [], source = 'results') {
   if (!Array.isArray(batch) || batch.length === 0) return null;
-  const batchId = `BATCH-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
-  const validSource = ['attendance', 'results', 'broadcast'].includes(source) ? source : 'results';
+  let validSource = 'results';
+  if (source === 'attendance') validSource = 'attendance';
+  else if (source === 'results' || source === 'result_card') validSource = 'results';
+  else validSource = 'broadcast'; // fee_reminder, fee_receipt, broadcast
 
   if (isPostgresConfigured()) {
     const db = getDb();
