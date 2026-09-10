@@ -267,15 +267,23 @@ async function loadOverviewData() {
   try {
     const res = await fetch(`${API_BASE}/admin/insights?schoolId=${CURRENT_SCHOOL_ID}`);
     const data = await res.json();
-    if (!data.success) return;
+    const ins = data.insights || {};
+    const rate = ins.todayAttendanceRate != null ? ins.todayAttendanceRate : (ins.today ? ins.today.rate : 0);
+    const presentCount = ins.presentToday != null ? ins.presentToday : (ins.today ? ins.today.present : 0);
+    const absentCount = ins.absentToday != null ? ins.absentToday : (ins.today ? ins.today.absent : 0);
 
-    const ins = data.insights;
-    document.getElementById('statTodayRate').innerText = `${ins.today.rate}%`;
-    document.getElementById('statTodayMeta').innerText = `${ins.today.present} Present / ${ins.today.absent} Absent`;
-    document.getElementById('statFinalizedResults').innerText = ins.totalResultsFinalized || 0;
-    document.getElementById('statTotalStudents').innerText = ins.totalStudents;
-    document.getElementById('statTotalClasses').innerText = `${ins.totalClasses} Active Classes`;
-    document.getElementById('statAlertsSent').innerText = ins.totalAlertsSent;
+    const rateEl = document.getElementById('statTodayRate');
+    if (rateEl) rateEl.innerText = `${rate}%`;
+    const metaEl = document.getElementById('statTodayMeta');
+    if (metaEl) metaEl.innerText = `${presentCount} Present / ${absentCount} Absent`;
+    const finalEl = document.getElementById('statFinalizedResults');
+    if (finalEl) finalEl.innerText = ins.totalResultsFinalized != null ? ins.totalResultsFinalized : (ins.activeTerms || 0);
+    const stuEl = document.getElementById('statTotalStudents');
+    if (stuEl) stuEl.innerText = ins.totalStudents || 0;
+    const clsEl = document.getElementById('statTotalClasses');
+    if (clsEl) clsEl.innerText = `${ins.totalClasses || 0} Active Classes`;
+    const altEl = document.getElementById('statAlertsSent');
+    if (altEl) altEl.innerText = ins.totalAlertsSent || 0;
 
     // Render Class Ratios
     const ratioBox = document.getElementById('classRatioList');
@@ -318,15 +326,51 @@ async function loadOverviewData() {
 // -------------------------------------------------------------
 // TAB 2: ACADEMIC RESULTS MODULE
 // -------------------------------------------------------------
+function getMatchingSubjectMark(marksMap, subjectName) {
+  if (!marksMap || typeof marksMap !== 'object') return '';
+  // 1. Direct exact match
+  if (marksMap[subjectName] != null && marksMap[subjectName].obtained != null) {
+    return marksMap[subjectName].obtained;
+  }
+
+  const subClean = subjectName.trim().toLowerCase();
+  const subRoot = subClean.split(/[\s&-_]+/)[0];
+
+  // 2. Case-insensitive exact match
+  const caseKey = Object.keys(marksMap).find(k => k.trim().toLowerCase() === subClean);
+  if (caseKey && marksMap[caseKey] != null && marksMap[caseKey].obtained != null) {
+    return marksMap[caseKey].obtained;
+  }
+
+  // 3. Substring / root word match (e.g. 'English' <-> 'English Rhymes', 'Math' <-> 'Math Concepts', 'Urdu' <-> 'Urdu Basics')
+  const rootKey = Object.keys(marksMap).find(k => {
+    const kClean = k.trim().toLowerCase();
+    const kRoot = kClean.split(/[\s&-_]+/)[0];
+    return kRoot === subRoot || kClean.includes(subRoot) || subClean.includes(kRoot);
+  });
+  if (rootKey && marksMap[rootKey] != null && marksMap[rootKey].obtained != null) {
+    return marksMap[rootKey].obtained;
+  }
+
+  return '';
+}
+
 function loadResultsTabData() {
   loadMarksEntryGrid();
   loadTermsAndSubjectsConfig();
+  loadFinalizedResultsHistory();
 }
 
 async function loadMarksEntryGrid() {
-  const termId = document.getElementById('marksTermSelect')?.value;
-  const classId = document.getElementById('marksClassSelect')?.value;
+  const termSelect = document.getElementById('marksTermSelect');
+  const classSelect = document.getElementById('marksClassSelect');
   const container = document.getElementById('marksGridContainer');
+
+  let termId = termSelect?.value || (globalTerms[0] ? globalTerms[0].id : '');
+  let classId = classSelect?.value || (globalClasses[0] ? globalClasses[0].id : '');
+
+  if (termSelect && termId && !termSelect.value) termSelect.value = termId;
+  if (classSelect && classId && !classSelect.value) classSelect.value = classId;
 
   if (!termId || !classId) {
     container.innerHTML = '<p class="text-muted text-center">Please select an Exam Term and Class to load the interactive marks sheet.</p>';
@@ -383,7 +427,8 @@ async function loadMarksEntryGrid() {
 
       let subjectInputsHtml = '';
       subjects.forEach(sub => {
-        const obtVal = marksMap[sub] ? marksMap[sub].obtained : '';
+        const rawVal = getMatchingSubjectMark(marksMap, sub);
+        const obtVal = rawVal !== '' ? rawVal : '';
         totalObt += Number(obtVal || 0);
         studentObj.marks[sub] = { obtained: Number(obtVal || 0), total: 100 };
 
@@ -745,9 +790,10 @@ async function handleDeleteTerm(termId) {
 }
 
 async function loadFinalizedResultsHistory() {
-  const termId = document.getElementById('historyTermSelect')?.value;
-  const classId = document.getElementById('historyClassSelect')?.value;
+  const termId = document.getElementById('historyTermSelect')?.value || '';
+  const classId = document.getElementById('historyClassSelect')?.value || '';
   const tbody = document.getElementById('finalizedResultsTableBody');
+  if (!tbody) return;
 
   try {
     const res = await fetch(`${API_BASE}/admin/results/marks?schoolId=${CURRENT_SCHOOL_ID}&termId=${termId || ''}&classId=${classId || ''}`);
