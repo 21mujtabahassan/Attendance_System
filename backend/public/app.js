@@ -510,10 +510,32 @@ function recalculateRowMarks(sIdx) {
   else if (pct >= 55) { grade = 'C'; statusPill = '<span class="pass-pill">PASS</span>'; }
   else if (pct >= 40) { grade = 'D'; statusPill = '<span class="pass-pill">PASS</span>'; }
 
-  document.getElementById(`rowTotal_${sIdx}`).innerText = `${totalObt} / ${totalMax}`;
-  document.getElementById(`rowPct_${sIdx}`).innerText = `${pct}%`;
-  document.getElementById(`rowGrade_${sIdx}`).innerText = grade;
-  document.getElementById(`rowStatus_${sIdx}`).innerHTML = statusPill;
+  const totalEl = document.getElementById(`rowTotal_${sIdx}`);
+  if (totalEl) totalEl.innerText = `${totalObt} / ${totalMax}`;
+  const pctEl = document.getElementById(`rowPct_${sIdx}`);
+  if (pctEl) pctEl.innerText = `${pct}%`;
+  const gradeEl = document.getElementById(`rowGrade_${sIdx}`);
+  if (gradeEl) gradeEl.innerText = grade;
+  const statusEl = document.getElementById(`rowStatus_${sIdx}`);
+  if (statusEl) statusEl.innerHTML = statusPill;
+
+  // Visual safeguard: mark modified row with indicator
+  const row = document.getElementById(`marksRow_${sIdx}`);
+  if (row) {
+    row.style.borderLeft = '3px solid #f59e0b';
+    let badge = document.getElementById(`unsavedBadge_${sIdx}`);
+    if (!badge) {
+      const rollCell = row.querySelector('td:first-child');
+      if (rollCell) {
+        badge = document.createElement('span');
+        badge.id = `unsavedBadge_${sIdx}`;
+        badge.className = 'badge badge-warning';
+        badge.style.cssText = 'font-size: 9px; margin-top: 3px; display: inline-block; padding: 2px 6px;';
+        badge.innerText = 'Modified';
+        rollCell.appendChild(badge);
+      }
+    }
+  }
 }
 
 async function handleSaveDraftResults() {
@@ -537,6 +559,9 @@ async function handleSaveDraftResults() {
     const data = await res.json();
     if (data.success) {
       showToast('Draft results saved successfully 📝');
+      // Clear modified badges
+      document.querySelectorAll('[id^="unsavedBadge_"]').forEach(el => el.remove());
+      document.querySelectorAll('[id^="marksRow_"]').forEach(row => { row.style.borderLeft = ''; });
     } else {
       showToast(data.error || 'Failed to save draft results.');
     }
@@ -964,7 +989,10 @@ function populateResultTelecastModal(ctx) {
 
   const badgeEl = document.getElementById('telecastGradeBadge');
   const isPass = ctx.passStatus === 'PASS';
-  badgeEl.innerHTML = `<span class="badge ${isPass ? 'badge-success' : 'badge-danger'}" style="font-size: 12px; font-weight: 700;">${ctx.grade} (${ctx.percentage}%) - ${ctx.passStatus}</span>`;
+  badgeEl.innerHTML = `
+    <span class="badge ${isPass ? 'badge-success' : 'badge-danger'}" style="font-size: 12px; font-weight: 700;">${ctx.grade} (${ctx.percentage}%) - ${ctx.passStatus}</span>
+    <span class="badge" style="font-size: 11px; margin-left: 6px; background: rgba(56, 189, 248, 0.15); color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.3); padding: 4px 8px;"><i class="fa-solid fa-cloud-arrow-up"></i> Live Synced to DB</span>
+  `;
 
   // PDF link
   const pdfBtn = document.getElementById('telecastPdfBtn');
@@ -1111,6 +1139,16 @@ async function handleDispatchResultFromModal() {
         showToast(`⚡ WhatsApp result queued for gateway telecast! (${data.studentName})`);
       } else {
         showToast(`Result prepared! Notice sent via ${data.routedVia || 'system'}.`);
+      }
+      // Clear modified indicator on the grid for this student if grid is loaded
+      if (currentTelecastContext && currentTelecastContext.studentId) {
+        const sIdx = currentMarksGridData.findIndex(s => s.studentId === currentTelecastContext.studentId || s.id === currentTelecastContext.studentId);
+        if (sIdx >= 0) {
+          const badge = document.getElementById(`unsavedBadge_${sIdx}`);
+          if (badge) badge.remove();
+          const row = document.getElementById(`marksRow_${sIdx}`);
+          if (row) row.style.borderLeft = '';
+        }
       }
       // If finalized results tab is active, refresh it
       loadFinalizedResultsHistory();

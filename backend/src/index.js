@@ -51,7 +51,8 @@ const {
   generateMonthlyFeeLedger,
   recordFeePayment,
   updateStudentFeeStatus,
-  updateStudentConcession
+  updateStudentConcession,
+  computeGradeAndStatus
 } = require('./services/store');
 const { getDb, isPostgresConfigured } = require('./db');
 
@@ -797,8 +798,62 @@ app.post('/api/admin/results/dispatch-individual', async (req, res) => {
 
     const teacherRemarks = customRemarks !== undefined ? customRemarks : (item.remarks || 'Result Finalized & Announced.');
 
-    // Persist any updated remarks directly to Neon DB / store
-    if (customRemarks !== undefined && item && item.id) {
+    // Synchronize live edited marks if supplied from frontend
+    if (marks && typeof marks === 'object' && Object.keys(marks).length > 0) {
+      let totalObtained = 0;
+      let totalMax = 0;
+      const normalizedMarks = {};
+
+      for (const [sub, m] of Object.entries(marks)) {
+        const obt = Number(typeof m === 'object' ? (m.obtained !== undefined ? m.obtained : 0) : m) || 0;
+        const tot = Number(typeof m === 'object' ? (m.total !== undefined ? m.total : 100) : 100) || 100;
+        totalObtained += obt;
+        totalMax += tot;
+        normalizedMarks[sub] = { obtained: obt, total: tot };
+      }
+
+      const percentage = totalMax > 0 ? Number(((totalObtained / totalMax) * 100).toFixed(1)) : 0;
+      const { grade, passStatus } = computeGradeAndStatus(percentage);
+
+      item.marks = normalizedMarks;
+      item.totalObtained = totalObtained;
+      item.totalMax = totalMax;
+      item.percentage = percentage;
+      item.grade = grade;
+      item.passStatus = passStatus;
+      item.remarks = teacherRemarks;
+
+      // Persist updated marks, computed summaries, and remarks directly to Neon DB
+      if (item && item.id) {
+        try {
+          if (isPostgresConfigured()) {
+            const db = getDb();
+            await db('student_results').where({ id: item.id }).update({
+              total_obtained: totalObtained,
+              total_max: totalMax,
+              percentage,
+              grade,
+              pass_status: passStatus,
+              remarks: teacherRemarks,
+              updated_at: new Date()
+            });
+
+            await db('student_result_marks').where({ result_id: item.id }).del();
+            for (const [subName, m] of Object.entries(normalizedMarks)) {
+              await db('student_result_marks').insert({
+                result_id: item.id,
+                subject_name: subName,
+                obtained: m.obtained,
+                total: m.total
+              });
+            }
+          }
+        } catch (syncErr) {
+          console.warn('Failed to sync updated marks to DB on dispatch:', syncErr.message);
+        }
+      }
+    } else if (customRemarks !== undefined && item && item.id) {
+      // Persist any updated remarks directly to Neon DB / store if only remarks changed
       try {
         if (isPostgresConfigured()) {
           const db = getDb();
@@ -874,7 +929,8 @@ Unique Scholars High School`;
       studentName,
       reportLink,
       message,
-      routedVia: waRes.routedVia || 'gateway'
+      routedVia: waRes.routedVia || 'gateway',
+      result: item
     });
   } catch (error) {
     console.error('Error dispatching individual result:', error);

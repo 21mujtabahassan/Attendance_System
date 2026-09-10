@@ -1023,12 +1023,7 @@ async function saveDraftResults(schoolId = 'unique_scholars', payload) {
           .first();
 
         const resId = existing ? existing.id : `RES-${item.studentId}-${termId}`;
-
-        // Business rule: Once FINALIZED, do not overwrite with draft
-        if (existing && existing.state === 'FINALIZED') {
-          saved.push({ id: resId, ...existing });
-          continue;
-        }
+        const recordState = (existing && existing.state === 'FINALIZED') ? 'FINALIZED' : 'DRAFT';
 
         let totalObtained = 0;
         let totalMax = 0;
@@ -1051,8 +1046,8 @@ async function saveDraftResults(schoolId = 'unique_scholars', payload) {
             percentage,
             grade,
             pass_status: passStatus,
-            remarks: item.remarks || '',
-            state: 'DRAFT',
+            remarks: item.remarks !== undefined ? item.remarks : (existing ? existing.remarks : ''),
+            state: recordState,
             updated_at: new Date()
           })
           .onConflict('id')
@@ -1083,7 +1078,7 @@ async function saveDraftResults(schoolId = 'unique_scholars', payload) {
           percentage,
           grade,
           passStatus,
-          state: 'DRAFT'
+          state: recordState
         });
       }
     });
@@ -1103,15 +1098,27 @@ async function saveDraftResults(schoolId = 'unique_scholars', payload) {
     });
     const percentage = totalMax > 0 ? Number(((totalObtained / totalMax) * 100).toFixed(1)) : 0;
     const { grade, passStatus } = computeGradeAndStatus(percentage);
-    const record = {
-      id: resId, schoolId, termId, classId, studentId: item.studentId, studentName: item.studentName,
-      parentPhone: item.parentPhone, marks: item.marks, totalObtained, totalMax, percentage, grade, passStatus,
-      remarks: item.remarks || '', state: 'DRAFT'
-    };
     const idx = db.studentResults.findIndex(r => r.id === resId || (r.termId === termId && r.studentId === item.studentId));
+    const existingState = idx >= 0 ? (db.studentResults[idx].state || 'DRAFT') : 'DRAFT';
+    const record = {
+      id: idx >= 0 ? db.studentResults[idx].id : resId,
+      schoolId,
+      termId,
+      classId,
+      studentId: item.studentId,
+      studentName: item.studentName,
+      parentPhone: item.parentPhone,
+      marks: item.marks,
+      totalObtained,
+      totalMax,
+      percentage,
+      grade,
+      passStatus,
+      remarks: item.remarks !== undefined ? item.remarks : (idx >= 0 ? db.studentResults[idx].remarks : ''),
+      state: existingState
+    };
     if (idx >= 0) {
-      record.id = db.studentResults[idx].id;
-      if (db.studentResults[idx].state !== 'FINALIZED') db.studentResults[idx] = record;
+      db.studentResults[idx] = record;
     } else {
       db.studentResults.push(record);
     }
@@ -2113,5 +2120,6 @@ module.exports = {
   generateMonthlyFeeLedger,
   recordFeePayment,
   updateStudentFeeStatus,
-  updateStudentConcession
+  updateStudentConcession,
+  computeGradeAndStatus
 };
