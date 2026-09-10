@@ -797,6 +797,18 @@ app.post('/api/admin/results/dispatch-individual', async (req, res) => {
 
     const teacherRemarks = customRemarks !== undefined ? customRemarks : (item.remarks || 'Result Finalized & Announced.');
 
+    // Persist any updated remarks directly to Neon DB / store
+    if (customRemarks !== undefined && item && item.id) {
+      try {
+        if (isPostgresConfigured()) {
+          const db = getDb();
+          await db('student_results').where({ id: item.id }).update({ remarks: customRemarks, updated_at: new Date() });
+        }
+      } catch (dbErr) {
+        console.warn('Could not update remarks in DB:', dbErr.message);
+      }
+    }
+
     let subjectsSummary = '';
     if (item.marks && typeof item.marks === 'object') {
       const entries = Object.entries(item.marks);
