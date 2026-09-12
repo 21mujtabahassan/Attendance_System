@@ -33,28 +33,31 @@
       </div>
 
       <nav class="nav-menu">
-        <button class="nav-item active" data-tab="overview">
+        <button class="nav-item active" data-tab="overview" id="navOverview">
           <i class="fa-solid fa-chart-pie"></i> <span>Executive Overview</span>
         </button>
-        <button class="nav-item" data-tab="results">
+        <button class="nav-item" data-tab="results" id="navResults">
           <i class="fa-solid fa-award"></i> <span>Academic Results</span>
         </button>
-        <button class="nav-item" data-tab="fees">
+        <button class="nav-item" data-tab="fees" id="navFees">
           <i class="fa-solid fa-file-invoice-dollar"></i> <span>Fee Management</span>
         </button>
-        <button class="nav-item" data-tab="broadcast">
+        <button class="nav-item" data-tab="broadcast" id="navBroadcast">
           <i class="fa-solid fa-bullhorn"></i> <span>WhatsApp Broadcast</span>
         </button>
-        <button class="nav-item" data-tab="classes">
+        <button class="nav-item" data-tab="classes" id="navClasses">
           <i class="fa-solid fa-school"></i> <span>Classes & Sections</span>
         </button>
-        <button class="nav-item" data-tab="students">
+        <button class="nav-item" data-tab="students" id="navStudents">
           <i class="fa-solid fa-user-graduate"></i> <span>Student Roster</span>
         </button>
-        <button class="nav-item" data-tab="records">
+        <button class="nav-item" data-tab="records" id="navRecords">
           <i class="fa-solid fa-clipboard-list"></i> <span>Attendance History</span>
         </button>
-        <button class="nav-item" data-tab="whatsapp">
+        <button class="nav-item" data-tab="teachers" id="navTeachers">
+          <i class="fa-solid fa-chalkboard-user"></i> <span>Staff & Teachers</span>
+        </button>
+        <button class="nav-item" data-tab="whatsapp" id="navWhatsapp">
           <i class="fa-brands fa-whatsapp"></i> <span>WhatsApp Gateway</span>
         </button>
       </nav>
@@ -86,10 +89,25 @@
             <span class="status-dot" id="waGatewayDot" style="width: 8px; height: 8px; border-radius: 50%; background: #f59e0b; display: inline-block;"></span>
             <span id="waGatewayBadgeText">WA Gateway: Auto</span>
           </div>
-          <button class="btn btn-primary" onclick="openModal('addStudentModal')">
+
+          <!-- USER PROFILE BADGE & LOGOUT -->
+          <div class="user-profile-badge" id="userProfileBadge" style="display: flex; align-items: center; gap: 8px; padding: 5px 12px; background: var(--bg-card); border: 1px solid var(--border-color); border-radius: var(--radius-md); font-size: 12px;">
+            <div class="user-avatar-circle" id="topbarAvatar" style="width: 26px; height: 26px; border-radius: 50%; background: var(--primary); color: #fff; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 700;">
+              👑
+            </div>
+            <div style="display: flex; flex-direction: column; text-align: left; line-height: 1.2;">
+              <span id="topbarUserName" style="font-size: 12px; font-weight: 600; color: var(--text-main);">Principal Office</span>
+              <span id="topbarUserRole" style="font-size: 10px; color: var(--text-muted);">Master Admin</span>
+            </div>
+            <button class="btn btn-secondary btn-sm" onclick="handleLogout()" title="Log out from portal" style="padding: 4px 8px; margin-left: 6px; font-size: 11px; border-radius: 6px;">
+              <i class="fa-solid fa-right-from-bracket"></i>
+            </button>
+          </div>
+
+          <button class="btn btn-primary admin-only-btn" id="topbarAddStudentBtn" onclick="openModal('addStudentModal')">
             <i class="fa-solid fa-plus"></i> Add Student
           </button>
-          <button class="btn btn-accent" onclick="openModal('addClassModal')">
+          <button class="btn btn-accent admin-only-btn" id="topbarAddClassBtn" onclick="openModal('addClassModal')">
             <i class="fa-solid fa-folder-plus"></i> Add Class
           </button>
         </div>
@@ -666,6 +684,85 @@
 
           <div class="wa-qr-box" id="waQrBox">
             <p class="text-muted">Loading WhatsApp connection status...</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- TAB 8: STAFF & TEACHERS MANAGEMENT (ADMIN ONLY) -->
+      <section class="tab-content" id="tab-teachers">
+        <div class="metrics-grid" style="margin-bottom: 24px;">
+          <div class="card metric-card">
+            <div class="metric-icon blue"><i class="fa-solid fa-chalkboard-user"></i></div>
+            <div>
+              <p class="metric-label">Total Faculty & Staff</p>
+              <h3 class="metric-value" id="statTotalTeachers">0</h3>
+              <p class="metric-sub" id="statActiveTeachers">0 Active</p>
+            </div>
+          </div>
+          <div class="card metric-card">
+            <div class="metric-icon green"><i class="fa-solid fa-user-shield"></i></div>
+            <div>
+              <p class="metric-label">Class Incharges</p>
+              <h3 class="metric-value" id="statAssignedIncharges">0</h3>
+              <p class="metric-sub">Classes Supervised</p>
+            </div>
+          </div>
+          <div class="card metric-card">
+            <div class="metric-icon orange"><i class="fa-solid fa-triangle-exclamation"></i></div>
+            <div>
+              <p class="metric-label">Unassigned Classes</p>
+              <h3 class="metric-value" id="statUnassignedClasses">0</h3>
+              <p class="metric-sub">Need Incharge</p>
+            </div>
+          </div>
+          <div class="card metric-card">
+            <div class="metric-icon purple"><i class="fa-solid fa-key"></i></div>
+            <div>
+              <p class="metric-label">Access Control</p>
+              <h3 class="metric-value">Active</h3>
+              <p class="metric-sub">Role-Based Protection</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-header" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 14px;">
+            <div>
+              <h3 style="display: flex; align-items: center; gap: 8px;"><i class="fa-solid fa-id-badge" style="color: var(--primary);"></i> Faculty & Staff Management</h3>
+              <p class="text-muted" style="font-size: 13px; margin-top: 4px;">
+                Manage teachers, set login credentials, and assign Class Incharge roles.
+              </p>
+            </div>
+            <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+              <input type="text" id="teacherSearchInput" placeholder="🔍 Search name, username, phone..."
+                style="padding: 8px 14px; border-radius: var(--radius-md); background: var(--bg-card); border: 1px solid var(--border-color); color: var(--text-main); font-size: 13px; width: 250px;"
+                oninput="filterTeachersTable()">
+              <button class="btn btn-primary" onclick="openModal('addTeacherModal')">
+                <i class="fa-solid fa-user-plus"></i> Add New Teacher
+              </button>
+            </div>
+          </div>
+
+          <div class="table-container" style="margin-top: 16px; overflow-x: auto;">
+            <table class="data-table" id="teachersTable">
+              <thead>
+                <tr>
+                  <th>Staff Member</th>
+                  <th>Username / ID</th>
+                  <th>Phone</th>
+                  <th>Role</th>
+                  <th>Assigned Incharge</th>
+                  <th>Status</th>
+                  <th>Last Login</th>
+                  <th style="text-align: right;">Actions</th>
+                </tr>
+              </thead>
+              <tbody id="teachersTableBody">
+                <tr>
+                  <td colspan="8" class="text-muted" style="text-align: center; padding: 24px;">Loading faculty & staff...</td>
+                </tr>
+              </tbody>
+            </table>
           </div>
         </div>
       </section>
@@ -1250,11 +1347,214 @@
     </div>
   </div>
 
+  <!-- MODAL: LOGIN / LOCK SCREEN OVERLAY -->
+  <div class="modal login-modal" id="loginModal" style="background: rgba(10, 15, 29, 0.95); backdrop-filter: blur(8px); z-index: 9999;">
+    <div class="modal-dialog" style="max-width: 440px; border: 1px solid rgba(56, 189, 248, 0.3); box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.8);">
+      <div style="text-align: center; margin-bottom: 24px;">
+        <div style="width: 68px; height: 68px; margin: 0 auto 16px auto; background: rgba(56, 189, 248, 0.1); border-radius: 50%; display: flex; align-items: center; justify-content: center; border: 2px solid rgba(56, 189, 248, 0.3);">
+          <img src="logo.png?v=2026" alt="Unique Scholars" style="width: 46px; height: 46px; object-fit: contain;">
+        </div>
+        <h2 style="font-size: 22px; font-weight: 700; color: #fff; margin-bottom: 6px;">Unique Scholars Academy</h2>
+        <p style="color: var(--text-muted); font-size: 13px;">Staff & Administration Secure Login</p>
+      </div>
+
+      <div id="loginErrorMsg" style="display: none; padding: 12px; border-radius: var(--radius-md); background: rgba(239, 68, 68, 0.15); border: 1px solid rgba(239, 68, 68, 0.4); color: #f87171; font-size: 13px; margin-bottom: 18px; text-align: center;"></div>
+
+      <form id="loginForm" onsubmit="handleLoginSubmit(event)">
+        <div class="form-group" style="margin-bottom: 16px;">
+          <label style="display: block; font-size: 13px; font-weight: 600; margin-bottom: 6px; color: var(--text-main);">
+            <i class="fa-solid fa-user"></i> Username or Phone Number
+          </label>
+          <input type="text" id="loginUsername" placeholder="e.g. admin or 03334751998" required autocomplete="username"
+            style="width: 100%; padding: 12px 14px; border-radius: var(--radius-md); background: #0f172a; border: 1px solid #334155; color: #fff; font-size: 14px;">
+        </div>
+
+        <div class="form-group" style="margin-bottom: 24px;">
+          <label style="display: flex; justify-content: space-between; font-size: 13px; font-weight: 600; margin-bottom: 6px; color: var(--text-main);">
+            <span><i class="fa-solid fa-lock"></i> Password or PIN</span>
+            <span style="font-weight: 400; font-size: 11px; color: var(--text-muted); cursor: pointer;" onclick="toggleLoginPassVisibility()">
+              <i class="fa-solid fa-eye" id="loginPassEyeIcon"></i> Show
+            </span>
+          </label>
+          <input type="password" id="loginPassword" placeholder="Enter your password / PIN" required autocomplete="current-password"
+            style="width: 100%; padding: 12px 14px; border-radius: var(--radius-md); background: #0f172a; border: 1px solid #334155; color: #fff; font-size: 14px;">
+        </div>
+
+        <button type="submit" class="btn btn-primary" id="btnLoginSubmit" style="width: 100%; padding: 12px; font-size: 15px; font-weight: 600; display: flex; align-items: center; justify-content: center; gap: 8px;">
+          <i class="fa-solid fa-right-to-bracket"></i> Sign In to Portal
+        </button>
+      </form>
+
+      <div style="margin-top: 20px; text-align: center; border-top: 1px solid rgba(148, 163, 184, 0.15); padding-top: 16px;">
+        <p style="font-size: 12px; color: var(--text-muted); margin: 0;">
+          <i class="fa-solid fa-shield-halved" style="color: #38bdf8;"></i> Role-Based Access Control Active
+        </p>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: ADD TEACHER -->
+  <div class="modal" id="addTeacherModal">
+    <div class="modal-dialog" style="max-width: 540px;">
+      <div class="modal-header">
+        <div>
+          <h3><i class="fa-solid fa-chalkboard-user"></i> Add Faculty / Teacher</h3>
+          <p class="text-muted" style="font-size: 12px; margin-top: 2px;">Create login credentials and assign Class Incharge</p>
+        </div>
+        <button class="modal-close" onclick="closeModal('addTeacherModal')">&times;</button>
+      </div>
+
+      <form id="addTeacherForm" onsubmit="handleSaveNewTeacher(event)">
+        <div class="form-group" style="margin-bottom: 14px;">
+          <label>Full Name *</label>
+          <input type="text" id="teacherFullName" placeholder="e.g. Sir Asad / Miss Sana" required>
+        </div>
+
+        <div class="grid-2-col" style="gap: 14px; margin-bottom: 14px;">
+          <div class="form-group">
+            <label>Username / Login ID *</label>
+            <input type="text" id="teacherUsername" placeholder="e.g. sir_asad" required autocomplete="off">
+          </div>
+          <div class="form-group">
+            <label>Phone Number (WhatsApp)</label>
+            <input type="text" id="teacherPhone" placeholder="e.g. 03001234567">
+          </div>
+        </div>
+
+        <div class="grid-2-col" style="gap: 14px; margin-bottom: 14px;">
+          <div class="form-group">
+            <label>Password *</label>
+            <input type="password" id="teacherPassword" placeholder="Set login password" required autocomplete="new-password">
+          </div>
+          <div class="form-group">
+            <label>Role</label>
+            <select id="teacherRole">
+              <option value="teacher" selected>Teacher (Class Incharge)</option>
+              <option value="admin">Administrator (Full Master Access)</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="form-group" style="margin-bottom: 14px;">
+          <label>Assign Class Incharge</label>
+          <select id="teacherInchargeClass">
+            <option value="">-- No Class Incharge (General Staff) --</option>
+          </select>
+          <small class="text-muted">Teacher will have direct attendance & marksheet access restricted to this class.</small>
+        </div>
+
+        <div class="modal-actions" style="margin-top: 20px;">
+          <button type="button" class="btn btn-secondary" onclick="closeModal('addTeacherModal')">Cancel</button>
+          <button type="submit" class="btn btn-primary" id="btnSaveTeacherSubmit"><i class="fa-solid fa-check"></i> Create Teacher</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- MODAL: EDIT TEACHER / RESET PASSWORD -->
+  <div class="modal" id="editTeacherModal">
+    <div class="modal-dialog" style="max-width: 540px;">
+      <div class="modal-header">
+        <div>
+          <h3><i class="fa-solid fa-user-pen"></i> Edit Faculty Member</h3>
+          <p class="text-muted" style="font-size: 12px; margin-top: 2px;" id="editTeacherSubtitle">Update profile, reset password or reassign class</p>
+        </div>
+        <button class="modal-close" onclick="closeModal('editTeacherModal')">&times;</button>
+      </div>
+
+      <form id="editTeacherForm" onsubmit="handleUpdateTeacherSubmit(event)">
+        <input type="hidden" id="editTeacherId">
+
+        <div class="form-group" style="margin-bottom: 14px;">
+          <label>Full Name *</label>
+          <input type="text" id="editTeacherFullName" required>
+        </div>
+
+        <div class="grid-2-col" style="gap: 14px; margin-bottom: 14px;">
+          <div class="form-group">
+            <label>Username / Login ID *</label>
+            <input type="text" id="editTeacherUsername" required>
+          </div>
+          <div class="form-group">
+            <label>Phone Number</label>
+            <input type="text" id="editTeacherPhone">
+          </div>
+        </div>
+
+        <div class="grid-2-col" style="gap: 14px; margin-bottom: 14px;">
+          <div class="form-group">
+            <label>Reset Password (leave blank to keep current)</label>
+            <input type="password" id="editTeacherPassword" placeholder="Enter new password to change">
+          </div>
+          <div class="form-group">
+            <label>Role</label>
+            <select id="editTeacherRole">
+              <option value="teacher">Teacher</option>
+              <option value="principal">Principal</option>
+              <option value="admin">Administrator</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="grid-2-col" style="gap: 14px; margin-bottom: 14px;">
+          <div class="form-group">
+            <label>Class Incharge</label>
+            <select id="editTeacherInchargeClass">
+              <option value="">-- No Class Incharge --</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Account Status</label>
+            <select id="editTeacherActiveStatus">
+              <option value="true">Active (Allowed to Login)</option>
+              <option value="false">Suspended / Inactive</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="modal-actions" style="margin-top: 20px;">
+          <button type="button" class="btn btn-secondary" onclick="closeModal('editTeacherModal')">Cancel</button>
+          <button type="submit" class="btn btn-primary" id="btnUpdateTeacherSubmit"><i class="fa-solid fa-floppy-disk"></i> Save Changes</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- MODAL: ASSIGN CLASS INCHARGE DIRECTLY -->
+  <div class="modal" id="assignInchargeModal">
+    <div class="modal-dialog" style="max-width: 480px;">
+      <div class="modal-header">
+        <div>
+          <h3><i class="fa-solid fa-user-tie"></i> Assign Class Incharge</h3>
+          <p class="text-muted" style="font-size: 12px; margin-top: 2px;" id="assignInchargeModalSubtitle">Designate incharge teacher</p>
+        </div>
+        <button class="modal-close" onclick="closeModal('assignInchargeModal')">&times;</button>
+      </div>
+
+      <form id="assignInchargeForm" onsubmit="handleSaveInchargeDirect(event)">
+        <input type="hidden" id="assignInchargeClassId">
+
+        <div class="form-group" style="margin-bottom: 18px;">
+          <label style="display: block; margin-bottom: 6px;">Select Incharge Teacher *</label>
+          <select id="assignInchargeTeacherSelect" required style="width: 100%; padding: 10px 12px; border-radius: var(--radius-md); background: #1e293b; border: 1px solid #334155; color: #fff;">
+            <option value="">-- Remove Incharge (Unassigned) --</option>
+          </select>
+          <small class="text-muted" style="display: block; margin-top: 6px;">The chosen teacher will automatically have access to this class's attendance and marksheet.</small>
+        </div>
+
+        <div class="modal-actions" style="margin-top: 20px;">
+          <button type="button" class="btn btn-secondary" onclick="closeModal('assignInchargeModal')">Cancel</button>
+          <button type="submit" class="btn btn-primary"><i class="fa-solid fa-check"></i> Save Incharge</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
   <!-- NOTIFICATION TOAST -->
   <div id="toast" class="toast">Action completed successfully</div>
 
   <script src="/socket.io/socket.io.js"></script>
-  <script src="app.js?v=2.0.2"></script>
+  <script src="app.js?v=2.0.3"></script>
 </body>
 
 </html>

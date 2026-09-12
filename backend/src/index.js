@@ -40,6 +40,13 @@ const {
   getMessageTemplates,
   saveMessageTemplate,
   verifyAdminPin,
+  authenticateUser,
+  getTeachers,
+  addTeacher,
+  updateTeacher,
+  deleteTeacher,
+  assignClassIncharge,
+  getTeacherAssignedClasses,
   getAdminInsights,
   getAdminRecords,
   addPendingDispatches,
@@ -485,6 +492,10 @@ app.put('/api/admin/students/:studentId', async (req, res) => {
 
 app.delete('/api/admin/students/:studentId', async (req, res) => {
   try {
+    const reqUser = getReqUser(req);
+    if (reqUser && reqUser.role === 'teacher') {
+      return res.status(403).json({ success: false, error: 'Access Denied: Only Administrators can delete students.' });
+    }
     const { schoolId = 'unique_scholars' } = req.query;
     const { studentId } = req.params;
     const deleted = await deleteStudent(schoolId, studentId);
@@ -1680,17 +1691,122 @@ app.post('/api/admin/broadcast/send', async (req, res) => {
 });
 
 // -------------------------------------------------------------
-// PRINCIPAL AUTH & INSIGHTS
+// AUTHENTICATION & RBAC HELPERS
 // -------------------------------------------------------------
 
+function generateAuthToken(user) {
+  const payload = {
+    id: user.id,
+    fullName: user.fullName,
+    username: user.username,
+    role: user.role,
+    assignedClassIds: user.assignedClassIds || [],
+    ts: Date.now()
+  };
+  return Buffer.from(JSON.stringify(payload)).toString('base64');
+}
+
+function decodeAuthToken(token) {
+  if (!token) return null;
+  try {
+    const raw = token.replace(/^Bearer\s+/i, '');
+    return JSON.parse(Buffer.from(raw, 'base64').toString('utf8'));
+  } catch (e) {
+    return null;
+  }
+}
+
+function getReqUser(req) {
+  const header = req.headers['authorization'] || req.headers['x-auth-token'];
+  return decodeAuthToken(header);
+}
+
+function requireAdminOrPrincipal(req, res, next) {
+  const user = getReqUser(req);
+  if (user && user.role === 'teacher') {
+    return res.status(403).json({
+      success: false,
+      error: 'Access Denied: This administrative feature is restricted to Principals and Admins.'
+    });
+  }
+  next();
+}
+
+// -------------------------------------------------------------
+// AUTHENTICATION ENDPOINTS
+// -------------------------------------------------------------
+
+app.post('/api/auth/login', async (req, res) => {
+  try {
+    const { username, loginId, password, pin, schoolId = 'unique_scholars' } = req.body;
+    const credId = username || loginId || (pin ? 'admin' : '');
+    const credPass = password || pin || '';
+
+    if (!credId || !credPass) {
+      return res.status(400).json({ success: false, error: 'Username/phone and password are required.' });
+    }
+
+    const authRes = await authenticateUser(credId, credPass, schoolId);
+    if (authRes.success) {
+      const token = generateAuthToken(authRes.user);
+      return res.json({
+        success: true,
+        message: 'Authentication successful!',
+        token,
+        user: authRes.user
+      });
+    } else {
+      return res.status(401).json({ success: false, error: authRes.error || 'Invalid credentials.' });
+    }
+  } catch (err) {
+    console.error('Login error:', err);
+    return res.status(500).json({ success: false, error: 'Server authentication error.' });
+  }
+});
+
+app.get('/api/auth/me', async (req, res) => {
+  try {
+    const user = getReqUser(req);
+    if (!user) {
+      return res.status(401).json({ success: false, error: 'Not authenticated.' });
+    }
+    const schoolId = req.query.schoolId || 'unique_scholars';
+    const assignedClasses = await getTeacherAssignedClasses(schoolId, user.id);
+    const inchargeClasses = assignedClasses.filter(c => c.isIncharge);
+
+    return res.json({
+      success: true,
+      user: {
+        ...user,
+        assignedClasses,
+        inchargeClasses,
+        assignedClassIds: assignedClasses.map(c => c.id)
+      }
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Legacy /api/admin/login backward-compatibility
 app.post('/api/admin/login', async (req, res) => {
-  const { pin, schoolId = 'unique_scholars' } = req.body;
-  if (!pin) return res.status(400).json({ success: false, error: 'PIN is required' });
-  const isValid = await verifyAdminPin(pin, schoolId);
-  if (isValid) {
-    return res.json({ success: true, message: 'Principal Authentication Successful!' });
+  const { pin, username, password, schoolId = 'unique_scholars' } = req.body;
+  if (!pin && !password) return res.status(400).json({ success: false, error: 'Password or PIN is required' });
+
+  const credId = username || 'admin';
+  const credPass = password || pin;
+
+  const authRes = await authenticateUser(credId, credPass, schoolId);
+  if (authRes.success) {
+    const token = generateAuthToken(authRes.user);
+    return res.json({
+      success: true,
+      message: 'Principal Authentication Successful!',
+      token,
+      user: authRes.user
+    });
   } else {
-    return res.status(401).json({ success: false, error: 'Invalid Principal PIN. Default is 1234.' });
+    return res.status(401).json({ success: false, error: 'Invalid PIN or credentials.' });
   }
 });
 
@@ -1707,8 +1823,84 @@ app.get('/api/admin/records', async (req, res) => {
 });
 
 // -------------------------------------------------------------
-// FEE MANAGEMENT ENDPOINTS
+// TEACHER & STAFF MANAGEMENT ENDPOINTS
 // -------------------------------------------------------------
+
+app.get('/api/admin/teachers', async (req, res) => {
+  try {
+    const { schoolId = 'unique_scholars' } = req.query;
+    const teachers = await getTeachers(schoolId);
+    res.json({ success: true, total: teachers.length, teachers });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post('/api/admin/teachers', async (req, res) => {
+  try {
+    const reqUser = getReqUser(req);
+    if (reqUser && reqUser.role === 'teacher') {
+      return res.status(403).json({ success: false, error: 'Access Denied: Only Administrators can create teachers.' });
+    }
+    const { schoolId = 'unique_scholars', fullName, username, phone, email, password, role, inchargeClassId } = req.body;
+    const newTeacher = await addTeacher(schoolId, { fullName, username, phone, email, password, role, inchargeClassId });
+    res.json({ success: true, message: 'Teacher added successfully!', teacher: newTeacher });
+  } catch (err) {
+    res.status(400).json({ success: false, error: err.message });
+  }
+});
+
+app.put('/api/admin/teachers/:id', async (req, res) => {
+  try {
+    const reqUser = getReqUser(req);
+    if (reqUser && reqUser.role === 'teacher' && reqUser.id !== req.params.id) {
+      return res.status(403).json({ success: false, error: 'Access Denied: Cannot modify other staff records.' });
+    }
+    const { schoolId = 'unique_scholars', fullName, username, phone, email, password, role, isActive, inchargeClassId } = req.body;
+    const updated = await updateTeacher(schoolId, req.params.id, { fullName, username, phone, email, password, role, isActive, inchargeClassId });
+    res.json({ success: true, message: 'Teacher updated successfully!', teacher: updated });
+  } catch (err) {
+    res.status(400).json({ success: false, error: err.message });
+  }
+});
+
+app.delete('/api/admin/teachers/:id', async (req, res) => {
+  try {
+    const reqUser = getReqUser(req);
+    if (reqUser && reqUser.role === 'teacher') {
+      return res.status(403).json({ success: false, error: 'Access Denied: Only Administrators can delete staff.' });
+    }
+    const { schoolId = 'unique_scholars' } = req.body;
+    const ok = await deleteTeacher(schoolId, req.params.id);
+    if (ok) {
+      res.json({ success: true, message: 'Teacher deleted successfully.' });
+    } else {
+      res.status(404).json({ success: false, error: 'Teacher not found.' });
+    }
+  } catch (err) {
+    res.status(400).json({ success: false, error: err.message });
+  }
+});
+
+// Assign or change Class Incharge
+app.post('/api/admin/classes/:id/incharge', async (req, res) => {
+  try {
+    const reqUser = getReqUser(req);
+    if (reqUser && reqUser.role === 'teacher') {
+      return res.status(403).json({ success: false, error: 'Access Denied: Only Administrators can assign class incharge.' });
+    }
+    const { schoolId = 'unique_scholars', teacherId } = req.body;
+    const result = await assignClassIncharge(schoolId, req.params.id, teacherId);
+    res.json({ success: true, message: 'Class Incharge assigned successfully!', ...result });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// -------------------------------------------------------------
+// FEE MANAGEMENT ENDPOINTS (Guarded with requireAdminOrPrincipal)
+// -------------------------------------------------------------
+app.use('/api/admin/fees', requireAdminOrPrincipal);
 
 // Get base fee structures for classes
 app.get('/api/admin/fees/structure', async (req, res) => {

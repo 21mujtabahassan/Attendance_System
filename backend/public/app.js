@@ -2,6 +2,9 @@
 const API_BASE = '/api';
 const CURRENT_SCHOOL_ID = 'unique_scholars';
 
+let currentUser = null;
+let authToken = localStorage.getItem('usa_auth_token') || null;
+let globalTeachers = [];
 let globalClasses = [];
 let globalStudents = [];
 let globalTerms = [];
@@ -12,14 +15,205 @@ let currentWaStatus = { status: 'disconnected', qr: '' };
 let currentMarksGridData = [];
 let socket = null;
 
-document.addEventListener('DOMContentLoaded', () => {
+function escapeHtml(str) {
+  if (str === null || str === undefined) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
+
+document.addEventListener('DOMContentLoaded', async () => {
   initClock();
   initServerBadge();
   initGatewayBadge();
   initSocketIO();
   setupTabNavigation();
-  loadInitialData();
+  const authed = await initAuth();
+  if (authed) {
+    loadInitialData();
+  }
 });
+
+// -------------------------------------------------------------
+// AUTHENTICATION & ACCESS CONTROL HELPERS
+// -------------------------------------------------------------
+
+function getAuthHeaders() {
+  const headers = { 'Content-Type': 'application/json' };
+  if (authToken) {
+    headers['Authorization'] = `Bearer ${authToken}`;
+  }
+  return headers;
+}
+
+async function initAuth() {
+  const savedUser = localStorage.getItem('usa_current_user');
+  if (authToken && savedUser) {
+    try {
+      currentUser = JSON.parse(savedUser);
+      updateUserProfileUI();
+      applyRoleRestrictions();
+
+      // Refresh in background
+      fetch(`${API_BASE}/auth/me?schoolId=${CURRENT_SCHOOL_ID}`, {
+        headers: getAuthHeaders()
+      }).then(r => r.json()).then(data => {
+        if (data.success && data.user) {
+          currentUser = data.user;
+          localStorage.setItem('usa_current_user', JSON.stringify(currentUser));
+          updateUserProfileUI();
+          applyRoleRestrictions();
+        }
+      }).catch(() => {});
+
+      closeModal('loginModal');
+      return true;
+    } catch (e) {
+      console.warn('Session parse warning:', e);
+    }
+  }
+
+  // Not logged in: show login lock screen
+  showLoginModal();
+  return false;
+}
+
+function showLoginModal() {
+  const modal = document.getElementById('loginModal');
+  if (modal) {
+    modal.classList.add('active');
+    const err = document.getElementById('loginErrorMsg');
+    if (err) err.style.display = 'none';
+    const userInp = document.getElementById('loginUsername');
+    if (userInp) setTimeout(() => userInp.focus(), 150);
+  }
+}
+
+async function handleLoginSubmit(e) {
+  e.preventDefault();
+  const username = document.getElementById('loginUsername').value.trim();
+  const password = document.getElementById('loginPassword').value.trim();
+  const errBox = document.getElementById('loginErrorMsg');
+  const btn = document.getElementById('btnLoginSubmit');
+
+  if (!username || !password) return;
+
+  btn.disabled = true;
+  btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Signing in...';
+  if (errBox) errBox.style.display = 'none';
+
+  try {
+    const res = await fetch(`${API_BASE}/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password, schoolId: CURRENT_SCHOOL_ID })
+    });
+    const data = await res.json();
+
+    if (data.success && data.user) {
+      authToken = data.token;
+      currentUser = data.user;
+      localStorage.setItem('usa_auth_token', authToken);
+      localStorage.setItem('usa_current_user', JSON.stringify(currentUser));
+
+      updateUserProfileUI();
+      applyRoleRestrictions();
+      closeModal('loginModal');
+      showToast(`Welcome back, ${currentUser.fullName}! 🎉`);
+
+      // Load portal data
+      await loadInitialData();
+    } else {
+      if (errBox) {
+        errBox.innerText = data.error || 'Invalid credentials. Please try again.';
+        errBox.style.display = 'block';
+      }
+    }
+  } catch (err) {
+    if (errBox) {
+      errBox.innerText = 'Connection error. Please check your network and server.';
+      errBox.style.display = 'block';
+    }
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = '<i class="fa-solid fa-right-to-bracket"></i> Sign In to Portal';
+  }
+}
+
+function handleLogout() {
+  if (confirm('Are you sure you want to log out from the portal?')) {
+    authToken = null;
+    currentUser = null;
+    localStorage.removeItem('usa_auth_token');
+    localStorage.removeItem('usa_current_user');
+    showLoginModal();
+    showToast('Logged out successfully.');
+  }
+}
+
+function toggleLoginPassVisibility() {
+  const passInp = document.getElementById('loginPassword');
+  const icon = document.getElementById('loginPassEyeIcon');
+  if (passInp.type === 'password') {
+    passInp.type = 'text';
+    if (icon) icon.className = 'fa-solid fa-eye-slash';
+  } else {
+    passInp.type = 'password';
+    if (icon) icon.className = 'fa-solid fa-eye';
+  }
+}
+
+function updateUserProfileUI() {
+  const nameEl = document.getElementById('topbarUserName');
+  const roleEl = document.getElementById('topbarUserRole');
+  const avatarEl = document.getElementById('topbarAvatar');
+  if (!nameEl || !currentUser) return;
+
+  nameEl.innerText = currentUser.fullName;
+
+  if (currentUser.role === 'principal' || currentUser.role === 'admin') {
+    if (roleEl) roleEl.innerText = 'Master Admin 👑';
+    if (avatarEl) avatarEl.innerText = '👑';
+  } else if (currentUser.role === 'teacher') {
+    const inchargeNames = (currentUser.inchargeClasses || []).map(c => c.name).join(', ');
+    if (roleEl) roleEl.innerText = inchargeNames ? `Incharge: ${inchargeNames}` : 'Teacher';
+    if (avatarEl) avatarEl.innerText = '🎓';
+  }
+}
+
+function applyRoleRestrictions() {
+  if (!currentUser) return;
+  const isTeacher = currentUser.role === 'teacher';
+
+  // Sidebar Tabs visibility
+  const navFees = document.getElementById('navFees');
+  const navWhatsapp = document.getElementById('navWhatsapp');
+  const navTeachers = document.getElementById('navTeachers');
+  const navBroadcast = document.getElementById('navBroadcast');
+
+  if (navFees) navFees.style.display = isTeacher ? 'none' : 'flex';
+  if (navWhatsapp) navWhatsapp.style.display = isTeacher ? 'none' : 'flex';
+  if (navTeachers) navTeachers.style.display = isTeacher ? 'none' : 'flex';
+  if (navBroadcast) navBroadcast.style.display = isTeacher ? 'none' : 'flex';
+
+  // Admin-only buttons
+  document.querySelectorAll('.admin-only-btn').forEach(el => {
+    el.style.display = isTeacher ? 'none' : 'inline-flex';
+  });
+
+  // Switch away from restricted tabs
+  const activeTabBtn = document.querySelector('.nav-item.active');
+  const currentTab = activeTabBtn ? activeTabBtn.getAttribute('data-tab') : 'overview';
+  if (isTeacher && (currentTab === 'fees' || currentTab === 'whatsapp' || currentTab === 'teachers' || currentTab === 'broadcast')) {
+    switchTab('students');
+  }
+
+  // Scope class dropdowns
+  populateClassDropdowns();
+}
 
 async function initServerBadge() {
   const badge = document.getElementById('serverBadgeText');
@@ -128,6 +322,7 @@ function setupTabNavigation() {
     classes: { title: 'Classes & Sections Architecture', subtitle: 'Manage school grade levels and classroom sections' },
     students: { title: 'Student Directory & Contact Numbers', subtitle: 'Manage student roster, parent WhatsApp phone numbers, and profile details' },
     records: { title: 'Complete Attendance History', subtitle: 'Search, filter, and audit all mobile app attendance logs' },
+    teachers: { title: 'Faculty & Staff Administration', subtitle: 'Manage teachers, set login passwords, and assign Class Incharge roles' },
     whatsapp: { title: 'WhatsApp Gateway Engine', subtitle: 'Scan QR code & monitor multi-tenant WhatsApp socket connection' }
   };
 
@@ -153,6 +348,7 @@ function setupTabNavigation() {
       if (targetTab === 'classes') renderClassesGrid();
       if (targetTab === 'students') renderStudentsTable();
       if (targetTab === 'records') loadRecordsData();
+      if (targetTab === 'teachers') loadTeachersTabData();
       if (targetTab === 'whatsapp') fetchWaStatus();
     });
   });
@@ -179,6 +375,7 @@ async function loadInitialData() {
     fetchClasses(),
     fetchStudents(),
     fetchTerms(),
+    fetchTeachers(),
     fetchWaStatus(),
     loadOverviewData()
   ]);
@@ -217,6 +414,16 @@ async function fetchTerms() {
 }
 
 function populateClassDropdowns() {
+  const isTeacher = currentUser && currentUser.role === 'teacher';
+  let allowedClasses = globalClasses;
+  if (isTeacher) {
+    const assignedIds = new Set(currentUser.assignedClassIds || []);
+    allowedClasses = globalClasses.filter(c => assignedIds.has(c.id));
+    if (allowedClasses.length === 0 && (currentUser.assignedClassIds || []).length > 0) {
+      allowedClasses = globalClasses.filter(c => (currentUser.assignedClassIds || []).includes(c.id));
+    }
+  }
+
   const selects = ['studentClassFilter', 'recordClassFilter', 'studentClassSelect', 'editStudentClass', 'marksClassSelect', 'subjectClassSelect', 'historyClassSelect', 'broadcastClassSelect'];
   selects.forEach(id => {
     const el = document.getElementById(id);
@@ -224,15 +431,40 @@ function populateClassDropdowns() {
     const currentVal = el.value;
     const isFilter = id.includes('Filter') || id.includes('Select');
 
-    let html = isFilter && !id.includes('studentClassSelect') && !id.includes('editStudentClass') && !id.includes('subjectClassSelect') && !id.includes('marksClassSelect') ? '<option value="">All Classes</option>' : '';
-    globalClasses.forEach(c => {
-      html += `<option value="${c.id}">${c.name}</option>`;
-    });
+    let html = '';
+    if (!isTeacher && (isFilter && !id.includes('studentClassSelect') && !id.includes('editStudentClass') && !id.includes('subjectClassSelect') && !id.includes('marksClassSelect'))) {
+      html = '<option value="">All Classes</option>';
+    }
+
+    if (allowedClasses.length === 0) {
+      html += '<option value="">-- No Classes Assigned --</option>';
+    } else {
+      allowedClasses.forEach(c => {
+        html += `<option value="${c.id}">${escapeHtml(c.name)}</option>`;
+      });
+    }
+
     el.innerHTML = html;
     if (currentVal && Array.from(el.options).some(o => o.value === currentVal)) {
       el.value = currentVal;
+    } else if (allowedClasses.length > 0) {
+      el.value = allowedClasses[0].id;
     }
   });
+
+  populateTeacherClassDropdowns();
+}
+
+function populateTeacherClassDropdowns() {
+  const addSelect = document.getElementById('teacherInchargeClass');
+  const editSelect = document.getElementById('editTeacherInchargeClass');
+  let html = '<option value="">-- No Class Incharge (General Staff) --</option>';
+  globalClasses.forEach(c => {
+    const inchargeInfo = c.inchargeTeacher ? ` (Currently: ${escapeHtml(c.inchargeTeacher.fullName)})` : '';
+    html += `<option value="${c.id}">${escapeHtml(c.name)}${inchargeInfo}</option>`;
+  });
+  if (addSelect) addSelect.innerHTML = html;
+  if (editSelect) editSelect.innerHTML = html;
 }
 
 function populateTermDropdowns() {
@@ -1315,33 +1547,52 @@ function renderClassesGrid() {
     return;
   }
 
-  grid.innerHTML = globalClasses.map(c => `
+  const isTeacher = currentUser && currentUser.role === 'teacher';
+
+  grid.innerHTML = globalClasses.map(c => {
+    const inchargeName = c.inchargeTeacher ? escapeHtml(c.inchargeTeacher.fullName) : '<span style="color: #94a3b8; font-weight: normal;">Unassigned</span>';
+    return `
     <div class="card class-card">
       <div class="class-card-header">
         <div>
-          <h3>${c.name}</h3>
-          <p class="text-muted" style="font-size: 12px;">ID: ${c.id}</p>
+          <h3>${escapeHtml(c.name)}</h3>
+          <p class="text-muted" style="font-size: 12px;">ID: ${escapeHtml(c.id)}</p>
         </div>
-        <button class="btn btn-danger btn-sm" onclick="handleDeleteClass('${c.id}')"><i class="fa-solid fa-trash"></i></button>
+        ${!isTeacher ? `<button class="btn btn-danger btn-sm" onclick="handleDeleteClass('${c.id}')"><i class="fa-solid fa-trash"></i></button>` : ''}
       </div>
 
-      <div style="margin: 14px 0;">
+      <!-- INCHARGE TEACHER BADGE -->
+      <div style="margin: 12px 0 8px 0; padding: 7px 10px; background: rgba(56, 189, 248, 0.08); border: 1px solid rgba(56, 189, 248, 0.2); border-radius: 8px; display: flex; align-items: center; justify-content: space-between;">
+        <span style="font-size: 12px; color: var(--text-main); display: flex; align-items: center; gap: 6px;">
+          <i class="fa-solid fa-user-tie" style="color: #38bdf8;"></i> Incharge: <strong>${inchargeName}</strong>
+        </span>
+        ${!isTeacher ? `
+          <button class="btn btn-secondary btn-xs" onclick="openAssignInchargeModal('${c.id}', '${escapeHtml(c.name)}', '${c.inchargeTeacherId || ''}')" title="Designate Class Incharge" style="padding: 2px 7px; font-size: 10px;">
+            <i class="fa-solid fa-pen"></i> Assign
+          </button>
+        ` : ''}
+      </div>
+
+      <div style="margin: 12px 0;">
         <span style="font-size: 11px; font-weight: 600; color: #94a3b8; display: block; margin-bottom: 6px;">SECTIONS:</span>
         <div style="display: flex; gap: 6px; flex-wrap: wrap;">
-          ${(c.sections || ['Section A']).map(s => `<span class="section-tag"><i class="fa-solid fa-tag"></i> ${s}</span>`).join('')}
+          ${(c.sections || ['Section A']).map(s => `<span class="section-tag"><i class="fa-solid fa-tag"></i> ${escapeHtml(s)}</span>`).join('')}
         </div>
       </div>
 
       <div style="display: flex; gap: 8px; margin-top: 15px;">
-        <button class="btn btn-secondary btn-sm" style="flex: 1;" onclick="openAddSectionModal('${c.id}', '${c.name}')">
-          <i class="fa-solid fa-plus"></i> Add Section
-        </button>
-        <button class="btn btn-primary btn-sm" style="flex: 1;" onclick="viewClassRoster('${c.id}', '${c.name}')">
+        ${!isTeacher ? `
+          <button class="btn btn-secondary btn-sm" style="flex: 1;" onclick="openAddSectionModal('${c.id}', '${escapeHtml(c.name)}')">
+            <i class="fa-solid fa-plus"></i> Add Section
+          </button>
+        ` : ''}
+        <button class="btn btn-primary btn-sm" style="flex: 1;" onclick="viewClassRoster('${c.id}', '${escapeHtml(c.name)}')">
           <i class="fa-solid fa-users"></i> View Students
         </button>
       </div>
     </div>
-  `).join('');
+  `;
+  }).join('');
 }
 
 async function handleCreateClass(e) {
@@ -1425,8 +1676,13 @@ function filterStudentTable() {
   const query = document.getElementById('studentSearchInput')?.value.toLowerCase() || '';
   const classFilter = document.getElementById('studentClassFilter')?.value || '';
   const tbody = document.getElementById('studentTableBody');
+  const isTeacher = currentUser && currentUser.role === 'teacher';
 
   let list = globalStudents;
+  if (isTeacher) {
+    const assignedSet = new Set(currentUser.assignedClassIds || []);
+    list = list.filter(s => assignedSet.has(s.classId));
+  }
   if (classFilter) list = list.filter(s => s.classId === classFilter);
   if (query) {
     list = list.filter(s =>
@@ -1444,15 +1700,15 @@ function filterStudentTable() {
   tbody.innerHTML = list.map(s => `
     <tr>
       <td><span class="badge badge-primary" style="font-weight:700; font-size: 0.85rem;">#${s.rollNumber != null ? s.rollNumber : '-'}</span></td>
-      <td><strong>${s.id}</strong></td>
-      <td>${s.name}</td>
-      <td>${s.classId}</td>
-      <td>${s.section || 'Section A'}</td>
-      <td><span class="phone-badge">📞 ${s.parentPhone || 'Not Provided'}</span></td>
-      <td>${s.parentEmail || '-'}</td>
+      <td><strong>${escapeHtml(s.id)}</strong></td>
+      <td>${escapeHtml(s.name)}</td>
+      <td>${escapeHtml(s.classId)}</td>
+      <td>${escapeHtml(s.section || 'Section A')}</td>
+      <td><span class="phone-badge">📞 ${escapeHtml(s.parentPhone || 'Not Provided')}</span></td>
+      <td>${escapeHtml(s.parentEmail || '-')}</td>
       <td>
         <button class="btn btn-secondary btn-sm" onclick="openEditStudentModal('${s.id}')"><i class="fa-solid fa-pen"></i></button>
-        <button class="btn btn-danger btn-sm" onclick="handleDeleteStudent('${s.id}')"><i class="fa-solid fa-trash"></i></button>
+        ${!isTeacher ? `<button class="btn btn-danger btn-sm" onclick="handleDeleteStudent('${s.id}')"><i class="fa-solid fa-trash"></i></button>` : ''}
       </td>
     </tr>
   `).join('');
@@ -2782,4 +3038,294 @@ function showToast(message) {
   setTimeout(() => {
     toast.classList.remove('active');
   }, 3500);
+}
+
+// -------------------------------------------------------------
+// TAB 8: STAFF & TEACHER MANAGEMENT
+// -------------------------------------------------------------
+
+async function fetchTeachers() {
+  try {
+    const res = await fetch(`${API_BASE}/admin/teachers?schoolId=${CURRENT_SCHOOL_ID}`, {
+      headers: getAuthHeaders()
+    });
+    const data = await res.json();
+    if (data.success) {
+      globalTeachers = data.teachers || [];
+      updateTeacherMetrics();
+      renderTeachersTable();
+    }
+  } catch (err) {
+    console.error('Error fetching teachers:', err);
+  }
+}
+
+async function loadTeachersTabData() {
+  await fetchTeachers();
+  populateTeacherClassDropdowns();
+}
+
+function updateTeacherMetrics() {
+  const statTotal = document.getElementById('statTotalTeachers');
+  const statActive = document.getElementById('statActiveTeachers');
+  const statIncharges = document.getElementById('statAssignedIncharges');
+  const statUnassigned = document.getElementById('statUnassignedClasses');
+
+  const totalTeachers = globalTeachers.length;
+  const activeTeachers = globalTeachers.filter(t => t.isActive).length;
+  const assignedIncharges = globalClasses.filter(c => c.inchargeTeacherId).length;
+  const unassignedClasses = Math.max(0, globalClasses.length - assignedIncharges);
+
+  if (statTotal) statTotal.innerText = totalTeachers;
+  if (statActive) statActive.innerText = `${activeTeachers} Active`;
+  if (statIncharges) statIncharges.innerText = assignedIncharges;
+  if (statUnassigned) statUnassigned.innerText = unassignedClasses;
+}
+
+function renderTeachersTable(filteredList = null) {
+  const tbody = document.getElementById('teachersTableBody');
+  if (!tbody) return;
+
+  const list = filteredList !== null ? filteredList : globalTeachers;
+  if (list.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="8" class="text-muted text-center" style="padding: 24px;">No faculty members found.</td></tr>';
+    return;
+  }
+
+  tbody.innerHTML = list.map(t => {
+    const initials = t.fullName.split(' ').map(w => w[0]).filter(Boolean).slice(0, 2).join('').toUpperCase();
+    const inchargeNames = (t.inchargeClasses || []).map(c => `<span class="incharge-tag"><i class="fa-solid fa-school"></i> ${escapeHtml(c.name)}</span>`).join(' ') || '<span class="text-muted" style="font-size: 11px;">-- Unassigned --</span>';
+    const roleBadgeClass = t.role === 'principal' ? 'principal' : (t.role === 'admin' ? 'admin' : 'teacher');
+    const statusClass = t.isActive ? 'active' : 'inactive';
+    const statusLabel = t.isActive ? 'Active' : 'Inactive';
+    const lastLogin = t.lastLoginAt ? new Date(t.lastLoginAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : 'Never';
+
+    return `
+      <tr>
+        <td>
+          <div style="display: flex; align-items: center;">
+            <div class="user-avatar-initials">${initials}</div>
+            <div>
+              <strong style="color: var(--text-main); font-size: 13px;">${escapeHtml(t.fullName)}</strong>
+              ${t.email ? `<p style="font-size: 11px; color: var(--text-muted); margin: 2px 0 0 0;">${escapeHtml(t.email)}</p>` : ''}
+            </div>
+          </div>
+        </td>
+        <td><code style="background: rgba(15, 23, 42, 0.6); padding: 3px 6px; border-radius: 4px; font-size: 12px; color: #38bdf8;">@${escapeHtml(t.username || '-')}</code></td>
+        <td><span style="font-size: 12px;">📞 ${escapeHtml(t.phone || '-')}</span></td>
+        <td><span class="role-badge ${roleBadgeClass}">${t.role}</span></td>
+        <td>${inchargeNames}</td>
+        <td><span class="status-badge ${statusClass}"><span class="status-dot"></span> ${statusLabel}</span></td>
+        <td><span style="font-size: 11px; color: var(--text-muted);">${lastLogin}</span></td>
+        <td style="text-align: right; white-space: nowrap;">
+          <button class="btn btn-secondary btn-xs" onclick="openEditTeacherModal('${t.id}')" title="Edit Teacher / Reset Password" style="margin-right: 4px;">
+            <i class="fa-solid fa-pen"></i> Edit
+          </button>
+          ${t.role !== 'principal' ? `
+            <button class="btn btn-danger btn-xs" onclick="handleDeleteTeacher('${t.id}', '${escapeHtml(t.fullName)}')" title="Delete Teacher">
+              <i class="fa-solid fa-trash"></i>
+            </button>
+          ` : ''}
+        </td>
+      </tr>
+    `;
+  }).join('');
+}
+
+function filterTeachersTable() {
+  const query = (document.getElementById('teacherSearchInput')?.value || '').toLowerCase().trim();
+  if (!query) {
+    renderTeachersTable();
+    return;
+  }
+  const filtered = globalTeachers.filter(t =>
+    t.fullName.toLowerCase().includes(query) ||
+    (t.username && t.username.toLowerCase().includes(query)) ||
+    (t.phone && t.phone.includes(query))
+  );
+  renderTeachersTable(filtered);
+}
+
+async function handleSaveNewTeacher(e) {
+  e.preventDefault();
+  const fullName = document.getElementById('teacherFullName').value.trim();
+  const username = document.getElementById('teacherUsername').value.trim();
+  const phone = document.getElementById('teacherPhone').value.trim();
+  const password = document.getElementById('teacherPassword').value.trim();
+  const role = document.getElementById('teacherRole').value;
+  const inchargeClassId = document.getElementById('teacherInchargeClass').value;
+  const btn = document.getElementById('btnSaveTeacherSubmit');
+
+  if (!fullName || !username || !password) {
+    showToast('Please fill all required fields.');
+    return;
+  }
+
+  btn.disabled = true;
+  btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Creating...';
+
+  try {
+    const res = await fetch(`${API_BASE}/admin/teachers`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify({
+        schoolId: CURRENT_SCHOOL_ID,
+        fullName,
+        username,
+        phone,
+        password,
+        role,
+        inchargeClassId: inchargeClassId || null
+      })
+    });
+    const data = await res.json();
+    if (data.success) {
+      showToast('Teacher added successfully! 🎓');
+      closeModal('addTeacherModal');
+      document.getElementById('addTeacherForm').reset();
+      await fetchClasses();
+      await fetchTeachers();
+    } else {
+      showToast(data.error || 'Failed to add teacher.');
+    }
+  } catch (err) {
+    showToast('Error creating teacher account.');
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = '<i class="fa-solid fa-check"></i> Create Teacher';
+  }
+}
+
+function openEditTeacherModal(teacherId) {
+  const teacher = globalTeachers.find(t => t.id === teacherId);
+  if (!teacher) return;
+
+  document.getElementById('editTeacherId').value = teacher.id;
+  document.getElementById('editTeacherFullName').value = teacher.fullName;
+  document.getElementById('editTeacherUsername').value = teacher.username || '';
+  document.getElementById('editTeacherPhone').value = teacher.phone || '';
+  document.getElementById('editTeacherPassword').value = '';
+  document.getElementById('editTeacherRole').value = teacher.role;
+  document.getElementById('editTeacherActiveStatus').value = String(teacher.isActive);
+
+  populateTeacherClassDropdowns();
+  const inchargeClass = (teacher.inchargeClasses && teacher.inchargeClasses[0]) ? teacher.inchargeClasses[0].id : '';
+  document.getElementById('editTeacherInchargeClass').value = inchargeClass;
+
+  openModal('editTeacherModal');
+}
+
+async function handleUpdateTeacherSubmit(e) {
+  e.preventDefault();
+  const teacherId = document.getElementById('editTeacherId').value;
+  const fullName = document.getElementById('editTeacherFullName').value.trim();
+  const username = document.getElementById('editTeacherUsername').value.trim();
+  const phone = document.getElementById('editTeacherPhone').value.trim();
+  const password = document.getElementById('editTeacherPassword').value.trim();
+  const role = document.getElementById('editTeacherRole').value;
+  const isActive = document.getElementById('editTeacherActiveStatus').value === 'true';
+  const inchargeClassId = document.getElementById('editTeacherInchargeClass').value;
+  const btn = document.getElementById('btnUpdateTeacherSubmit');
+
+  btn.disabled = true;
+  btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Saving...';
+
+  try {
+    const payload = {
+      schoolId: CURRENT_SCHOOL_ID,
+      fullName,
+      username,
+      phone,
+      role,
+      isActive,
+      inchargeClassId: inchargeClassId || null
+    };
+    if (password) payload.password = password;
+
+    const res = await fetch(`${API_BASE}/admin/teachers/${teacherId}`, {
+      method: 'PUT',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(payload)
+    });
+    const data = await res.json();
+    if (data.success) {
+      showToast('Staff member updated successfully! 💾');
+      closeModal('editTeacherModal');
+      await fetchClasses();
+      await fetchTeachers();
+    } else {
+      showToast(data.error || 'Failed to update teacher.');
+    }
+  } catch (err) {
+    showToast('Error updating staff member.');
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = '<i class="fa-solid fa-floppy-disk"></i> Save Changes';
+  }
+}
+
+async function handleDeleteTeacher(teacherId, teacherName) {
+  if (!confirm(`Are you sure you want to delete teacher "${teacherName}"? They will lose portal access immediately.`)) {
+    return;
+  }
+
+  try {
+    const res = await fetch(`${API_BASE}/admin/teachers/${teacherId}?schoolId=${CURRENT_SCHOOL_ID}`, {
+      method: 'DELETE',
+      headers: getAuthHeaders()
+    });
+    const data = await res.json();
+    if (data.success) {
+      showToast('Teacher removed successfully.');
+      await fetchClasses();
+      await fetchTeachers();
+    } else {
+      showToast(data.error || 'Could not delete teacher.');
+    }
+  } catch (e) {
+    showToast('Error removing teacher.');
+  }
+}
+
+function openAssignInchargeModal(classId, className, currentTeacherId) {
+  document.getElementById('assignInchargeClassId').value = classId;
+  const subtitle = document.getElementById('assignInchargeModalSubtitle');
+  if (subtitle) subtitle.innerText = `Designate teacher incharge for ${className}`;
+
+  const select = document.getElementById('assignInchargeTeacherSelect');
+  if (select) {
+    let html = '<option value="">-- Remove Incharge (Unassigned) --</option>';
+    globalTeachers.filter(t => t.isActive).forEach(t => {
+      const selected = t.id === currentTeacherId ? 'selected' : '';
+      html += `<option value="${t.id}" ${selected}>${escapeHtml(t.fullName)} (@${escapeHtml(t.username)})</option>`;
+    });
+    select.innerHTML = html;
+  }
+  openModal('assignInchargeModal');
+}
+
+async function handleSaveInchargeDirect(e) {
+  e.preventDefault();
+  const classId = document.getElementById('assignInchargeClassId').value;
+  const teacherId = document.getElementById('assignInchargeTeacherSelect').value;
+
+  try {
+    const res = await fetch(`${API_BASE}/admin/classes/${classId}/incharge`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify({ schoolId: CURRENT_SCHOOL_ID, teacherId: teacherId || null })
+    });
+    const data = await res.json();
+    if (data.success) {
+      showToast('Class Incharge assigned successfully! 👑');
+      closeModal('assignInchargeModal');
+      await fetchClasses();
+      await fetchTeachers();
+      renderClassesGrid();
+    } else {
+      showToast(data.error || 'Could not assign incharge.');
+    }
+  } catch (e) {
+    showToast('Error saving Class Incharge.');
+  }
 }

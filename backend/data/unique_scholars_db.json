@@ -547,5 +547,19 @@
       "category": "Fees",
       "body": "Assalam-o-Alaikum! 💰\n{school_name} Fee Reminder\n\nRespectable Parent of {student_name} ({class_name}),\nYeh polite reminder hai ke mahana school fee ki last date qareeb hai. Barah-e-karam timely payment ensure karein.\n\nThank you for your cooperation!\n{school_name}"
     }
+  ],
+  "adminUsers": [
+    {
+      "id": "e16c9eef-3c43-431c-ac85-50ac33f96c53",
+      "schoolId": "unique_scholars",
+      "fullName": "Sir Asad",
+      "username": "sir_asad",
+      "phone": "03001234567",
+      "email": "",
+      "role": "teacher",
+      "isActive": true,
+      "inchargeClassId": "Class-9",
+      "createdAt": "2026-09-12T21:24:32.910Z"
+    }
   ]
 }

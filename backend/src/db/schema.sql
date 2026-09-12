@@ -20,15 +20,17 @@ CREATE TABLE IF NOT EXISTS schools (
 );
 
 -- =====================================================================
--- 2. ADMIN USERS (replaces the single hardcoded PIN)
+-- 2. ADMIN USERS & TEACHERS (Staff credential & role-based authentication)
 -- =====================================================================
 CREATE TABLE IF NOT EXISTS admin_users (
   id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   school_id   VARCHAR(50) NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
+  username    VARCHAR(50) UNIQUE,
   full_name   VARCHAR(100) NOT NULL,
   role        VARCHAR(20) NOT NULL DEFAULT 'principal'
               CHECK (role IN ('principal','teacher','admin')),
   phone       VARCHAR(20),
+  email       VARCHAR(100),
   pin_hash    VARCHAR(255) NOT NULL,   -- bcrypt hash of the login PIN/password
   is_active   BOOLEAN NOT NULL DEFAULT true,
   last_login_at TIMESTAMPTZ,
@@ -36,20 +38,23 @@ CREATE TABLE IF NOT EXISTS admin_users (
   updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_admin_users_school ON admin_users(school_id);
+CREATE INDEX IF NOT EXISTS idx_admin_users_username ON admin_users(username);
 
 -- =====================================================================
--- 3. CLASSES + SECTIONS (sections normalized out of the array)
+-- 3. CLASSES + SECTIONS + INCHARGE
 -- =====================================================================
 CREATE TABLE IF NOT EXISTS classes (
-  id          VARCHAR(50) PRIMARY KEY,
-  school_id   VARCHAR(50) NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
-  name        VARCHAR(100) NOT NULL,
-  is_active   BOOLEAN NOT NULL DEFAULT true,
-  created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
-  updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+  id                  VARCHAR(50) PRIMARY KEY,
+  school_id           VARCHAR(50) NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
+  name                VARCHAR(100) NOT NULL,
+  incharge_teacher_id UUID REFERENCES admin_users(id) ON DELETE SET NULL,
+  is_active           BOOLEAN NOT NULL DEFAULT true,
+  created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
   UNIQUE (school_id, name)
 );
 CREATE INDEX IF NOT EXISTS idx_classes_school ON classes(school_id);
+CREATE INDEX IF NOT EXISTS idx_classes_incharge ON classes(incharge_teacher_id);
 
 CREATE TABLE IF NOT EXISTS class_sections (
   id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -58,6 +63,18 @@ CREATE TABLE IF NOT EXISTS class_sections (
   created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
   UNIQUE (class_id, section_name)
 );
+
+CREATE TABLE IF NOT EXISTS class_teachers (
+  id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  school_id     VARCHAR(50) NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
+  class_id      VARCHAR(50) NOT NULL REFERENCES classes(id) ON DELETE CASCADE,
+  teacher_id    UUID NOT NULL REFERENCES admin_users(id) ON DELETE CASCADE,
+  is_incharge   BOOLEAN NOT NULL DEFAULT true,
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (class_id, teacher_id)
+);
+CREATE INDEX IF NOT EXISTS idx_class_teachers_teacher ON class_teachers(teacher_id);
+CREATE INDEX IF NOT EXISTS idx_class_teachers_class ON class_teachers(class_id);
 
 -- =====================================================================
 -- 4. STUDENTS & SEQUENCES

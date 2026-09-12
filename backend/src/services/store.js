@@ -92,10 +92,21 @@ async function getClasses(schoolId = 'unique_scholars') {
       .whereIn('class_id', classes.map(c => c.id))
       .orderBy('section_name', 'asc');
 
+    const inchargeTeacherIds = classes.map(c => c.incharge_teacher_id).filter(Boolean);
+    let teachersMap = {};
+    if (inchargeTeacherIds.length > 0) {
+      const teachers = await db('admin_users').whereIn('id', inchargeTeacherIds);
+      teachers.forEach(t => {
+        teachersMap[t.id] = { id: t.id, fullName: t.full_name, phone: t.phone, username: t.username, role: t.role };
+      });
+    }
+
     return classes.map(c => ({
       id: c.id,
       schoolId: c.school_id,
       name: c.name,
+      inchargeTeacherId: c.incharge_teacher_id || null,
+      inchargeTeacher: teachersMap[c.incharge_teacher_id] || null,
       sections: sections.filter(s => s.class_id === c.id).map(s => s.section_name)
     }));
   }
@@ -1275,8 +1286,377 @@ async function saveMessageTemplate(schoolId = 'unique_scholars', templateData) {
 }
 
 // -------------------------------------------------------------
-// 7. ADMIN PIN / USER AUTH (Bcrypt against admin_users)
+// 7. TEACHERS, USERS & AUTHENTICATION
 // -------------------------------------------------------------
+
+async function getTeachers(schoolId = 'unique_scholars') {
+  if (isPostgresConfigured()) {
+    const db = getDb();
+    const users = await db('admin_users')
+      .where({ school_id: schoolId })
+      .orderBy('created_at', 'asc');
+
+    const classes = await db('classes').where({ school_id: schoolId, is_active: true });
+    const classTeachers = await db('class_teachers').where({ school_id: schoolId });
+
+    return users.map(u => {
+      const inchargeClasses = classes.filter(c => c.incharge_teacher_id === u.id).map(c => ({ id: c.id, name: c.name }));
+      const ctClasses = classTeachers.filter(ct => ct.teacher_id === u.id).map(ct => {
+        const cl = classes.find(c => c.id === ct.class_id);
+        return cl ? { id: cl.id, name: cl.name, isIncharge: ct.is_incharge } : null;
+      }).filter(Boolean);
+
+      const assignedMap = new Map();
+      inchargeClasses.forEach(c => assignedMap.set(c.id, { id: c.id, name: c.name, isIncharge: true }));
+      ctClasses.forEach(c => {
+        if (!assignedMap.has(c.id)) assignedMap.set(c.id, c);
+      });
+
+      return {
+        id: u.id,
+        schoolId: u.school_id,
+        fullName: u.full_name,
+        username: u.username || '',
+        phone: u.phone || '',
+        email: u.email || '',
+        role: u.role, // 'principal' | 'teacher' | 'admin'
+        isActive: u.is_active,
+        lastLoginAt: u.last_login_at,
+        createdAt: u.created_at,
+        inchargeClasses,
+        assignedClasses: Array.from(assignedMap.values())
+      };
+    });
+  }
+
+  const db = readJsonDb();
+  return (db.adminUsers || []).filter(u => u.schoolId === schoolId);
+}
+
+async function addTeacher(schoolId = 'unique_scholars', teacherData) {
+  const { fullName, username, phone, email, password, role = 'teacher', inchargeClassId } = teacherData;
+  if (!fullName || !fullName.trim()) throw new Error('Teacher full name is required.');
+  if (!username || !username.trim()) throw new Error('Teacher username is required.');
+  if (!password || !password.trim()) throw new Error('Teacher password is required.');
+
+  const cleanUsername = username.trim().toLowerCase();
+  const pinHash = bcrypt.hashSync(password.trim(), 10);
+
+  if (isPostgresConfigured()) {
+    const db = getDb();
+    const existing = await db('admin_users').where({ username: cleanUsername }).first();
+    if (existing) {
+      throw new Error(`Username "${cleanUsername}" is already in use. Please choose another.`);
+    }
+
+    const [newUser] = await db('admin_users').insert({
+      school_id: schoolId,
+      full_name: fullName.trim(),
+      username: cleanUsername,
+      phone: phone ? phone.trim() : null,
+      email: email ? email.trim().toLowerCase() : null,
+      role: role || 'teacher',
+      pin_hash: pinHash,
+      is_active: true
+    }).returning('*');
+
+    if (inchargeClassId) {
+      await assignClassIncharge(schoolId, inchargeClassId, newUser.id);
+    }
+
+    // Mirror to JSON db
+    try {
+      const jDb = readJsonDb();
+      if (!jDb.adminUsers) jDb.adminUsers = [];
+      jDb.adminUsers.push({
+        id: newUser.id,
+        schoolId,
+        fullName: newUser.full_name,
+        username: newUser.username,
+        phone: newUser.phone || '',
+        email: newUser.email || '',
+        role: newUser.role,
+        isActive: true,
+        inchargeClassId: inchargeClassId || null,
+        createdAt: new Date().toISOString()
+      });
+      writeJsonDb(jDb);
+    } catch (e) {}
+
+    return {
+      id: newUser.id,
+      schoolId: newUser.school_id,
+      fullName: newUser.full_name,
+      username: newUser.username,
+      phone: newUser.phone,
+      email: newUser.email,
+      role: newUser.role,
+      isActive: newUser.is_active,
+      inchargeClassId: inchargeClassId || null
+    };
+  }
+
+  const db = readJsonDb();
+  if (!db.adminUsers) db.adminUsers = [];
+  const newTeacher = {
+    id: `teacher-${Date.now()}`,
+    schoolId,
+    fullName: fullName.trim(),
+    username: cleanUsername,
+    phone: phone ? phone.trim() : '',
+    email: email ? email.trim() : '',
+    role: role || 'teacher',
+    pinHash,
+    isActive: true,
+    inchargeClassId: inchargeClassId || null,
+    createdAt: new Date().toISOString()
+  };
+  db.adminUsers.push(newTeacher);
+  writeJsonDb(db);
+  return newTeacher;
+}
+
+async function updateTeacher(schoolId = 'unique_scholars', teacherId, updateData) {
+  const { fullName, username, phone, email, password, role, isActive, inchargeClassId } = updateData;
+
+  if (isPostgresConfigured()) {
+    const db = getDb();
+    const updatePayload = { updated_at: new Date() };
+    if (fullName !== undefined) updatePayload.full_name = fullName.trim();
+    if (username !== undefined) {
+      const cleanUsername = username.trim().toLowerCase();
+      const existing = await db('admin_users').where({ username: cleanUsername }).whereNot({ id: teacherId }).first();
+      if (existing) throw new Error(`Username "${cleanUsername}" is already taken.`);
+      updatePayload.username = cleanUsername;
+    }
+    if (phone !== undefined) updatePayload.phone = phone ? phone.trim() : null;
+    if (email !== undefined) updatePayload.email = email ? email.trim().toLowerCase() : null;
+    if (role !== undefined) updatePayload.role = role;
+    if (isActive !== undefined) updatePayload.is_active = Boolean(isActive);
+    if (password && password.trim()) {
+      updatePayload.pin_hash = bcrypt.hashSync(password.trim(), 10);
+    }
+
+    await db('admin_users').where({ school_id: schoolId, id: teacherId }).update(updatePayload);
+
+    if (inchargeClassId !== undefined) {
+      await db('classes').where({ school_id: schoolId, incharge_teacher_id: teacherId }).update({ incharge_teacher_id: null });
+      await db('class_teachers').where({ school_id: schoolId, teacher_id: teacherId, is_incharge: true }).del();
+
+      if (inchargeClassId) {
+        await assignClassIncharge(schoolId, inchargeClassId, teacherId);
+      }
+    }
+
+    const updated = await db('admin_users').where({ id: teacherId }).first();
+    return updated;
+  }
+
+  const db = readJsonDb();
+  if (!db.adminUsers) db.adminUsers = [];
+  const idx = db.adminUsers.findIndex(u => u.id === teacherId);
+  if (idx >= 0) {
+    if (fullName) db.adminUsers[idx].fullName = fullName.trim();
+    if (username) db.adminUsers[idx].username = username.trim().toLowerCase();
+    if (phone !== undefined) db.adminUsers[idx].phone = phone;
+    if (email !== undefined) db.adminUsers[idx].email = email;
+    if (role) db.adminUsers[idx].role = role;
+    if (isActive !== undefined) db.adminUsers[idx].isActive = Boolean(isActive);
+    if (password && password.trim()) db.adminUsers[idx].pinHash = bcrypt.hashSync(password.trim(), 10);
+    if (inchargeClassId !== undefined) db.adminUsers[idx].inchargeClassId = inchargeClassId;
+    writeJsonDb(db);
+    return db.adminUsers[idx];
+  }
+  return null;
+}
+
+async function deleteTeacher(schoolId = 'unique_scholars', teacherId) {
+  if (isPostgresConfigured()) {
+    const db = getDb();
+    const user = await db('admin_users').where({ school_id: schoolId, id: teacherId }).first();
+    if (!user) return false;
+
+    if (user.role === 'principal') {
+      const principalCount = await db('admin_users').where({ school_id: schoolId, role: 'principal', is_active: true }).count('id as count').first();
+      if (Number(principalCount?.count || 0) <= 1) {
+        throw new Error('Cannot delete the last active Principal account.');
+      }
+    }
+
+    await db('classes').where({ school_id: schoolId, incharge_teacher_id: teacherId }).update({ incharge_teacher_id: null });
+    await db('class_teachers').where({ school_id: schoolId, teacher_id: teacherId }).del();
+    const deleted = await db('admin_users').where({ school_id: schoolId, id: teacherId }).del();
+    return deleted > 0;
+  }
+
+  const db = readJsonDb();
+  if (!db.adminUsers) return false;
+  const idx = db.adminUsers.findIndex(u => u.id === teacherId);
+  if (idx >= 0) {
+    db.adminUsers.splice(idx, 1);
+    writeJsonDb(db);
+    return true;
+  }
+  return false;
+}
+
+async function assignClassIncharge(schoolId = 'unique_scholars', classId, teacherId) {
+  if (isPostgresConfigured()) {
+    const db = getDb();
+    await db('classes').where({ school_id: schoolId, id: classId }).update({
+      incharge_teacher_id: teacherId || null,
+      updated_at: new Date()
+    });
+
+    await db('class_teachers').where({ school_id: schoolId, class_id: classId, is_incharge: true }).del();
+
+    if (teacherId) {
+      await db('class_teachers').insert({
+        school_id: schoolId,
+        class_id: classId,
+        teacher_id: teacherId,
+        is_incharge: true
+      });
+    }
+
+    return { success: true, classId, teacherId };
+  }
+
+  const db = readJsonDb();
+  const cl = (db.classes || []).find(c => c.id === classId);
+  if (cl) {
+    cl.inchargeTeacherId = teacherId || null;
+    writeJsonDb(db);
+    return { success: true, classId, teacherId };
+  }
+  return { success: false, error: 'Class not found' };
+}
+
+async function getTeacherAssignedClasses(schoolId = 'unique_scholars', teacherId) {
+  if (isPostgresConfigured()) {
+    const db = getDb();
+    const classes = await db('classes').where({ school_id: schoolId, is_active: true });
+    const incharge = classes.filter(c => c.incharge_teacher_id === teacherId).map(c => ({ id: c.id, name: c.name, isIncharge: true }));
+    const classTeachers = await db('class_teachers').where({ school_id: schoolId, teacher_id: teacherId });
+    const addtl = classTeachers.map(ct => {
+      const cl = classes.find(c => c.id === ct.class_id);
+      return cl ? { id: cl.id, name: cl.name, isIncharge: ct.is_incharge } : null;
+    }).filter(Boolean);
+
+    const map = new Map();
+    incharge.forEach(c => map.set(c.id, c));
+    addtl.forEach(c => {
+      if (!map.has(c.id)) map.set(c.id, c);
+    });
+    return Array.from(map.values());
+  }
+
+  const db = readJsonDb();
+  const user = (db.adminUsers || []).find(u => u.id === teacherId);
+  if (user && user.inchargeClassId) {
+    const cl = (db.classes || []).find(c => c.id === user.inchargeClassId);
+    return cl ? [{ id: cl.id, name: cl.name, isIncharge: true }] : [];
+  }
+  return [];
+}
+
+async function authenticateUser(loginId, password, schoolId = 'unique_scholars') {
+  if (!loginId || !password) {
+    return { success: false, error: 'Username/phone and password are required.' };
+  }
+
+  const cleanId = String(loginId).trim().toLowerCase();
+  const cleanPass = String(password).trim();
+
+  if (isPostgresConfigured()) {
+    const db = getDb();
+
+    // 1. Find user by username, phone, or email
+    let user = await db('admin_users')
+      .where({ school_id: schoolId, is_active: true })
+      .andWhere(function() {
+        this.whereRaw('LOWER(username) = ?', [cleanId])
+          .orWhere('phone', cleanId)
+          .orWhereRaw('LOWER(email) = ?', [cleanId]);
+      })
+      .first();
+
+    // 2. Fallback: if loginId is 'admin' or 'principal' and no username matched
+    if (!user && (cleanId === 'admin' || cleanId === 'principal')) {
+      user = await db('admin_users')
+        .where({ school_id: schoolId, role: 'principal', is_active: true })
+        .first();
+    }
+
+    if (user && user.pin_hash) {
+      const match = bcrypt.compareSync(cleanPass, user.pin_hash);
+      if (match) {
+        await db('admin_users').where({ id: user.id }).update({ last_login_at: new Date() });
+
+        const assignedClasses = await getTeacherAssignedClasses(schoolId, user.id);
+        const inchargeClasses = assignedClasses.filter(c => c.isIncharge);
+
+        return {
+          success: true,
+          user: {
+            id: user.id,
+            schoolId: user.school_id,
+            fullName: user.full_name,
+            username: user.username || '',
+            phone: user.phone || '',
+            email: user.email || '',
+            role: user.role, // 'principal' | 'teacher' | 'admin'
+            inchargeClasses,
+            assignedClasses,
+            assignedClassIds: assignedClasses.map(c => c.id)
+          }
+        };
+      }
+    }
+
+    // 3. Fallback for default ADMIN_PIN
+    const envPin = process.env.ADMIN_PIN || '1234';
+    if ((cleanId === 'admin' || cleanId === 'principal') && cleanPass === envPin) {
+      return {
+        success: true,
+        user: {
+          id: 'admin-master',
+          schoolId,
+          fullName: 'Principal Office',
+          username: 'admin',
+          phone: '03334751998',
+          role: 'principal',
+          inchargeClasses: [],
+          assignedClasses: [],
+          assignedClassIds: []
+        }
+      };
+    }
+
+    return { success: false, error: 'Invalid credentials. Please check your username and password.' };
+  }
+
+  // JSON fallback
+  const validPin = process.env.ADMIN_PIN || '1234';
+  if ((cleanId === 'admin' || cleanId === 'principal') && cleanPass === validPin) {
+    return {
+      success: true,
+      user: {
+        id: 'admin-master',
+        schoolId,
+        fullName: 'Principal Office',
+        username: 'admin',
+        role: 'principal',
+        inchargeClasses: [],
+        assignedClasses: [],
+        assignedClassIds: []
+      }
+    };
+  }
+
+  return { success: false, error: 'Invalid credentials' };
+}
+
 async function verifyAdminPin(pin, schoolId = 'unique_scholars') {
   if (isPostgresConfigured()) {
     const db = getDb();
@@ -2220,6 +2600,13 @@ module.exports = {
   getMessageTemplates,
   saveMessageTemplate,
   verifyAdminPin,
+  authenticateUser,
+  getTeachers,
+  addTeacher,
+  updateTeacher,
+  deleteTeacher,
+  assignClassIncharge,
+  getTeacherAssignedClasses,
   getAdminInsights,
   getAdminRecords,
   addPendingDispatches,
