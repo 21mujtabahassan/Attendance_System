@@ -189,26 +189,57 @@ function applyRoleRestrictions() {
   const isTeacher = currentUser.role === 'teacher';
 
   // Sidebar Tabs visibility
+  const navOverview = document.getElementById('navOverview');
+  const navResults = document.getElementById('navResults');
   const navFees = document.getElementById('navFees');
-  const navWhatsapp = document.getElementById('navWhatsapp');
-  const navTeachers = document.getElementById('navTeachers');
   const navBroadcast = document.getElementById('navBroadcast');
+  const navClasses = document.getElementById('navClasses');
+  const navStudents = document.getElementById('navStudents');
+  const navRecords = document.getElementById('navRecords');
+  const navTeachers = document.getElementById('navTeachers');
+  const navWhatsapp = document.getElementById('navWhatsapp');
 
+  if (navOverview) navOverview.style.display = isTeacher ? 'none' : 'flex';
+  if (navClasses) navClasses.style.display = isTeacher ? 'none' : 'flex';
+  if (navRecords) navRecords.style.display = isTeacher ? 'none' : 'flex';
   if (navFees) navFees.style.display = isTeacher ? 'none' : 'flex';
-  if (navWhatsapp) navWhatsapp.style.display = isTeacher ? 'none' : 'flex';
-  if (navTeachers) navTeachers.style.display = isTeacher ? 'none' : 'flex';
   if (navBroadcast) navBroadcast.style.display = isTeacher ? 'none' : 'flex';
+  if (navTeachers) navTeachers.style.display = isTeacher ? 'none' : 'flex';
+  if (navWhatsapp) navWhatsapp.style.display = isTeacher ? 'none' : 'flex';
 
-  // Admin-only buttons
+  if (navResults) navResults.style.display = 'flex';
+  if (navStudents) {
+    navStudents.style.display = 'flex';
+    const span = navStudents.querySelector('span');
+    if (span) {
+      if (isTeacher) {
+        const inchargeNames = (currentUser.inchargeClasses || []).map(c => c.name).join(', ');
+        span.innerText = inchargeNames ? `${inchargeNames} Students` : 'My Students';
+      } else {
+        span.innerText = 'Student Roster';
+      }
+    }
+  }
+
+  // Topbar badges
+  const waBadge = document.getElementById('waGatewayBadge');
+  if (waBadge) waBadge.style.display = isTeacher ? 'none' : 'flex';
+
+  const sidebarWa = document.getElementById('sidebarWaStatus');
+  if (sidebarWa) sidebarWa.style.display = isTeacher ? 'none' : 'flex';
+
+  // Admin-only buttons and elements
   document.querySelectorAll('.admin-only-btn').forEach(el => {
     el.style.display = isTeacher ? 'none' : 'inline-flex';
   });
 
-  // Switch away from restricted tabs
+  // Switch away from restricted tabs immediately
   const activeTabBtn = document.querySelector('.nav-item.active');
   const currentTab = activeTabBtn ? activeTabBtn.getAttribute('data-tab') : 'overview';
-  if (isTeacher && (currentTab === 'fees' || currentTab === 'whatsapp' || currentTab === 'teachers' || currentTab === 'broadcast')) {
-    switchTab('students');
+  if (isTeacher) {
+    if (currentTab !== 'results' && currentTab !== 'students') {
+      switchTab('results');
+    }
   }
 
   // Scope class dropdowns
@@ -308,62 +339,107 @@ function initSocketIO() {
 // -------------------------------------------------------------
 // NAVIGATION & TAB SWITCHING
 // -------------------------------------------------------------
-function setupTabNavigation() {
+function switchTab(targetTab) {
+  const isTeacher = currentUser && currentUser.role === 'teacher';
+  // If teacher, strictly enforce allowed tabs: only results and students!
+  if (isTeacher && targetTab !== 'results' && targetTab !== 'students') {
+    targetTab = 'results';
+  }
+
   const navItems = document.querySelectorAll('.nav-item');
   const tabContents = document.querySelectorAll('.tab-content');
   const pageTitle = document.getElementById('pageTitle');
   const pageSubtitle = document.getElementById('pageSubtitle');
 
+  const inchargeNames = currentUser && currentUser.inchargeClasses ? currentUser.inchargeClasses.map(c => c.name).join(', ') : '';
+
   const titlesMap = {
     overview: { title: 'Executive Overview', subtitle: 'Real-time attendance ratios, class breakdown & quick stats' },
-    results: { title: 'Academic Results & Digital Marksheets', subtitle: 'Configure terms, enter student marks, and dispatch branded WhatsApp report cards' },
+    results: { title: 'Academic Results & Digital Marksheets', subtitle: isTeacher ? `Enter marks and generate digital report cards for ${inchargeNames || 'your assigned class'}` : 'Configure terms, enter student marks, and dispatch branded WhatsApp report cards' },
     fees: { title: 'Tuition Fee Management & Billing Ledger', subtitle: 'Standard class rates, scholarship concessions, payment collection & WhatsApp receipts' },
     broadcast: { title: 'WhatsApp Broadcast Center', subtitle: 'Send targeted broadcasts & custom message templates to parents' },
     classes: { title: 'Classes & Sections Architecture', subtitle: 'Manage school grade levels and classroom sections' },
-    students: { title: 'Student Directory & Contact Numbers', subtitle: 'Manage student roster, parent WhatsApp phone numbers, and profile details' },
+    students: { title: isTeacher ? `${inchargeNames || 'Class'} Student Directory` : 'Student Directory & Contact Numbers', subtitle: isTeacher ? `Manage students and add new admissions for ${inchargeNames || 'your assigned class'}` : 'Manage student roster, parent WhatsApp phone numbers, and profile details' },
     records: { title: 'Complete Attendance History', subtitle: 'Search, filter, and audit all mobile app attendance logs' },
     teachers: { title: 'Faculty & Staff Administration', subtitle: 'Manage teachers, set login passwords, and assign Class Incharge roles' },
     whatsapp: { title: 'WhatsApp Gateway Engine', subtitle: 'Scan QR code & monitor multi-tenant WhatsApp socket connection' }
   };
 
+  navItems.forEach(n => {
+    if (n.getAttribute('data-tab') === targetTab) {
+      n.classList.add('active');
+    } else {
+      n.classList.remove('active');
+    }
+  });
+
+  tabContents.forEach(c => {
+    if (c.id === `tab-${targetTab}`) {
+      c.classList.add('active');
+    } else {
+      c.classList.remove('active');
+    }
+  });
+
+  if (titlesMap[targetTab]) {
+    if (pageTitle) pageTitle.innerText = titlesMap[targetTab].title;
+    if (pageSubtitle) pageSubtitle.innerText = titlesMap[targetTab].subtitle;
+  }
+
+  if (targetTab === 'overview' && !isTeacher) loadOverviewData();
+  if (targetTab === 'results') loadResultsTabData();
+  if (targetTab === 'fees' && !isTeacher) loadFeesTabData();
+  if (targetTab === 'broadcast' && !isTeacher) loadBroadcastTabData();
+  if (targetTab === 'classes' && !isTeacher) renderClassesGrid();
+  if (targetTab === 'students') renderStudentsTable();
+  if (targetTab === 'records' && !isTeacher) loadRecordsData();
+  if (targetTab === 'teachers' && !isTeacher) loadTeachersTabData();
+  if (targetTab === 'whatsapp' && !isTeacher) fetchWaStatus();
+}
+
+function setupTabNavigation() {
+  const navItems = document.querySelectorAll('.nav-item');
   navItems.forEach(item => {
     item.addEventListener('click', () => {
       const targetTab = item.getAttribute('data-tab');
-      navItems.forEach(n => n.classList.remove('active'));
-      tabContents.forEach(c => c.classList.remove('active'));
-
-      item.classList.add('active');
-      const targetEl = document.getElementById(`tab-${targetTab}`);
-      if (targetEl) targetEl.classList.add('active');
-
-      if (titlesMap[targetTab]) {
-        pageTitle.innerText = titlesMap[targetTab].title;
-        pageSubtitle.innerText = titlesMap[targetTab].subtitle;
-      }
-
-      if (targetTab === 'overview') loadOverviewData();
-      if (targetTab === 'results') loadResultsTabData();
-      if (targetTab === 'fees') loadFeesTabData();
-      if (targetTab === 'broadcast') loadBroadcastTabData();
-      if (targetTab === 'classes') renderClassesGrid();
-      if (targetTab === 'students') renderStudentsTable();
-      if (targetTab === 'records') loadRecordsData();
-      if (targetTab === 'teachers') loadTeachersTabData();
-      if (targetTab === 'whatsapp') fetchWaStatus();
+      switchTab(targetTab);
     });
   });
 }
 
+function openAddStudentForClass() {
+  openModal('addStudentModal');
+  const classSelect = document.getElementById('studentClassSelect');
+  const isTeacher = currentUser && currentUser.role === 'teacher';
+  if (classSelect) {
+    const activeClass = document.getElementById('marksClassSelect')?.value || (currentUser && currentUser.assignedClassIds && currentUser.assignedClassIds[0]);
+    if (activeClass) classSelect.value = activeClass;
+    if (isTeacher) {
+      classSelect.disabled = true;
+    } else {
+      classSelect.disabled = false;
+    }
+    populateSectionDropdown('studentClassSelect', 'studentSectionSelect');
+  }
+}
+
 function switchResultsSubTab(subTabId) {
+  const isTeacher = currentUser && currentUser.role === 'teacher';
+  if (isTeacher && subTabId === 'terms-config') {
+    subTabId = 'marks-entry';
+  }
+
   document.querySelectorAll('.subnav-btn').forEach(btn => btn.classList.remove('active'));
   document.querySelectorAll('.results-subtab').forEach(tab => tab.classList.remove('active'));
 
-  event.target.classList.add('active');
+  const btn = document.getElementById(`btnSubnav${subTabId.split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join('')}`) || (event && event.target);
+  if (btn && btn.classList) btn.classList.add('active');
+
   const target = document.getElementById(`res-subtab-${subTabId}`);
   if (target) target.classList.add('active');
 
   if (subTabId === 'marks-entry') loadMarksEntryGrid();
-  if (subTabId === 'terms-config') loadTermsAndSubjectsConfig();
+  if (subTabId === 'terms-config' && !isTeacher) loadTermsAndSubjectsConfig();
   if (subTabId === 'results-history') loadFinalizedResultsHistory();
 }
 
@@ -371,19 +447,32 @@ function switchResultsSubTab(subTabId) {
 // DATA FETCHING & POPULATION
 // -------------------------------------------------------------
 async function loadInitialData() {
-  await Promise.all([
-    fetchClasses(),
-    fetchStudents(),
-    fetchTerms(),
-    fetchTeachers(),
-    fetchWaStatus(),
-    loadOverviewData()
-  ]);
+  const isTeacher = currentUser && currentUser.role === 'teacher';
+  if (isTeacher) {
+    await Promise.all([
+      fetchClasses(),
+      fetchStudents(),
+      fetchTerms()
+    ]);
+    switchTab('results');
+    loadMarksEntryGrid();
+  } else {
+    await Promise.all([
+      fetchClasses(),
+      fetchStudents(),
+      fetchTerms(),
+      fetchTeachers(),
+      fetchWaStatus(),
+      loadOverviewData()
+    ]);
+  }
 }
 
 async function fetchClasses() {
   try {
-    const res = await fetch(`${API_BASE}/schools/${CURRENT_SCHOOL_ID}/classes`);
+    const res = await fetch(`${API_BASE}/schools/${CURRENT_SCHOOL_ID}/classes`, {
+      headers: getAuthHeaders()
+    });
     const data = await res.json();
     globalClasses = data.classes || [];
     populateClassDropdowns();
@@ -394,9 +483,12 @@ async function fetchClasses() {
 
 async function fetchStudents() {
   try {
-    const res = await fetch(`${API_BASE}/schools/${CURRENT_SCHOOL_ID}/students`);
+    const res = await fetch(`${API_BASE}/schools/${CURRENT_SCHOOL_ID}/students`, {
+      headers: getAuthHeaders()
+    });
     const data = await res.json();
     globalStudents = data.students || [];
+    filterStudentTable();
   } catch (e) {
     console.error('Error fetching students:', e);
   }
@@ -404,7 +496,9 @@ async function fetchStudents() {
 
 async function fetchTerms() {
   try {
-    const res = await fetch(`${API_BASE}/admin/results/terms?schoolId=${CURRENT_SCHOOL_ID}`);
+    const res = await fetch(`${API_BASE}/admin/results/terms?schoolId=${CURRENT_SCHOOL_ID}`, {
+      headers: getAuthHeaders()
+    });
     const data = await res.json();
     globalTerms = data.terms || [];
     populateTermDropdowns();
@@ -449,6 +543,19 @@ function populateClassDropdowns() {
       el.value = currentVal;
     } else if (allowedClasses.length > 0) {
       el.value = allowedClasses[0].id;
+    }
+
+    // Role-based disable/lock logic
+    if (isTeacher) {
+      if (id === 'editStudentClass') {
+        el.disabled = true; // Teacher cannot reassign class
+      } else if (allowedClasses.length <= 1 && (id === 'marksClassSelect' || id === 'historyClassSelect' || id === 'studentClassFilter' || id === 'studentClassSelect')) {
+        el.disabled = true; // Lock to single assigned class
+      } else {
+        el.disabled = false;
+      }
+    } else {
+      el.disabled = false;
     }
   });
 
@@ -1723,7 +1830,7 @@ async function handleCreateStudent(e) {
   const emailInput = document.getElementById('parentEmailInput');
 
   const name = (nameInput?.value || '').trim();
-  const classId = classSelect?.value;
+  const classId = classSelect?.value || (currentUser && currentUser.assignedClassIds && currentUser.assignedClassIds[0]);
   const section = sectionSelect?.value || 'Section A';
   const parentPhone = (phoneInput?.value || '').trim();
   const parentEmail = (emailInput?.value || '').trim();
@@ -1740,7 +1847,7 @@ async function handleCreateStudent(e) {
   try {
     const res = await fetch(`${API_BASE}/schools/${CURRENT_SCHOOL_ID}/students`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: getAuthHeaders(),
       body: JSON.stringify({ name, classId, section, parentPhone, parentEmail })
     });
     const data = await res.json();
@@ -1750,8 +1857,11 @@ async function handleCreateStudent(e) {
       document.getElementById('addStudentForm').reset();
       await fetchStudents();
       filterStudentTable();
-      if (typeof loadOverviewData === 'function') loadOverviewData();
-      if (typeof loadFeeLedger === 'function') loadFeeLedger();
+      if (typeof loadMarksEntryGrid === 'function') loadMarksEntryGrid();
+      if (currentUser && currentUser.role !== 'teacher') {
+        if (typeof loadOverviewData === 'function') loadOverviewData();
+        if (typeof loadFeeLedger === 'function') loadFeeLedger();
+      }
     } else {
       showToast(data.error || 'Failed to create student.');
     }
@@ -1764,6 +1874,15 @@ function openEditStudentModal(studentId) {
   const stu = globalStudents.find(s => s.id === studentId);
   if (!stu) return;
 
+  const isTeacher = currentUser && currentUser.role === 'teacher';
+  if (isTeacher) {
+    const assignedIds = currentUser.assignedClassIds || [];
+    if (!assignedIds.includes(stu.classId)) {
+      showToast('Access Denied: You cannot modify students of other classes.');
+      return;
+    }
+  }
+
   const idDisplay = document.getElementById('editStudentIdDisplay');
   const rollDisplay = document.getElementById('editStudentRollDisplay');
   if (idDisplay) idDisplay.textContent = stu.id;
@@ -1771,7 +1890,11 @@ function openEditStudentModal(studentId) {
 
   document.getElementById('editStudentId').value = stu.id;
   document.getElementById('editStudentName').value = stu.name;
-  document.getElementById('editStudentClass').value = stu.classId;
+  const classSelect = document.getElementById('editStudentClass');
+  if (classSelect) {
+    classSelect.value = stu.classId;
+    classSelect.disabled = isTeacher; // Teachers cannot change student class
+  }
   populateSectionDropdown('editStudentClass', 'editStudentSection');
   document.getElementById('editStudentSection').value = stu.section || 'Section A';
   document.getElementById('editParentPhone').value = stu.parentPhone || '';
@@ -1784,7 +1907,9 @@ async function handleEditStudentSubmit(e) {
   e.preventDefault();
   const studentId = document.getElementById('editStudentId').value;
   const name = document.getElementById('editStudentName').value;
-  const classId = document.getElementById('editStudentClass').value;
+  const classSelect = document.getElementById('editStudentClass');
+  const stu = globalStudents.find(s => s.id === studentId);
+  const classId = classSelect?.value || (stu ? stu.classId : '');
   const section = document.getElementById('editStudentSection').value;
   const parentPhone = document.getElementById('editParentPhone').value;
   const parentEmail = document.getElementById('editParentEmail').value;
@@ -1792,7 +1917,7 @@ async function handleEditStudentSubmit(e) {
   try {
     const res = await fetch(`${API_BASE}/admin/students/${studentId}?schoolId=${CURRENT_SCHOOL_ID}`, {
       method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
+      headers: getAuthHeaders(),
       body: JSON.stringify({ name, classId, section, parentPhone, parentEmail })
     });
     const data = await res.json();
@@ -1802,6 +1927,7 @@ async function handleEditStudentSubmit(e) {
       closeModal('editStudentModal');
       await fetchStudents();
       filterStudentTable();
+      if (typeof loadMarksEntryGrid === 'function') loadMarksEntryGrid();
     } else {
       showToast(data.error || 'Failed to update student profile.');
     }

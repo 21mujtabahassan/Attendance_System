@@ -97,6 +97,61 @@
       "section": "Section A",
       "parentPhone": "03314751998",
       "parentEmail": "parent.zainab@gmail.com"
+    },
+    {
+      "id": "STU-000008",
+      "rollNumber": 3,
+      "schoolId": "unique_scholars",
+      "name": "Hacker Student",
+      "classId": "Class-10",
+      "sectionId": "d20387ca-76b1-4b81-a3d4-c55f119eba58",
+      "section": "Section A",
+      "parentPhone": "",
+      "parentEmail": ""
+    },
+    {
+      "id": "STU-000009",
+      "rollNumber": 4,
+      "schoolId": "unique_scholars",
+      "name": "Class 9 Test Candidate 561",
+      "classId": "Class-10",
+      "sectionId": "d20387ca-76b1-4b81-a3d4-c55f119eba58",
+      "section": "Section A",
+      "parentPhone": "03009998877",
+      "parentEmail": ""
+    },
+    {
+      "id": "STU-000010",
+      "rollNumber": 5,
+      "schoolId": "unique_scholars",
+      "name": "Hacker Student",
+      "classId": "Class-10",
+      "sectionId": "d20387ca-76b1-4b81-a3d4-c55f119eba58",
+      "section": "Section A",
+      "parentPhone": "",
+      "parentEmail": ""
+    },
+    {
+      "id": "STU-000011",
+      "rollNumber": 6,
+      "schoolId": "unique_scholars",
+      "name": "Class 9 Test Candidate 265",
+      "classId": "Class-10",
+      "sectionId": "d20387ca-76b1-4b81-a3d4-c55f119eba58",
+      "section": "Section A",
+      "parentPhone": "03009998877",
+      "parentEmail": ""
+    },
+    {
+      "id": "STU-000012",
+      "rollNumber": 1,
+      "schoolId": "unique_scholars",
+      "name": "Class 9 Test Candidate 742",
+      "classId": "Class-9",
+      "sectionId": "3b7d3d8e-3ee2-4c2e-84c3-74111aa22770",
+      "section": "Section A",
+      "parentPhone": "03009998877",
+      "parentEmail": ""
     }
   ],
   "attendanceLogs": [

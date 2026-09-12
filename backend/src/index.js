@@ -261,6 +261,48 @@ if (!process.env.VERCEL) {
 }
 
 // -------------------------------------------------------------
+// AUTHENTICATION & RBAC HELPERS
+// -------------------------------------------------------------
+
+function generateAuthToken(user) {
+  const payload = {
+    id: user.id,
+    fullName: user.fullName,
+    username: user.username,
+    role: user.role,
+    assignedClassIds: user.assignedClassIds || [],
+    ts: Date.now()
+  };
+  return Buffer.from(JSON.stringify(payload)).toString('base64');
+}
+
+function decodeAuthToken(token) {
+  if (!token) return null;
+  try {
+    const raw = token.replace(/^Bearer\s+/i, '');
+    return JSON.parse(Buffer.from(raw, 'base64').toString('utf8'));
+  } catch (e) {
+    return null;
+  }
+}
+
+function getReqUser(req) {
+  const header = req.headers['authorization'] || req.headers['x-auth-token'];
+  return decodeAuthToken(header);
+}
+
+function requireAdminOrPrincipal(req, res, next) {
+  const user = getReqUser(req);
+  if (user && user.role === 'teacher') {
+    return res.status(403).json({
+      success: false,
+      error: 'Access Denied: This administrative feature is restricted to Principals and Admins.'
+    });
+  }
+  next();
+}
+
+// -------------------------------------------------------------
 // WHATSAPP GATEWAY ENDPOINTS
 // -------------------------------------------------------------
 
@@ -451,9 +493,31 @@ app.get('/api/system/status', async (req, res) => {
 
 app.get('/api/schools/:schoolId/students', async (req, res) => {
   try {
+    const reqUser = getReqUser(req);
     const { schoolId } = req.params;
-    const classId = req.query.class;
-    const students = await getStudents(schoolId, classId);
+    let classId = req.query.class;
+
+    if (reqUser && reqUser.role === 'teacher') {
+      const allowed = reqUser.assignedClassIds || [];
+      if (allowed.length === 0) {
+        return res.json({ success: true, students: [] });
+      }
+      if (classId && !allowed.includes(classId)) {
+        return res.status(403).json({
+          success: false,
+          error: 'Access Denied: You cannot view students of other classes.',
+          students: []
+        });
+      }
+    }
+
+    let students = await getStudents(schoolId, classId);
+
+    if (reqUser && reqUser.role === 'teacher') {
+      const allowedSet = new Set(reqUser.assignedClassIds || []);
+      students = students.filter(s => allowedSet.has(s.classId));
+    }
+
     res.json({ success: true, students });
   } catch (err) {
     console.error('Error getting students:', err);
@@ -463,11 +527,23 @@ app.get('/api/schools/:schoolId/students', async (req, res) => {
 
 app.post('/api/schools/:schoolId/students', async (req, res) => {
   try {
+    const reqUser = getReqUser(req);
     const { schoolId } = req.params;
     const { name, classId, section, parentPhone, parentEmail } = req.body;
     if (!name) {
       return res.status(400).json({ success: false, error: 'Student name is required.' });
     }
+
+    if (reqUser && reqUser.role === 'teacher') {
+      const allowed = reqUser.assignedClassIds || [];
+      if (!classId || !allowed.includes(classId)) {
+        return res.status(403).json({
+          success: false,
+          error: 'Access Denied: Teachers can only add students to their assigned class.'
+        });
+      }
+    }
+
     const student = await addStudent(schoolId, { name, classId, section, parentPhone, parentEmail });
     if (io) io.emit('students_updated', { action: 'create', schoolId, student });
     res.json({ success: true, student });
@@ -479,8 +555,31 @@ app.post('/api/schools/:schoolId/students', async (req, res) => {
 
 app.put('/api/admin/students/:studentId', async (req, res) => {
   try {
+    const reqUser = getReqUser(req);
     const { schoolId = 'unique_scholars' } = req.query;
     const { studentId } = req.params;
+
+    if (reqUser && reqUser.role === 'teacher') {
+      const allStudents = await getStudents(schoolId);
+      const target = allStudents.find(s => s.id === studentId);
+      if (!target) {
+        return res.status(404).json({ success: false, error: 'Student not found.' });
+      }
+      const allowed = reqUser.assignedClassIds || [];
+      if (!allowed.includes(target.classId)) {
+        return res.status(403).json({
+          success: false,
+          error: 'Access Denied: You do not have permission to modify students from other classes.'
+        });
+      }
+      if (req.body.classId && !allowed.includes(req.body.classId)) {
+        return res.status(403).json({
+          success: false,
+          error: 'Access Denied: You cannot transfer a student to another class.'
+        });
+      }
+    }
+
     const updated = await updateStudent(schoolId, studentId, req.body);
     if (updated && io) io.emit('students_updated', { action: 'update', schoolId, student: updated });
     res.status(updated ? 200 : 400).json({ success: !!updated, student: updated });
@@ -633,7 +732,7 @@ app.get('/api/admin/results/terms', async (req, res) => {
   }
 });
 
-app.post('/api/admin/results/terms', async (req, res) => {
+app.post('/api/admin/results/terms', requireAdminOrPrincipal, async (req, res) => {
   try {
     const { schoolId = 'unique_scholars', name, date, description, status } = req.body;
     if (!name) return res.status(400).json({ success: false, error: 'Term name is required.' });
@@ -645,7 +744,7 @@ app.post('/api/admin/results/terms', async (req, res) => {
   }
 });
 
-app.delete('/api/admin/results/terms/:termId', async (req, res) => {
+app.delete('/api/admin/results/terms/:termId', requireAdminOrPrincipal, async (req, res) => {
   try {
     const { schoolId = 'unique_scholars' } = req.query;
     const { termId } = req.params;
@@ -670,9 +769,16 @@ app.get('/api/admin/results/subjects', async (req, res) => {
 
 app.post('/api/admin/results/subjects', async (req, res) => {
   try {
+    const reqUser = getReqUser(req);
     const { schoolId = 'unique_scholars', classId, termId, subjects } = req.body;
     if (!classId || !termId || !Array.isArray(subjects)) {
       return res.status(400).json({ success: false, error: 'classId, termId, and subjects array are required.' });
+    }
+    if (reqUser && reqUser.role === 'teacher') {
+      const allowed = reqUser.assignedClassIds || [];
+      if (!allowed.includes(classId)) {
+        return res.status(403).json({ success: false, error: 'Access Denied: You can only configure subjects for your assigned class.' });
+      }
     }
     const result = await saveClassSubjects(schoolId, classId, termId, subjects);
     res.json({ success: true, record: result, subjects: result });
@@ -683,15 +789,37 @@ app.post('/api/admin/results/subjects', async (req, res) => {
 });
 
 app.get('/api/admin/results/marks', async (req, res) => {
+  const reqUser = getReqUser(req);
   const { schoolId = 'unique_scholars', termId, classId, studentId, resultId } = req.query;
-  const results = await getStudentResults(schoolId, { termId, classId, studentId, resultId });
+
+  if (reqUser && reqUser.role === 'teacher') {
+    const allowed = reqUser.assignedClassIds || [];
+    if (classId && !allowed.includes(classId)) {
+      return res.status(403).json({ success: false, error: 'Access Denied: You cannot view results of other classes.', results: [] });
+    }
+  }
+
+  let results = await getStudentResults(schoolId, { termId, classId, studentId, resultId });
+
+  if (reqUser && reqUser.role === 'teacher') {
+    const allowedSet = new Set(reqUser.assignedClassIds || []);
+    results = results.filter(r => allowedSet.has(r.classId));
+  }
+
   res.json({ success: true, results });
 });
 
 app.post('/api/admin/results/draft', async (req, res) => {
+  const reqUser = getReqUser(req);
   const { schoolId = 'unique_scholars', termId, classId, results } = req.body;
   if (!termId || !classId || !Array.isArray(results)) {
     return res.status(400).json({ success: false, error: 'termId, classId, and results list are required.' });
+  }
+  if (reqUser && reqUser.role === 'teacher') {
+    const allowed = reqUser.assignedClassIds || [];
+    if (!allowed.includes(classId)) {
+      return res.status(403).json({ success: false, error: 'Access Denied: You can only save marks for your assigned class.' });
+    }
   }
   const saved = await saveDraftResults(schoolId, { termId, classId, results });
   res.json({ success: true, message: 'Draft result marks saved successfully!', results: saved });
@@ -699,9 +827,16 @@ app.post('/api/admin/results/draft', async (req, res) => {
 
 app.post('/api/admin/results/submit', async (req, res) => {
   try {
+    const reqUser = getReqUser(req);
     const { schoolId = 'unique_scholars', termId, classId, results } = req.body;
     if (!termId || !classId || !Array.isArray(results)) {
       return res.status(400).json({ success: false, error: 'termId, classId, and results list are required.' });
+    }
+    if (reqUser && reqUser.role === 'teacher') {
+      const allowed = reqUser.assignedClassIds || [];
+      if (!allowed.includes(classId)) {
+        return res.status(403).json({ success: false, error: 'Access Denied: You can only submit marks for your assigned class.' });
+      }
     }
 
     const gatewayUrl = req.headers['x-whatsapp-gateway-url'] || req.body.gatewayUrl || process.env.WHATSAPP_GATEWAY_URL || process.env.PERSISTENT_BACKEND_URL;
@@ -1690,47 +1825,7 @@ app.post('/api/admin/broadcast/send', async (req, res) => {
   }
 });
 
-// -------------------------------------------------------------
-// AUTHENTICATION & RBAC HELPERS
-// -------------------------------------------------------------
 
-function generateAuthToken(user) {
-  const payload = {
-    id: user.id,
-    fullName: user.fullName,
-    username: user.username,
-    role: user.role,
-    assignedClassIds: user.assignedClassIds || [],
-    ts: Date.now()
-  };
-  return Buffer.from(JSON.stringify(payload)).toString('base64');
-}
-
-function decodeAuthToken(token) {
-  if (!token) return null;
-  try {
-    const raw = token.replace(/^Bearer\s+/i, '');
-    return JSON.parse(Buffer.from(raw, 'base64').toString('utf8'));
-  } catch (e) {
-    return null;
-  }
-}
-
-function getReqUser(req) {
-  const header = req.headers['authorization'] || req.headers['x-auth-token'];
-  return decodeAuthToken(header);
-}
-
-function requireAdminOrPrincipal(req, res, next) {
-  const user = getReqUser(req);
-  if (user && user.role === 'teacher') {
-    return res.status(403).json({
-      success: false,
-      error: 'Access Denied: This administrative feature is restricted to Principals and Admins.'
-    });
-  }
-  next();
-}
 
 // -------------------------------------------------------------
 // AUTHENTICATION ENDPOINTS
@@ -1810,13 +1905,13 @@ app.post('/api/admin/login', async (req, res) => {
   }
 });
 
-app.get('/api/admin/insights', async (req, res) => {
+app.get('/api/admin/insights', requireAdminOrPrincipal, async (req, res) => {
   const { schoolId } = req.query;
   const insights = await getAdminInsights(schoolId || 'unique_scholars');
   res.json({ success: true, insights });
 });
 
-app.get('/api/admin/records', async (req, res) => {
+app.get('/api/admin/records', requireAdminOrPrincipal, async (req, res) => {
   const { schoolId, classId, status, date, search } = req.query;
   const records = await getAdminRecords(schoolId || 'unique_scholars', { classId, status, date, search });
   res.json({ success: true, total: records.length, records });

@@ -188,7 +188,7 @@
                 cards.</p>
             </div>
             <div class="search-filter-group">
-              <button class="btn btn-accent" onclick="openModal('addTermModal')">
+              <button class="btn btn-accent admin-only-btn" id="btnNewExamTerm" onclick="openModal('addTermModal')">
                 <i class="fa-solid fa-calendar-plus"></i> New Exam Term
               </button>
             </div>
@@ -196,10 +196,9 @@
 
           <!-- RESULTS CONTROL SUB-NAV -->
           <div class="subnav-pills">
-            <button class="subnav-btn active" onclick="switchResultsSubTab('marks-entry')">📝 Marks Entry Sheet</button>
-            <button class="subnav-btn" onclick="switchResultsSubTab('terms-config')">⚙️ Terms & Subjects Setup</button>
-            <button class="subnav-btn" onclick="switchResultsSubTab('results-history')">📜 Finalized Results &
-              Marksheets</button>
+            <button class="subnav-btn active" id="btnSubnavMarksEntry" onclick="switchResultsSubTab('marks-entry')">📝 Marks Entry Sheet</button>
+            <button class="subnav-btn admin-only-btn" id="btnSubnavTermsConfig" onclick="switchResultsSubTab('terms-config')">⚙️ Terms & Subjects Setup</button>
+            <button class="subnav-btn" id="btnSubnavResultsHistory" onclick="switchResultsSubTab('results-history')">📜 Finalized Results & Marksheets</button>
           </div>
         </div>
 
@@ -217,7 +216,10 @@
                   <select id="marksClassSelect" onchange="loadMarksEntryGrid()"></select>
                 </div>
               </div>
-              <div style="display: flex; gap: 10px; align-items: flex-end;">
+              <div style="display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap;">
+                <button class="btn btn-primary" id="btnMarksAddStudent" onclick="openAddStudentForClass()">
+                  <i class="fa-solid fa-user-plus"></i> Add Student to Class
+                </button>
                 <button class="btn btn-secondary" onclick="handleSaveDraftResults()">
                   <i class="fa-solid fa-floppy-disk"></i> Save Draft
                 </button>
@@ -1554,7 +1556,7 @@
   <div id="toast" class="toast">Action completed successfully</div>
 
   <script src="/socket.io/socket.io.js"></script>
-  <script src="app.js?v=2.0.3"></script>
+  <script src="app.js?v=2.0.4"></script>
 </body>
 
 </html>
