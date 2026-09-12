@@ -74,6 +74,7 @@ CREATE TABLE IF NOT EXISTS students (
   name          VARCHAR(150) NOT NULL,
   parent_phone  VARCHAR(20),
   parent_email  VARCHAR(150),
+  custom_fee    NUMERIC(8,2) DEFAULT NULL,
   is_active     BOOLEAN NOT NULL DEFAULT true,   -- soft delete: preserves attendance/result history
   created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at    TIMESTAMPTZ NOT NULL DEFAULT now(),

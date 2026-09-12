@@ -1047,23 +1047,25 @@
   </div>
 
   <!-- MODAL: RECORD FEE PAYMENT / SET STATUS -->
+  <!-- MODAL: RECORD FEE PAYMENT / MODIFY STUDENT FEE -->
   <div class="modal" id="feePaymentModal">
-    <div class="modal-dialog" style="max-width: 560px;">
+    <div class="modal-dialog" style="max-width: 580px;">
       <div class="modal-header">
         <div>
-          <h3><i class="fa-solid fa-file-invoice-dollar"></i> Set Fee & Payment Status</h3>
-          <p id="feeModalStudentSub" class="text-muted" style="font-size: 13px; margin-top: 2px;">Set status to Paid, Partial, or Unpaid and record payments</p>
+          <h3><i class="fa-solid fa-file-invoice-dollar"></i> Modify Student Fee & Payment</h3>
+          <p id="feeModalStudentSub" class="text-muted" style="font-size: 13px; margin-top: 2px;">Update individual student monthly fee, scholarship concessions, and payment status</p>
         </div>
         <button class="modal-close" onclick="closeModal('feePaymentModal')">&times;</button>
       </div>
       <form id="feePaymentForm" onsubmit="handleSubmitFeePayment(event)">
         <input type="hidden" id="payFeeId">
+        <input type="hidden" id="payStudentId">
         <input type="hidden" id="payStudentPhone">
         
         <!-- Summary Banner in Modal -->
         <div style="background: rgba(15, 23, 42, 0.7); border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 14px 16px; margin-bottom: 12px; display: flex; justify-content: space-between; align-items: center;">
           <div>
-            <div id="payStudentName" style="font-weight: 700; font-size: 15px; color: #fff;">Student Name</div>
+            <div id="payStudentName" style="font-weight: 700; font-size: 16px; color: #fff;">Student Name</div>
             <div id="payStudentClassRoll" style="font-size: 12px; color: var(--text-muted);">Class 9th - Roll #12</div>
           </div>
           <div style="text-align: right;">
@@ -1073,13 +1075,58 @@
         </div>
 
         <!-- Individual WhatsApp Reminder Quick Action Bar -->
-        <div style="display: flex; gap: 8px; justify-content: flex-end; margin-bottom: 16px;">
+        <div style="display: flex; gap: 8px; justify-content: flex-end; margin-bottom: 14px;">
           <button type="button" class="btn btn-sm btn-whatsapp" onclick="handleDispatchReminderFromModal()" title="Send WhatsApp Reminder Individually">
             <i class="fa-brands fa-whatsapp"></i> Send WhatsApp Reminder
           </button>
         </div>
 
-        <!-- PAYMENT STATUS TOGGLES (Paid / Partial / Unpaid) -->
+        <!-- SECTION 1: INDIVIDUAL STUDENT FEE CONFIGURATION -->
+        <div style="background: rgba(30, 41, 59, 0.5); border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 14px 16px; margin-bottom: 16px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+            <label style="font-size: 12px; font-weight: 700; text-transform: uppercase; color: #38bdf8; display: flex; align-items: center; gap: 6px; margin: 0;">
+              <i class="fa-solid fa-sliders"></i> Individual Student Fee Rate
+            </label>
+            <span id="payClassBaseFeeTag" style="font-size: 11px; color: var(--text-muted);">Class Standard: PKR 3,000</span>
+          </div>
+
+          <div class="form-row" style="margin-bottom: 8px;">
+            <div class="form-group" style="flex: 1; margin: 0;">
+              <label style="font-size: 12px; font-weight: 600;">Student Monthly Base Fee (PKR) *</label>
+              <input type="number" id="payBaseFeeInput" min="0" step="50" required
+                oninput="onFeeModalCalculationChange()" style="font-size: 15px; font-weight: 700; color: #38bdf8;"
+                placeholder="e.g. 3000">
+              <small class="text-muted" style="font-size: 11px;">Modify student's custom tuition fee</small>
+            </div>
+            <div class="form-group" style="flex: 1; margin: 0;">
+              <label style="font-size: 12px; font-weight: 600;">Concession / Discount (PKR)</label>
+              <input type="number" id="payDiscountInput" min="0" step="50"
+                oninput="onFeeModalCalculationChange()" style="font-size: 15px; font-weight: 700; color: #f59e0b;"
+                placeholder="0">
+              <small class="text-muted" style="font-size: 11px;">Scholarship or sibling aid</small>
+            </div>
+          </div>
+
+          <div class="form-group" style="margin-top: 8px; margin-bottom: 8px;">
+            <input type="text" id="payDiscountReasonInput" placeholder="Concession Reason (e.g. Sibling Discount, Staff Child, Need-based Aid)" style="font-size: 12px; padding: 7px 10px;">
+          </div>
+
+          <div style="display: flex; align-items: center; gap: 8px; margin-top: 8px;">
+            <input type="checkbox" id="paySetPermanentFee" style="width: 16px; height: 16px; accent-color: #38bdf8; cursor: pointer;">
+            <label for="paySetPermanentFee" style="margin: 0; font-size: 12px; color: #cbd5e1; cursor: pointer;">
+              Set as recurring monthly fee for this student (auto-applies to all future months)
+            </label>
+          </div>
+
+          <div style="margin-top: 10px; padding: 10px 14px; background: rgba(15, 23, 42, 0.65); border: 1px solid rgba(56, 189, 248, 0.2); border-radius: var(--radius-sm); display: flex; justify-content: space-between; align-items: center;">
+            <span style="font-size: 12px; font-weight: 600; color: var(--text-muted);">Net Payable Fee:</span>
+            <span id="payNetFeeDisplay" style="font-size: 16px; font-weight: 800; color: #fff;">PKR 0</span>
+          </div>
+        </div>
+
+        <input type="hidden" id="payTotalAmountInput">
+
+        <!-- SECTION 2: PAYMENT STATUS TOGGLES (Paid / Partial / Unpaid) -->
         <div class="form-group" style="margin-bottom: 16px;">
           <label style="font-size: 12px; font-weight: 700; text-transform: uppercase; color: var(--text-muted); display: block; margin-bottom: 8px;">
             Select Payment Status *
@@ -1103,27 +1150,21 @@
         <!-- AMOUNTS ROW -->
         <div class="form-row">
           <div class="form-group" style="flex: 1;">
-            <label>Total Fee Amount (PKR) *</label>
-            <input type="number" id="payTotalAmountInput" min="0" step="50" required
-              oninput="onFeeModalAmountChange()" style="font-size: 15px; font-weight: 700; color: #38bdf8;">
-            <small class="text-muted">Net fee billed for this month</small>
-          </div>
-          <div class="form-group" style="flex: 1;">
-            <label>Amount Paid (PKR) *</label>
+            <label>Amount Collected / Paid (PKR) *</label>
             <input type="number" id="payAmountInput" min="0" step="50" required
               oninput="onFeeModalAmountChange()" style="font-size: 15px; font-weight: 700; color: #10b981;">
             <small class="text-muted">Total collected from parent</small>
           </div>
-        </div>
-
-        <!-- REMAINING BALANCE & METHOD -->
-        <div class="form-row" style="margin-top: 4px;">
           <div class="form-group" style="flex: 1;">
             <label>Remaining Balance (PKR)</label>
             <div id="payRemainingBalancePreview" style="padding: 10px 14px; background: rgba(30, 41, 59, 0.6); border: 1px solid var(--border-color); border-radius: var(--radius-sm); font-size: 15px; font-weight: 800; color: #f59e0b;">
               PKR 0
             </div>
           </div>
+        </div>
+
+        <!-- PAYMENT METHOD & NOTES -->
+        <div class="form-row" style="margin-top: 4px;">
           <div class="form-group" style="flex: 1;">
             <label>Payment Method *</label>
             <select id="payMethodInput" required>
@@ -1134,11 +1175,10 @@
               <option value="Cheque">📜 Cheque</option>
             </select>
           </div>
-        </div>
-
-        <div class="form-group">
-          <label>Notes / Transaction Reference (Optional)</label>
-          <input type="text" id="payNotesInput" placeholder="e.g. Paid in full, Trx #1024, Father requested partial">
+          <div class="form-group" style="flex: 1;">
+            <label>Notes / Reference (Optional)</label>
+            <input type="text" id="payNotesInput" placeholder="e.g. Paid in full, Trx #1024">
+          </div>
         </div>
 
         <div class="form-group" style="background: rgba(16, 185, 129, 0.08); border: 1px solid rgba(16, 185, 129, 0.25); border-radius: var(--radius-sm); padding: 10px 14px; display: flex; align-items: center; gap: 10px; margin-top: 10px;">
@@ -1151,7 +1191,7 @@
         <div class="modal-actions" style="margin-top: 20px;">
           <button type="button" class="btn btn-secondary" onclick="closeModal('feePaymentModal')">Cancel</button>
           <button type="submit" class="btn btn-primary" id="btnSubmitPayment">
-            <i class="fa-solid fa-floppy-disk"></i> Save & Update Status
+            <i class="fa-solid fa-floppy-disk"></i> Save Fee & Update Status
           </button>
         </div>
       </form>

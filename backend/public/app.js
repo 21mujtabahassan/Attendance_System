@@ -2277,7 +2277,10 @@ function filterFeeLedgerRows() {
 
     tr.innerHTML = `
       <td>
-        <div style="font-weight: 700; color: #fff;">${item.studentName || 'Student'}</div>
+        <a href="javascript:void(0)" onclick="openFeePaymentModal('${item.id}')" style="font-weight: 700; color: #fff; text-decoration: none; display: inline-flex; align-items: center; gap: 4px;" title="Click to modify student fee, discount & payment">
+          <span>${item.studentName || 'Student'}</span>
+          ${item.hasCustomFee ? '<span class="badge" style="font-size: 9px; background: rgba(56, 189, 248, 0.2); color: #38bdf8; padding: 2px 6px; border-radius: 4px;">Custom Rate</span>' : ''}
+        </a>
         <div style="font-size: 11px; color: var(--text-muted);">Roll #${item.rollNo || '-'}</div>
       </td>
       <td>
@@ -2285,9 +2288,22 @@ function filterFeeLedgerRows() {
         ${item.section ? `<span style="font-size: 11px; color: var(--text-muted); margin-left: 4px;">(${item.section})</span>` : ''}
       </td>
       <td>${phoneDisplay}</td>
-      <td style="font-weight: 600;">PKR ${Number(item.baseFee || 0).toLocaleString()}</td>
-      <td>${concessionText}</td>
-      <td style="font-weight: 700; color: #fff;">PKR ${Number(item.netFee || 0).toLocaleString()}</td>
+      <td>
+        <span style="font-weight: 600; cursor: pointer;" onclick="openFeePaymentModal('${item.id}')" title="Click to modify fee rate">
+          PKR ${Number(item.baseFee || 0).toLocaleString()}
+          <i class="fa-solid fa-pen" style="font-size: 9px; opacity: 0.5; margin-left: 3px;"></i>
+        </span>
+      </td>
+      <td>
+        <span style="cursor: pointer;" onclick="openFeePaymentModal('${item.id}')" title="Click to modify concession / scholarship">
+          ${concessionText}
+        </span>
+      </td>
+      <td>
+        <a href="javascript:void(0)" onclick="openFeePaymentModal('${item.id}')" style="font-weight: 700; color: #fff; text-decoration: none; cursor: pointer;" title="Click to modify fee">
+          PKR ${Number(item.netFee || 0).toLocaleString()}
+        </a>
+      </td>
       <td style="font-weight: 700; color: #10b981;">PKR ${Number(item.paidAmount || 0).toLocaleString()}</td>
       <td style="font-weight: 800; color: ${item.balanceDue > 0 ? '#f59e0b' : '#94a3b8'};">
         PKR ${Number(item.balanceDue || 0).toLocaleString()}
@@ -2302,8 +2318,11 @@ function filterFeeLedgerRows() {
         </select>
       </td>
       <td>
-        <div style="display: flex; gap: 6px; align-items: center;">
-          <button class="btn btn-sm btn-whatsapp" onclick="handleDispatchSingleReminder('${item.id}')" title="${item.status === 'Paid' ? 'Send WhatsApp Receipt Notice' : 'Send WhatsApp Reminder to Parent'}">
+        <div style="display: flex; gap: 6px; align-items: center; flex-wrap: wrap;">
+          <button class="btn btn-sm btn-primary" onclick="openFeePaymentModal('${item.id}')" title="Modify Student Fee, Concession & Record Payment" style="padding: 5px 9px; font-size: 12px;">
+            <i class="fa-solid fa-pen-to-square"></i> Edit Fee
+          </button>
+          <button class="btn btn-sm btn-whatsapp" onclick="handleDispatchSingleReminder('${item.id}')" title="${item.status === 'Paid' ? 'Send WhatsApp Receipt Notice' : 'Send WhatsApp Reminder to Parent'}" style="padding: 5px 9px; font-size: 12px;">
             <i class="fa-brands fa-whatsapp"></i> ${item.status === 'Paid' ? 'Receipt' : 'Send Reminder'}
           </button>
         </div>
@@ -2377,7 +2396,7 @@ async function handleGenerateMonthlyFees() {
   }
 }
 
-function setFeeModalStatusUI(status, totalAmount, currentPaid) {
+function setFeeModalStatusUI(status, netAmount, currentPaid) {
   ['Paid', 'Partial', 'Unpaid'].forEach(s => {
     const btn = document.getElementById(`btnRadioStatus${s}`);
     const radio = document.getElementById(`radio${s}`);
@@ -2394,25 +2413,50 @@ function setFeeModalStatusUI(status, totalAmount, currentPaid) {
 
   const payAmountInput = document.getElementById('payAmountInput');
   if (status === 'Paid') {
-    payAmountInput.value = totalAmount;
+    payAmountInput.value = netAmount;
   } else if (status === 'Unpaid') {
     payAmountInput.value = 0;
   } else if (status === 'Partial') {
-    const partialVal = (currentPaid !== undefined && currentPaid > 0 && currentPaid < totalAmount)
+    const partialVal = (currentPaid !== undefined && currentPaid > 0 && currentPaid < netAmount)
       ? currentPaid
-      : Math.round(totalAmount / 2);
+      : Math.round(netAmount / 2);
     payAmountInput.value = partialVal;
   }
   onFeeModalAmountChange();
 }
 
+function onFeeModalCalculationChange(forcedStatus) {
+  const base = Math.max(0, parseFloat(document.getElementById('payBaseFeeInput')?.value) || 0);
+  const discount = Math.max(0, parseFloat(document.getElementById('payDiscountInput')?.value) || 0);
+  const net = Math.max(0, base - discount);
+
+  const netEl = document.getElementById('payNetFeeDisplay');
+  if (netEl) {
+    netEl.innerText = `PKR ${net.toLocaleString()}`;
+  }
+  const totalHidden = document.getElementById('payTotalAmountInput');
+  if (totalHidden) totalHidden.value = net;
+
+  let statusToApply = forcedStatus;
+  if (!statusToApply) {
+    const selectedRadio = document.querySelector('input[name="feeModalStatus"]:checked');
+    statusToApply = selectedRadio ? selectedRadio.value : 'Unpaid';
+  }
+
+  setFeeModalStatusUI(statusToApply, net, parseFloat(document.getElementById('payAmountInput')?.value) || 0);
+}
+
 function onFeeModalStatusChange(newStatus) {
-  const total = Math.max(0, parseFloat(document.getElementById('payTotalAmountInput')?.value) || 3000);
-  setFeeModalStatusUI(newStatus, total);
+  const base = Math.max(0, parseFloat(document.getElementById('payBaseFeeInput')?.value) || 0);
+  const discount = Math.max(0, parseFloat(document.getElementById('payDiscountInput')?.value) || 0);
+  const net = Math.max(0, base - discount);
+  setFeeModalStatusUI(newStatus, net);
 }
 
 function onFeeModalAmountChange() {
-  const total = Math.max(0, parseFloat(document.getElementById('payTotalAmountInput')?.value) || 0);
+  const base = Math.max(0, parseFloat(document.getElementById('payBaseFeeInput')?.value) || 0);
+  const discount = Math.max(0, parseFloat(document.getElementById('payDiscountInput')?.value) || 0);
+  const total = Math.max(0, base - discount);
   const paid = Math.max(0, parseFloat(document.getElementById('payAmountInput')?.value) || 0);
   const remaining = Math.max(0, total - paid);
 
@@ -2447,19 +2491,31 @@ function openFeePaymentModal(feeId) {
   if (!item) return;
 
   document.getElementById('payFeeId').value = item.id;
+  document.getElementById('payStudentId').value = item.studentId || '';
   document.getElementById('payStudentPhone').value = item.parentPhone || '';
   document.getElementById('payStudentName').innerText = item.studentName || 'Student';
-  document.getElementById('payStudentClassRoll').innerText = `Class: ${item.classId} | Roll #${item.rollNo || '-'}`;
+  document.getElementById('payStudentClassRoll').innerText = `Class: ${item.classId} | Roll #${item.rollNo || '-'} | ID: ${item.studentId || '-'}`;
   document.getElementById('payCurrentBalance').innerText = `PKR ${Number(item.balanceDue).toLocaleString()}`;
 
-  const totalFee = item.netFee > 0 ? item.netFee : (item.baseFee > 0 ? item.baseFee : 3000);
-  document.getElementById('payTotalAmountInput').value = totalFee;
+  const classRate = item.classBaseFee || (item.baseFee > 0 ? item.baseFee : 3000);
+  const classTag = document.getElementById('payClassBaseFeeTag');
+  if (classTag) {
+    classTag.innerText = `Class Standard: PKR ${Number(classRate).toLocaleString()}`;
+  }
 
-  const currentStatus = item.status === 'Paid' ? 'Paid' : (item.status === 'Partial' ? 'Partial' : 'Unpaid');
-  setFeeModalStatusUI(currentStatus, totalFee, item.paidAmount);
+  // Populate individual student fee and discount
+  const studentBaseFee = item.baseFee > 0 ? item.baseFee : classRate;
+  document.getElementById('payBaseFeeInput').value = studentBaseFee;
+  document.getElementById('payDiscountInput').value = item.discountAmount || 0;
+  document.getElementById('payDiscountReasonInput').value = item.discountReason || '';
+  document.getElementById('paySetPermanentFee').checked = !!item.hasCustomFee;
 
+  const currentPaid = item.paidAmount || 0;
+  document.getElementById('payAmountInput').value = currentPaid;
   document.getElementById('payNotesInput').value = item.notes || '';
   document.getElementById('payMethodInput').value = item.paymentMethod || 'Cash';
+
+  onFeeModalCalculationChange(item.status);
 
   openModal('feePaymentModal');
 }
@@ -2474,7 +2530,12 @@ function handleDispatchReminderFromModal() {
 async function handleSubmitFeePayment(event) {
   event.preventDefault();
   const feeId = document.getElementById('payFeeId').value;
-  const totalAmount = parseFloat(document.getElementById('payTotalAmountInput').value) || 0;
+  const baseFee = parseFloat(document.getElementById('payBaseFeeInput').value) || 0;
+  const discountAmount = parseFloat(document.getElementById('payDiscountInput').value) || 0;
+  const discountReason = document.getElementById('payDiscountReasonInput').value || '';
+  const updatePermanent = document.getElementById('paySetPermanentFee').checked;
+
+  const totalAmount = Math.max(0, baseFee - discountAmount);
   const paidAmount = parseFloat(document.getElementById('payAmountInput').value) || 0;
   const paymentMethod = document.getElementById('payMethodInput').value;
   const notes = document.getElementById('payNotesInput').value;
@@ -2497,17 +2558,21 @@ async function handleSubmitFeePayment(event) {
 
   try {
     const gwUrl = await getWaGatewayBase();
-    const res = await fetch(`${API_BASE}/admin/fees/set-status`, {
+    const res = await fetch(`${API_BASE}/admin/fees/modify-student-fee`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         schoolId: CURRENT_SCHOOL_ID,
         feeId,
-        status,
+        baseFee,
+        discountAmount,
+        discountReason,
         totalAmount,
+        status,
         paidAmount,
         paymentMethod,
         notes,
+        updatePermanent,
         sendReceipt,
         gatewayUrl: gwUrl
       })
@@ -2516,7 +2581,8 @@ async function handleSubmitFeePayment(event) {
     if (data.success) {
       closeModal('feePaymentModal');
       const receiptMsg = data.receiptSent ? ' & WhatsApp receipt sent! ✅' : '';
-      showToast(`Fee status saved as ${status} (PKR ${paidAmount.toLocaleString()} paid)${receiptMsg}`);
+      const permMsg = updatePermanent ? ' (Saved as permanent monthly fee)' : '';
+      showToast(`Fee saved for ${data.fee?.studentName || 'student'}: Base PKR ${baseFee.toLocaleString()} | Status: ${status}${permMsg}${receiptMsg}`);
       loadFeeLedger();
     } else {
       alert(`Error updating fee: ${data.error || 'Server error'}`);
@@ -2526,7 +2592,7 @@ async function handleSubmitFeePayment(event) {
   } finally {
     if (btn) {
       btn.disabled = false;
-      btn.innerHTML = '<i class="fa-solid fa-floppy-disk"></i> Save & Update Status';
+      btn.innerHTML = '<i class="fa-solid fa-floppy-disk"></i> Save Fee & Update Status';
     }
   }
 }

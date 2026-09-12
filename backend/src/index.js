@@ -51,6 +51,7 @@ const {
   generateMonthlyFeeLedger,
   recordFeePayment,
   updateStudentFeeStatus,
+  modifyStudentFee,
   updateStudentConcession,
   computeGradeAndStatus
 } = require('./services/store');
@@ -1842,30 +1843,37 @@ Thank you for your timely payment!`;
   }
 });
 
-// Explicitly set fee status (Paid, Partial, Unpaid) and custom payment details
+// Explicitly set fee status or modify individual student fee details
 app.post('/api/admin/fees/set-status', async (req, res) => {
   try {
     const {
       schoolId = 'unique_scholars',
       feeId,
-      status,
+      status = 'Unpaid',
+      baseFee,
+      discountAmount,
+      discountReason,
       totalAmount,
       paidAmount,
       paymentMethod = 'Cash',
       notes = '',
+      updatePermanent = false,
       sendReceipt = false,
       gatewayUrl
     } = req.body;
 
     if (!feeId) return res.status(400).json({ success: false, error: 'feeId is required' });
-    if (!status) return res.status(400).json({ success: false, error: 'status is required (Paid, Partial, or Unpaid)' });
 
-    const updated = await updateStudentFeeStatus(schoolId, feeId, {
+    const updated = await modifyStudentFee(schoolId, feeId, {
       status,
+      baseFee: baseFee !== undefined ? Number(baseFee) : undefined,
+      discountAmount: discountAmount !== undefined ? Number(discountAmount) : undefined,
+      discountReason,
       totalAmount: totalAmount !== undefined ? Number(totalAmount) : undefined,
       paidAmount: paidAmount !== undefined ? Number(paidAmount) : undefined,
       paymentMethod,
-      notes
+      notes,
+      updatePermanent: !!updatePermanent
     });
 
     if (!updated.success && updated.error) {
@@ -1906,6 +1914,82 @@ Thank you!`;
     res.json({ success: true, fee: updated, receiptSent });
   } catch (error) {
     console.error('Error setting fee status:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Dedicated endpoint to modify individual student fee structure, concessions & payment
+app.post('/api/admin/fees/modify-student-fee', async (req, res) => {
+  try {
+    const {
+      schoolId = 'unique_scholars',
+      feeId,
+      baseFee,
+      discountAmount,
+      discountReason,
+      totalAmount,
+      status = 'Unpaid',
+      paidAmount,
+      paymentMethod = 'Cash',
+      notes = '',
+      updatePermanent = false,
+      sendReceipt = false,
+      gatewayUrl
+    } = req.body;
+
+    if (!feeId) return res.status(400).json({ success: false, error: 'feeId is required' });
+
+    const updated = await modifyStudentFee(schoolId, feeId, {
+      baseFee: baseFee !== undefined ? Number(baseFee) : undefined,
+      discountAmount: discountAmount !== undefined ? Number(discountAmount) : undefined,
+      discountReason,
+      totalAmount: totalAmount !== undefined ? Number(totalAmount) : undefined,
+      status,
+      paidAmount: paidAmount !== undefined ? Number(paidAmount) : undefined,
+      paymentMethod,
+      notes,
+      updatePermanent: !!updatePermanent
+    });
+
+    if (!updated.success && updated.error) {
+      return res.status(400).json(updated);
+    }
+
+    let receiptSent = false;
+    if (sendReceipt && (status === 'Paid' || status === 'Partial') && updated.parentPhone) {
+      const receiptNo = `USHS-${String(updated.id).slice(-6)}`;
+      const dateStr = new Date().toLocaleDateString('en-PK', { day: '2-digit', month: 'short', year: 'numeric' });
+      const receiptMsg =
+        `🎓 *UNIQUE SCHOLARS HIGH SCHOOL*
+*Official Fee Payment Receipt*
+-----------------------------------
+Receipt No: *${receiptNo}*
+Student: *${updated.studentName}* (Roll #${updated.rollNo || '-'})
+Class: *${updated.classId}*
+Billing Month: *${updated.month}*
+
+📊 Monthly Base Fee: PKR ${Number(updated.baseFee).toLocaleString()}
+${updated.discountAmount > 0 ? `🎁 Concession / Aid: PKR ${Number(updated.discountAmount).toLocaleString()}\n` : ''}💰 Net Payable Fee: PKR ${Number(updated.netFee).toLocaleString()}
+💵 Amount Paid: *PKR ${Number(updated.paidAmount).toLocaleString()}*
+⚠️ Remaining Due: *PKR ${Number(updated.balanceDue).toLocaleString()}*
+Status: *${updated.status.toUpperCase()}*
+Payment Method: ${paymentMethod}
+📅 Date: ${dateStr}
+-----------------------------------
+Thank you!`;
+
+      try {
+        const waRes = await sendWhatsAppMessage(updated.parentPhone, receiptMsg, schoolId, gatewayUrl);
+        receiptSent = waRes.success;
+      } catch (waErr) {
+        console.warn('Receipt WhatsApp error:', waErr.message);
+      }
+    }
+
+    if (io) io.emit('fees_updated', { schoolId, fee: updated });
+    res.json({ success: true, fee: updated, receiptSent });
+  } catch (error) {
+    console.error('Error modifying student fee:', error);
     res.status(500).json({ success: false, error: error.message });
   }
 });

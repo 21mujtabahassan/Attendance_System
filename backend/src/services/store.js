@@ -1617,6 +1617,7 @@ async function getStudentFeeLedger(schoolId = 'unique_scholars', month = null, c
         'students.section_name as student_section_name',
         'students.parent_phone',
         'students.class_id',
+        'students.custom_fee as student_custom_fee',
         'classes.name as class_name',
         'class_fee_structures.base_fee as struct_base_fee'
       )
@@ -1628,9 +1629,11 @@ async function getStudentFeeLedger(schoolId = 'unique_scholars', month = null, c
     const ledger = rows.map(r => {
       const discount = parseFloat(r.discount_amount) || 0;
       const total = parseFloat(r.total_amount) || 0;
-      const baseFee = r.struct_base_fee !== null && r.struct_base_fee !== undefined
-        ? parseFloat(r.struct_base_fee)
-        : (total + discount);
+      const customFee = r.student_custom_fee !== null && r.student_custom_fee !== undefined ? parseFloat(r.student_custom_fee) : null;
+      const classBaseFee = r.struct_base_fee !== null && r.struct_base_fee !== undefined ? parseFloat(r.struct_base_fee) : 3000;
+      const baseFee = (customFee !== null && customFee > 0)
+        ? customFee
+        : ((total + discount) > 0 ? (total + discount) : classBaseFee);
 
       return {
         id: r.id,
@@ -1643,6 +1646,9 @@ async function getStudentFeeLedger(schoolId = 'unique_scholars', month = null, c
         rawClassId: r.class_id,
         month: r.term_or_month,
         baseFee,
+        classBaseFee,
+        customFee,
+        hasCustomFee: customFee !== null && customFee > 0,
         discountAmount: discount,
         discountReason: r.notes || '',
         netFee: total,
@@ -1691,6 +1697,15 @@ async function getStudentFeeLedger(schoolId = 'unique_scholars', month = null, c
     const record = db.studentFeeDues.find(d => d.schoolId === schoolId && d.studentId === s.id && d.termOrMonth === currentMonth);
     const cls = classes.find(c => c.id === s.classId);
     if (record) {
+      const discount = record.discountAmount || 0;
+      const total = record.totalAmount || 0;
+      const customFee = s.customFee !== null && s.customFee !== undefined ? parseFloat(s.customFee) : null;
+      const struct = (db.classFeeStructures || []).find(f => f.classId === s.classId && f.schoolId === schoolId);
+      const classBaseFee = struct ? parseFloat(struct.baseFee) : 3000;
+      const baseFee = (customFee !== null && customFee > 0)
+        ? customFee
+        : ((total + discount) > 0 ? (total + discount) : classBaseFee);
+
       ledger.push({
         id: record.id,
         studentId: s.id,
@@ -1701,10 +1716,17 @@ async function getStudentFeeLedger(schoolId = 'unique_scholars', month = null, c
         classId: s.classId,
         className: cls ? cls.name : s.classId,
         month: currentMonth,
-        totalAmount: record.totalAmount,
-        discountAmount: record.discountAmount || 0,
+        baseFee,
+        classBaseFee,
+        customFee,
+        hasCustomFee: customFee !== null && customFee > 0,
+        discountAmount: discount,
+        discountReason: record.notes || '',
+        netFee: total,
+        totalAmount: total,
         paidAmount: record.paidAmount || 0,
-        dueAmount: record.dueAmount,
+        balanceDue: record.dueAmount || 0,
+        dueAmount: record.dueAmount || 0,
         status: record.payLaterStatus || 'Unpaid',
         paymentMethod: record.paymentMethod || 'Cash',
         notes: record.notes || '',
@@ -1755,7 +1777,10 @@ async function generateMonthlyFeeLedger(schoolId = 'unique_scholars', month, cla
     for (const student of students) {
       if (!existingMap.has(student.id)) {
         const feeStruct = structures.find(s => s.class_id === student.class_id);
-        const baseFee = feeStruct && parseFloat(feeStruct.base_fee) > 0 ? parseFloat(feeStruct.base_fee) : 3000;
+        const studentCustomFee = student.custom_fee !== null && student.custom_fee !== undefined ? parseFloat(student.custom_fee) : null;
+        const baseFee = (studentCustomFee !== null && studentCustomFee > 0)
+          ? studentCustomFee
+          : (feeStruct && parseFloat(feeStruct.base_fee) > 0 ? parseFloat(feeStruct.base_fee) : 3000);
         const discountAmount = 0;
         const totalAmount = Math.max(0, baseFee - discountAmount);
 
@@ -1787,7 +1812,10 @@ async function generateMonthlyFeeLedger(schoolId = 'unique_scholars', month, cla
     const existing = db.studentFeeDues.find(d => d.schoolId === schoolId && d.studentId === student.id && d.termOrMonth === month);
     if (!existing) {
       const feeStruct = db.classFeeStructures.find(s => s.schoolId === schoolId && s.classId === student.classId);
-      const baseFee = feeStruct && parseFloat(feeStruct.baseFee) > 0 ? parseFloat(feeStruct.baseFee) : 3000;
+      const studentCustomFee = student.customFee !== null && student.customFee !== undefined ? parseFloat(student.customFee) : null;
+      const baseFee = (studentCustomFee !== null && studentCustomFee > 0)
+        ? studentCustomFee
+        : (feeStruct && parseFloat(feeStruct.baseFee) > 0 ? parseFloat(feeStruct.baseFee) : 3000);
       const discountAmount = 0;
       const totalAmount = Math.max(0, baseFee - discountAmount);
 
@@ -1811,11 +1839,18 @@ async function generateMonthlyFeeLedger(schoolId = 'unique_scholars', month, cla
   return { success: true, count, month };
 }
 
-async function updateStudentFeeStatus(schoolId = 'unique_scholars', feeId, data) {
-  const { status, totalAmount, paidAmount, paymentMethod = 'Cash', notes = '' } = data;
-  if (!['Paid', 'Partial', 'Unpaid', 'Pending'].includes(status)) {
-    throw new Error('Invalid status. Must be Paid, Partial, or Unpaid.');
-  }
+async function modifyStudentFee(schoolId = 'unique_scholars', feeId, data) {
+  const {
+    baseFee,
+    discountAmount,
+    discountReason,
+    totalAmount,
+    status = 'Unpaid',
+    paidAmount,
+    paymentMethod = 'Cash',
+    notes,
+    updatePermanent = false
+  } = data;
 
   if (isPostgresConfigured()) {
     const db = getDb();
@@ -1825,12 +1860,36 @@ async function updateStudentFeeStatus(schoolId = 'unique_scholars', feeId, data)
     const student = await db('students').where({ id: record.student_id }).first();
     const cls = student ? await db('classes').where({ id: student.class_id }).first() : null;
 
-    let finalTotal = totalAmount !== undefined && !isNaN(totalAmount) ? Math.max(0, parseFloat(totalAmount)) : parseFloat(record.total_amount);
-    if (finalTotal <= 0) {
+    // Determine base fee
+    let finalBaseFee = null;
+    if (baseFee !== undefined && baseFee !== null && !isNaN(baseFee)) {
+      finalBaseFee = Math.max(0, parseFloat(baseFee));
+    } else if (student && student.custom_fee !== null && parseFloat(student.custom_fee) > 0) {
+      finalBaseFee = parseFloat(student.custom_fee);
+    } else {
       const struct = await db('class_fee_structures').where({ school_id: schoolId, class_id: student?.class_id }).first();
-      finalTotal = struct && parseFloat(struct.base_fee) > 0 ? parseFloat(struct.base_fee) : 3000;
+      const currentDiscount = parseFloat(record.discount_amount) || 0;
+      const currentTotal = parseFloat(record.total_amount) || 0;
+      finalBaseFee = (currentTotal + currentDiscount) > 0
+        ? (currentTotal + currentDiscount)
+        : (struct && parseFloat(struct.base_fee) > 0 ? parseFloat(struct.base_fee) : 3000);
     }
 
+    // Determine discount amount
+    let finalDiscount = 0;
+    if (discountAmount !== undefined && discountAmount !== null && !isNaN(discountAmount)) {
+      finalDiscount = Math.max(0, parseFloat(discountAmount));
+    } else {
+      finalDiscount = parseFloat(record.discount_amount) || 0;
+    }
+
+    const calculatedTotal = Math.max(0, finalBaseFee - finalDiscount);
+    let finalTotal = calculatedTotal;
+    if (totalAmount !== undefined && totalAmount !== null && !isNaN(totalAmount) && baseFee === undefined) {
+      finalTotal = Math.max(0, parseFloat(totalAmount));
+    }
+
+    // Calculate paid and due
     let finalPaid = 0;
     let finalDue = finalTotal;
 
@@ -1841,7 +1900,7 @@ async function updateStudentFeeStatus(schoolId = 'unique_scholars', feeId, data)
       finalPaid = 0;
       finalDue = finalTotal;
     } else if (status === 'Partial') {
-      if (paidAmount !== undefined && !isNaN(paidAmount)) {
+      if (paidAmount !== undefined && paidAmount !== null && !isNaN(paidAmount)) {
         finalPaid = Math.max(0, parseFloat(paidAmount));
       } else {
         const cur = parseFloat(record.paid_amount) || 0;
@@ -1851,17 +1910,33 @@ async function updateStudentFeeStatus(schoolId = 'unique_scholars', feeId, data)
       finalDue = Math.max(0, finalTotal - finalPaid);
     }
 
+    const finalNotes = notes !== undefined ? notes : (discountReason || record.notes || '');
+
     const payload = {
       total_amount: finalTotal,
+      discount_amount: finalDiscount,
       paid_amount: finalPaid,
       due_amount: finalDue,
       pay_later_status: status,
-      payment_method: paymentMethod
+      payment_method: paymentMethod,
+      notes: finalNotes,
+      paid_at: (status === 'Paid' || status === 'Partial') ? new Date() : null
     };
-    if (notes) payload.notes = notes;
-    payload.paid_at = (status === 'Paid' || status === 'Partial') ? new Date() : null;
 
     await db('student_fee_dues').where({ id: feeId }).update(payload);
+
+    // If permanent update requested, save custom_fee on the student record
+    if (updatePermanent && student) {
+      await db('students').where({ id: student.id }).update({
+        custom_fee: finalBaseFee,
+        updated_at: new Date()
+      });
+    }
+
+    const classBaseFee = await (async () => {
+      const struct = await db('class_fee_structures').where({ school_id: schoolId, class_id: student?.class_id }).first();
+      return struct && parseFloat(struct.base_fee) > 0 ? parseFloat(struct.base_fee) : 3000;
+    })();
 
     return {
       success: true,
@@ -1872,8 +1947,12 @@ async function updateStudentFeeStatus(schoolId = 'unique_scholars', feeId, data)
       classId: cls ? cls.name : (student ? student.class_id : '-'),
       parentPhone: student ? student.parent_phone : '',
       month: record.term_or_month,
-      baseFee: finalTotal + (parseFloat(record.discount_amount) || 0),
-      discountAmount: parseFloat(record.discount_amount) || 0,
+      baseFee: finalBaseFee,
+      classBaseFee,
+      customFee: updatePermanent ? finalBaseFee : (student?.custom_fee ? parseFloat(student.custom_fee) : null),
+      hasCustomFee: updatePermanent || (student?.custom_fee !== null && parseFloat(student?.custom_fee) > 0),
+      discountAmount: finalDiscount,
+      discountReason: finalNotes,
       netFee: finalTotal,
       totalAmount: finalTotal,
       paidAmount: finalPaid,
@@ -1881,7 +1960,8 @@ async function updateStudentFeeStatus(schoolId = 'unique_scholars', feeId, data)
       dueAmount: finalDue,
       status,
       paymentMethod,
-      notes: payload.notes || record.notes || ''
+      notes: finalNotes,
+      isPermanentCustomFee: !!updatePermanent
     };
   }
 
@@ -1893,8 +1973,19 @@ async function updateStudentFeeStatus(schoolId = 'unique_scholars', feeId, data)
 
   const student = (db.students || []).find(s => s.id === record.studentId);
   const cls = (db.classes || []).find(c => c.id === student?.classId);
+  const struct = (db.classFeeStructures || []).find(f => f.classId === student?.classId && f.schoolId === schoolId);
+  const classBaseFee = struct ? parseFloat(struct.baseFee) : 3000;
 
-  let finalTotal = totalAmount !== undefined && !isNaN(totalAmount) ? Math.max(0, parseFloat(totalAmount)) : (parseFloat(record.totalAmount) || 3000);
+  let finalBaseFee = baseFee !== undefined && baseFee !== null && !isNaN(baseFee)
+    ? Math.max(0, parseFloat(baseFee))
+    : (student?.customFee ? parseFloat(student.customFee) : (parseFloat(record.totalAmount) || classBaseFee));
+
+  let finalDiscount = discountAmount !== undefined && discountAmount !== null && !isNaN(discountAmount)
+    ? Math.max(0, parseFloat(discountAmount))
+    : (parseFloat(record.discountAmount) || 0);
+
+  const finalTotal = Math.max(0, finalBaseFee - finalDiscount);
+
   let finalPaid = 0;
   let finalDue = finalTotal;
 
@@ -1905,7 +1996,7 @@ async function updateStudentFeeStatus(schoolId = 'unique_scholars', feeId, data)
     finalPaid = 0;
     finalDue = finalTotal;
   } else if (status === 'Partial') {
-    if (paidAmount !== undefined && !isNaN(paidAmount)) {
+    if (paidAmount !== undefined && paidAmount !== null && !isNaN(paidAmount)) {
       finalPaid = Math.max(0, parseFloat(paidAmount));
     } else {
       const cur = parseFloat(record.paidAmount) || 0;
@@ -1915,13 +2006,20 @@ async function updateStudentFeeStatus(schoolId = 'unique_scholars', feeId, data)
     finalDue = Math.max(0, finalTotal - finalPaid);
   }
 
+  const finalNotes = notes !== undefined ? notes : (discountReason || record.notes || '');
+
   record.totalAmount = finalTotal;
+  record.discountAmount = finalDiscount;
   record.paidAmount = finalPaid;
   record.dueAmount = finalDue;
   record.payLaterStatus = status;
   record.paymentMethod = paymentMethod;
-  if (notes) record.notes = notes;
+  record.notes = finalNotes;
   record.paidAt = (status === 'Paid' || status === 'Partial') ? new Date().toISOString() : null;
+
+  if (updatePermanent && student) {
+    student.customFee = finalBaseFee;
+  }
 
   writeJsonDb(db);
   return {
@@ -1933,8 +2031,12 @@ async function updateStudentFeeStatus(schoolId = 'unique_scholars', feeId, data)
     classId: cls ? cls.name : (student ? student.classId : '-'),
     parentPhone: student ? student.parentPhone : '',
     month: record.termOrMonth,
-    baseFee: finalTotal + (parseFloat(record.discountAmount) || 0),
-    discountAmount: record.discountAmount || 0,
+    baseFee: finalBaseFee,
+    classBaseFee,
+    customFee: updatePermanent ? finalBaseFee : (student?.customFee ? parseFloat(student.customFee) : null),
+    hasCustomFee: updatePermanent || (student?.customFee !== null && parseFloat(student?.customFee) > 0),
+    discountAmount: finalDiscount,
+    discountReason: finalNotes,
     netFee: finalTotal,
     totalAmount: finalTotal,
     paidAmount: finalPaid,
@@ -1942,8 +2044,14 @@ async function updateStudentFeeStatus(schoolId = 'unique_scholars', feeId, data)
     dueAmount: finalDue,
     status,
     paymentMethod,
-    notes: record.notes || ''
+    notes: finalNotes,
+    isPermanentCustomFee: !!updatePermanent
   };
+}
+
+async function updateStudentFeeStatus(schoolId = 'unique_scholars', feeId, data) {
+  // Delegate to modifyStudentFee for unified, robust behavior
+  return modifyStudentFee(schoolId, feeId, data);
 }
 
 async function recordFeePayment(schoolId = 'unique_scholars', feeId, paymentData) {
@@ -2123,6 +2231,7 @@ module.exports = {
   generateMonthlyFeeLedger,
   recordFeePayment,
   updateStudentFeeStatus,
+  modifyStudentFee,
   updateStudentConcession,
   computeGradeAndStatus
 };
