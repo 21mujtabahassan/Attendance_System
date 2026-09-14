@@ -1794,13 +1794,14 @@ function filterStudentTable() {
   if (query) {
     list = list.filter(s =>
       s.name.toLowerCase().includes(query) ||
+      (s.fatherName && s.fatherName.toLowerCase().includes(query)) ||
       s.id.toLowerCase().includes(query) ||
       (s.parentPhone && s.parentPhone.includes(query))
     );
   }
 
   if (list.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="8" class="text-center text-muted">No students matching criteria.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="9" class="text-center text-muted">No students matching criteria.</td></tr>';
     return;
   }
 
@@ -1809,6 +1810,7 @@ function filterStudentTable() {
       <td><span class="badge badge-primary" style="font-weight:700; font-size: 0.85rem;">#${s.rollNumber != null ? s.rollNumber : '-'}</span></td>
       <td><strong>${escapeHtml(s.id)}</strong></td>
       <td>${escapeHtml(s.name)}</td>
+      <td>${escapeHtml(s.fatherName || '-')}</td>
       <td>${escapeHtml(s.classId)}</td>
       <td>${escapeHtml(s.section || 'Section A')}</td>
       <td><span class="phone-badge">📞 ${escapeHtml(s.parentPhone || 'Not Provided')}</span></td>
@@ -1824,12 +1826,14 @@ function filterStudentTable() {
 async function handleCreateStudent(e) {
   e.preventDefault();
   const nameInput = document.getElementById('studentNameInput');
+  const fatherNameInput = document.getElementById('studentFatherNameInput');
   const classSelect = document.getElementById('studentClassSelect');
   const sectionSelect = document.getElementById('studentSectionSelect');
   const phoneInput = document.getElementById('parentPhoneInput');
   const emailInput = document.getElementById('parentEmailInput');
 
   const name = (nameInput?.value || '').trim();
+  const fatherName = (fatherNameInput?.value || '').trim();
   const classId = classSelect?.value || (currentUser && currentUser.assignedClassIds && currentUser.assignedClassIds[0]);
   const section = sectionSelect?.value || 'Section A';
   const parentPhone = (phoneInput?.value || '').trim();
@@ -1848,7 +1852,7 @@ async function handleCreateStudent(e) {
     const res = await fetch(`${API_BASE}/schools/${CURRENT_SCHOOL_ID}/students`, {
       method: 'POST',
       headers: getAuthHeaders(),
-      body: JSON.stringify({ name, classId, section, parentPhone, parentEmail })
+      body: JSON.stringify({ name, fatherName, classId, section, parentPhone, parentEmail })
     });
     const data = await res.json();
     if (data.success && data.student) {
@@ -1890,6 +1894,8 @@ function openEditStudentModal(studentId) {
 
   document.getElementById('editStudentId').value = stu.id;
   document.getElementById('editStudentName').value = stu.name;
+  const editFatherInput = document.getElementById('editStudentFatherName');
+  if (editFatherInput) editFatherInput.value = stu.fatherName || '';
   const classSelect = document.getElementById('editStudentClass');
   if (classSelect) {
     classSelect.value = stu.classId;
@@ -1907,6 +1913,7 @@ async function handleEditStudentSubmit(e) {
   e.preventDefault();
   const studentId = document.getElementById('editStudentId').value;
   const name = document.getElementById('editStudentName').value;
+  const fatherName = (document.getElementById('editStudentFatherName')?.value || '').trim();
   const classSelect = document.getElementById('editStudentClass');
   const stu = globalStudents.find(s => s.id === studentId);
   const classId = classSelect?.value || (stu ? stu.classId : '');
@@ -1918,7 +1925,7 @@ async function handleEditStudentSubmit(e) {
     const res = await fetch(`${API_BASE}/admin/students/${studentId}?schoolId=${CURRENT_SCHOOL_ID}`, {
       method: 'PUT',
       headers: getAuthHeaders(),
-      body: JSON.stringify({ name, classId, section, parentPhone, parentEmail })
+      body: JSON.stringify({ name, fatherName, classId, section, parentPhone, parentEmail })
     });
     const data = await res.json();
     if (data.success) {

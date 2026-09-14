@@ -65,6 +65,11 @@ const {
 const { getDb, isPostgresConfigured } = require('./db');
 const { generateAcademicResultPdf } = require('./services/pdfGenerator');
 
+// Idempotent column check for students table
+if (isPostgresConfigured()) {
+  getDb().raw('ALTER TABLE students ADD COLUMN IF NOT EXISTS father_name VARCHAR(150);').catch(() => {});
+}
+
 const app = express();
 const PORT = process.env.PORT || 3000;
 
@@ -529,7 +534,7 @@ app.post('/api/schools/:schoolId/students', async (req, res) => {
   try {
     const reqUser = getReqUser(req);
     const { schoolId } = req.params;
-    const { name, classId, section, parentPhone, parentEmail } = req.body;
+    const { name, fatherName, classId, section, parentPhone, parentEmail } = req.body;
     if (!name) {
       return res.status(400).json({ success: false, error: 'Student name is required.' });
     }
@@ -544,7 +549,7 @@ app.post('/api/schools/:schoolId/students', async (req, res) => {
       }
     }
 
-    const student = await addStudent(schoolId, { name, classId, section, parentPhone, parentEmail });
+    const student = await addStudent(schoolId, { name, fatherName, classId, section, parentPhone, parentEmail });
     if (io) io.emit('students_updated', { action: 'create', schoolId, student });
     res.json({ success: true, student });
   } catch (err) {

@@ -111,6 +111,7 @@ function generateAcademicResultPdf({
   termName = 'Mid Term 2026',
   studentId = 'STU-000005',
   studentName = 'Student Name',
+  fatherName = '',
   rollNo = '-',
   className = 'Class Play',
   marks = {},
@@ -154,7 +155,8 @@ function generateAcademicResultPdf({
 
   // Column 1
   doc.text('STUDENT NAME:', 48, infoY + 12, { font: 'F2', size: 9, color: cMuted });
-  doc.text(studentName.toUpperCase(), 145, infoY + 12, { font: 'F2', size: 10.5, color: cNavy });
+  const nameDisplay = fatherName ? `${studentName.toUpperCase()} (S/D of ${fatherName})` : studentName.toUpperCase();
+  doc.text(nameDisplay, 145, infoY + 12, { font: 'F2', size: 9.5, color: cNavy });
 
   doc.text('ROLL NUMBER:', 48, infoY + 30, { font: 'F2', size: 9, color: cMuted });
   doc.text(String(rollNo || '-'), 145, infoY + 30, { font: 'F2', size: 10, color: cDark });

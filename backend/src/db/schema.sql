@@ -89,6 +89,7 @@ CREATE TABLE IF NOT EXISTS students (
   section_name  VARCHAR(50),
   roll_number   INT,
   name          VARCHAR(150) NOT NULL,
+  father_name   VARCHAR(150),
   parent_phone  VARCHAR(20),
   parent_email  VARCHAR(150),
   custom_fee    NUMERIC(8,2) DEFAULT NULL,

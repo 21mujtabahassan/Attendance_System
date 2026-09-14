@@ -218,6 +218,7 @@ async function getStudents(schoolId = 'unique_scholars', classId = null) {
       sectionId: r.section_id,
       section: r.section_name || 'Section A',
       name: r.name,
+      fatherName: r.father_name || '',
       parentPhone: r.parent_phone || '',
       parentEmail: r.parent_email || ''
     }));
@@ -304,6 +305,7 @@ async function addStudent(schoolId = 'unique_scholars', studentData) {
         section_name: secName,
         roll_number: nextRoll,
         name: studentData.name.trim(),
+        father_name: (studentData.fatherName || '').trim(),
         parent_phone: (studentData.parentPhone || '').trim(),
         parent_email: (studentData.parentEmail || '').trim(),
         is_active: true
@@ -314,6 +316,7 @@ async function addStudent(schoolId = 'unique_scholars', studentData) {
         rollNumber: nextRoll,
         schoolId,
         name: studentData.name.trim(),
+        fatherName: (studentData.fatherName || '').trim(),
         classId: resolvedClassId,
         sectionId: secRow.id,
         section: secName,
@@ -354,6 +357,7 @@ async function addStudent(schoolId = 'unique_scholars', studentData) {
     rollNumber: nextRoll,
     schoolId,
     name: studentData.name.trim(),
+    fatherName: (studentData.fatherName || '').trim(),
     classId: targetClassId,
     section: secName,
     parentPhone: (studentData.parentPhone || '').trim(),
@@ -373,6 +377,7 @@ async function updateStudent(schoolId = 'unique_scholars', studentId, updates) {
 
       const payload = {};
       if (updates.name !== undefined) payload.name = updates.name.trim();
+      if (updates.fatherName !== undefined) payload.father_name = updates.fatherName.trim();
       if (updates.parentPhone !== undefined) payload.parent_phone = updates.parentPhone.trim();
       if (updates.parentEmail !== undefined) payload.parent_email = updates.parentEmail.trim();
       payload.updated_at = new Date();
@@ -440,6 +445,7 @@ async function updateStudent(schoolId = 'unique_scholars', studentId, updates) {
         sectionId: updated.section_id,
         section: updated.section_name,
         name: updated.name,
+        fatherName: updated.father_name || '',
         parentPhone: updated.parent_phone || '',
         parentEmail: updated.parent_email || ''
       };
@@ -1993,6 +1999,7 @@ async function getStudentFeeLedger(schoolId = 'unique_scholars', month = null, c
       .select(
         'student_fee_dues.*',
         'students.name as student_name',
+        'students.father_name as student_father_name',
         'students.roll_number as student_roll_number',
         'students.section_name as student_section_name',
         'students.parent_phone',
@@ -2019,6 +2026,7 @@ async function getStudentFeeLedger(schoolId = 'unique_scholars', month = null, c
         id: r.id,
         studentId: r.student_id,
         studentName: r.student_name,
+        fatherName: r.student_father_name || '',
         rollNo: r.student_roll_number !== null && r.student_roll_number !== undefined ? Number(r.student_roll_number) : String(r.student_id).replace('STU-', ''),
         section: r.student_section_name || 'Section A',
         parentPhone: r.parent_phone || '',

@@ -665,6 +665,10 @@
             <span class="info-value" id="dispStudentName">-</span>
           </div>
           <div class="info-row">
+            <span class="info-label">Father's Name:</span>
+            <span class="info-value" id="dispFatherName">-</span>
+          </div>
+          <div class="info-row">
             <span class="info-label">Roll / ID No:</span>
             <span class="info-value" id="dispRollNumber">-</span>
           </div>
@@ -802,6 +806,9 @@
       document.getElementById('termDisplay').innerText = data.term;
 
       document.getElementById('dispStudentName').innerText = data.studentName;
+      if (document.getElementById('dispFatherName')) {
+        document.getElementById('dispFatherName').innerText = data.fatherName || '-';
+      }
       document.getElementById('dispRollNumber').innerText = data.rollNumber;
       document.getElementById('dispClassName').innerText = data.className;
       document.getElementById('dispSection').innerText = data.section;

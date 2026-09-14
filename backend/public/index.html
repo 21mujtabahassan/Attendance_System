@@ -574,6 +574,7 @@
                   <th style="width: 90px;">Roll No.</th>
                   <th>Student ID</th>
                   <th>Student Name</th>
+                  <th style="min-width: 140px;">Father's Name</th>
                   <th>Class</th>
                   <th>Section</th>
                   <th>Parent Phone Number</th>
@@ -583,7 +584,7 @@
               </thead>
               <tbody id="studentTableBody">
                 <tr>
-                  <td colspan="8" class="text-center text-muted">Loading student directory...</td>
+                  <td colspan="9" class="text-center text-muted">Loading student directory...</td>
                 </tr>
               </tbody>
             </table>
@@ -952,6 +953,10 @@
           <label>Full Student Name *</label>
           <input type="text" id="studentNameInput" placeholder="e.g. Ali Ahmed" required>
         </div>
+        <div class="form-group">
+          <label>Father's Name</label>
+          <input type="text" id="studentFatherNameInput" placeholder="e.g. Tariq Ahmed">
+        </div>
         <div class="form-row">
           <div class="form-group">
             <label>Select Class *</label>
@@ -1009,6 +1014,10 @@
         <div class="form-group">
           <label>Full Student Name *</label>
           <input type="text" id="editStudentName" required>
+        </div>
+        <div class="form-group">
+          <label>Father's Name</label>
+          <input type="text" id="editStudentFatherName" placeholder="e.g. Tariq Ahmed">
         </div>
         <div class="form-row">
           <div class="form-group">
