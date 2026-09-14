@@ -152,6 +152,17 @@
       "section": "Section A",
       "parentPhone": "03009998877",
       "parentEmail": ""
+    },
+    {
+      "id": "STU-000013",
+      "rollNumber": 2,
+      "schoolId": "unique_scholars",
+      "name": "Hamza Tariq",
+      "classId": "Class-9",
+      "sectionId": "3b7d3d8e-3ee2-4c2e-84c3-74111aa22770",
+      "section": "Section A",
+      "parentPhone": "03005554433",
+      "parentEmail": ""
     }
   ],
   "attendanceLogs": [
@@ -615,6 +626,66 @@
       "isActive": true,
       "inchargeClassId": "Class-9",
       "createdAt": "2026-09-12T21:24:32.910Z"
+    },
+    {
+      "id": "17ae3874-eb78-4988-9c78-b9c1032a2430",
+      "schoolId": "unique_scholars",
+      "fullName": "Madam Tabana",
+      "username": "madam_tabana",
+      "phone": "",
+      "email": "",
+      "role": "teacher",
+      "isActive": true,
+      "inchargeClassId": "Class-Play",
+      "createdAt": "2026-09-12T21:58:13.733Z"
+    },
+    {
+      "id": "d1c8e28a-9feb-403c-950e-cc489148010d",
+      "schoolId": "unique_scholars",
+      "fullName": "Sir Salman Khan",
+      "username": "salmankhan",
+      "phone": "03017778899",
+      "email": "",
+      "role": "teacher",
+      "isActive": true,
+      "inchargeClassId": "Class-10",
+      "createdAt": "2026-09-12T22:51:50.930Z"
+    },
+    {
+      "id": "c37e13ec-1f10-46d3-b638-107565271704",
+      "schoolId": "unique_scholars",
+      "fullName": "Sir Salman Khan",
+      "username": "salmankhan",
+      "phone": "03017778899",
+      "email": "",
+      "role": "teacher",
+      "isActive": true,
+      "inchargeClassId": "Class-10",
+      "createdAt": "2026-09-12T23:04:38.097Z"
+    },
+    {
+      "id": "88976bfd-8e3c-4e3a-b05c-c20bcaa4d0b2",
+      "schoolId": "unique_scholars",
+      "fullName": "Sir Salman Khan",
+      "username": "salmankhan",
+      "phone": "03017778899",
+      "email": "",
+      "role": "teacher",
+      "isActive": true,
+      "inchargeClassId": "Class-10",
+      "createdAt": "2026-09-12T23:12:02.622Z"
+    },
+    {
+      "id": "1b0f66c9-eefa-4a48-9e98-1ceef8470ae6",
+      "schoolId": "unique_scholars",
+      "fullName": "Sir Salman Khan",
+      "username": "salmankhan",
+      "phone": "03017778899",
+      "email": "",
+      "role": "teacher",
+      "isActive": true,
+      "inchargeClassId": "Class-10",
+      "createdAt": "2026-09-12T23:37:12.927Z"
     }
   ]
 }

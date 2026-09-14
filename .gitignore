@@ -22,3 +22,12 @@ scratch/
 .qodo/
 dump*
 
+# Demo & Media Artifacts
+*.mp4
+*.wav
+demo_video/
+backend/scripts/demo_frames/
+backend/scripts/demo_frames_v2/
+backend/scripts/narration_audio/
+
+
