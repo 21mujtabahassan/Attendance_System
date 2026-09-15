@@ -92,7 +92,16 @@ app.use(express.urlencoded({ limit: '25mb', extended: true }));
 // Serve Static Admin Web Dashboard
 const publicPath = path.join(__dirname, '..', 'public');
 app.use('/admin', express.static(publicPath));
+
+// Serve Dedicated Teacher PWA
+const teacherPath = path.join(publicPath, 'teacher');
+app.use('/teacher', express.static(teacherPath));
+
 app.use(express.static(publicPath));
+
+app.get(['/teacher', '/teacher/*'], (req, res) => {
+  res.sendFile(path.join(teacherPath, 'index.html'));
+});
 
 app.get(['/', '/admin', '/admin/'], (req, res) => {
   res.sendFile(path.join(publicPath, 'index.html'));
@@ -1890,6 +1899,29 @@ app.get('/api/auth/me', async (req, res) => {
         assignedClassIds: assignedClasses.map(c => c.id)
       }
     });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post('/api/auth/change-password', async (req, res) => {
+  try {
+    const user = getReqUser(req);
+    if (!user) {
+      return res.status(401).json({ success: false, error: 'Not authenticated.' });
+    }
+    const { currentPassword, newPassword, schoolId = 'unique_scholars' } = req.body;
+    if (!newPassword || newPassword.length < 4) {
+      return res.status(400).json({ success: false, error: 'New password must be at least 4 characters long.' });
+    }
+
+    const authCheck = await authenticateUser(user.username || user.phone || user.id, currentPassword, schoolId);
+    if (!authCheck.success) {
+      return res.status(400).json({ success: false, error: 'Incorrect current password.' });
+    }
+
+    await updateTeacher(schoolId, user.id, { password: newPassword });
+    res.json({ success: true, message: 'Password updated successfully!' });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }

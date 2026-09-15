@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <title>Unique Scholars - Teacher Portal</title>
+  <meta name="description" content="Teacher classroom attendance and results portal for Unique Scholars Academy">
+  
+  <!-- PWA Settings -->
+  <link rel="manifest" href="manifest.json">
+  <meta name="theme-color" content="#FFFFFF">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="USA Teachers">
+  <link rel="apple-touch-icon" href="/logo.png">
+  <link rel="icon" type="image/png" href="/favicon.png">
+
+  <!-- FontAwesome 6 & CSS -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <!-- =====================================================================
+       1. BRANDED SPLASH SCREEN (First Load Flicker & Auto-Transition)
+       ===================================================================== -->
+  <div id="splashScreen">
+    <div class="splash-content">
+      <img src="/logo.png" alt="Unique Scholars Academy" class="splash-logo" id="splashLogo">
+      <div class="splash-title">Unique Scholars Academy</div>
+    </div>
+  </div>
+
+  <!-- Toast Notification Container -->
+  <div id="toastContainer"></div>
+
+  <!-- =====================================================================
+       2. MAIN APP CONTAINER
+       ===================================================================== -->
+  <div id="appContainer">
+
+    <!-- -----------------------------------------------------------------
+         VIEW A: TEACHER LOGIN SCREEN
+         ----------------------------------------------------------------- -->
+    <div class="view-screen" id="loginScreen">
+      <div class="login-box">
+        <div class="login-header">
+          <img src="/logo.png" alt="School Crest" class="login-logo">
+          <h1>Unique Scholars</h1>
+          <p>Teacher Classroom Portal</p>
+          <div class="login-badge">
+            <i class="fa-solid fa-chalkboard-user"></i> Teacher Access Only
+          </div>
+        </div>
+
+        <form class="login-form" id="teacherLoginForm" onsubmit="handleTeacherLogin(event)">
+          <div class="form-group">
+            <label class="form-label">Teacher ID / Phone Number</label>
+            <div class="input-container">
+              <i class="fa-solid fa-id-badge input-icon"></i>
+              <input type="text" id="teacherLoginId" class="form-input" placeholder="e.g. 03001234567 or T-01" required autocomplete="username">
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Password</label>
+            <div class="input-container">
+              <i class="fa-solid fa-lock input-icon"></i>
+              <input type="password" id="teacherLoginPassword" class="form-input" placeholder="Enter your password" required autocomplete="current-password">
+              <button type="button" class="toggle-password-btn" onclick="togglePasswordVisibility('teacherLoginPassword', this)">
+                <i class="fa-solid fa-eye"></i>
+              </button>
+            </div>
+          </div>
+
+          <button type="submit" class="btn-primary" id="btnTeacherLogin">
+            <span>Sign In to Classroom</span>
+            <i class="fa-solid fa-arrow-right"></i>
+          </button>
+        </form>
+
+        <div class="login-footer">
+          <a href="#" class="forgot-link" onclick="openModal('forgotModal')">Forgot password? Contact Administration</a>
+        </div>
+      </div>
+    </div>
+
+    <!-- -----------------------------------------------------------------
+         AUTHENTICATED APP SHELL (Headers, Views, Bottom Nav)
+         ----------------------------------------------------------------- -->
+    <div id="authenticatedApp" style="display: none; flex-direction: column; flex: 1;">
+
+      <!-- Top Pinned Header -->
+      <header id="appHeader">
+        <div class="header-brand">
+          <div class="header-avatar" id="headerAvatar">T</div>
+          <div class="header-info">
+            <span class="header-greeting" id="headerGreeting">Hello, Teacher</span>
+            <span class="header-subtext" id="headerDate">Today</span>
+          </div>
+        </div>
+        <div class="header-badge">
+          <div class="online-dot"></div>
+          <span id="onlineStatusText">Online</span>
+        </div>
+      </header>
+
+      <!-- VIEW 1: DASHBOARD -->
+      <main class="view-screen" id="viewDashboard">
+        <div class="quick-stats-row">
+          <div class="stat-tile">
+            <div class="stat-icon blue"><i class="fa-solid fa-chalkboard"></i></div>
+            <div class="stat-num" id="statClassCount">0</div>
+            <div class="stat-label">Assigned Classes</div>
+          </div>
+          <div class="stat-tile">
+            <div class="stat-icon amber"><i class="fa-solid fa-user-check"></i></div>
+            <div class="stat-num" id="statTodayStatus">Ready</div>
+            <div class="stat-label">Today's Attendance</div>
+          </div>
+        </div>
+
+        <div class="section-title">
+          <span>My Assigned Classes</span>
+          <span style="font-size: 12px; font-weight: 600; color: var(--text-muted);" id="assignedTotalPill">Active</span>
+        </div>
+
+        <div id="assignedClassesList">
+          <!-- Dynamic Class Cards Injected Here -->
+          <div style="text-align: center; padding: 40px 20px; color: var(--text-muted);">
+            <i class="fa-solid fa-circle-notch fa-spin" style="font-size: 24px; color: var(--color-primary-light);"></i>
+            <p style="margin-top: 10px; font-weight: 600;">Loading assigned classes...</p>
+          </div>
+        </div>
+      </main>
+
+      <!-- VIEW 2: ATTENDANCE MARKING -->
+      <main class="view-screen" id="viewAttendance">
+        <div class="filter-bar-card">
+          <div class="selector-row">
+            <select id="attendanceClassSelect" class="custom-select" onchange="loadAttendanceRoster()">
+              <option value="">-- Choose Class --</option>
+            </select>
+            <input type="date" id="attendanceDateInput" class="custom-select" onchange="loadAttendanceRoster()" style="max-width: 140px;">
+          </div>
+        </div>
+
+        <!-- Attendance Counter Pill -->
+        <div class="attendance-counter-bar">
+          <div class="counter-item">
+            <span>Present:</span>
+            <span class="counter-badge present" id="countPresent">0</span>
+          </div>
+          <div class="counter-item">
+            <span>Absent:</span>
+            <span class="counter-badge absent" id="countAbsent">0</span>
+          </div>
+          <div class="counter-item">
+            <span>Late:</span>
+            <span class="counter-badge late" id="countLate">0</span>
+          </div>
+        </div>
+
+        <!-- Fast Helper Row -->
+        <div class="quick-helpers-row">
+          <span style="font-size: 13px; font-weight: 700; color: var(--color-primary);" id="rosterTitle">Class Roster</span>
+          <button type="button" class="btn-text-helper" onclick="markAllPresent()">
+            <i class="fa-solid fa-check-double"></i> Mark All Present
+          </button>
+        </div>
+
+        <!-- Student Roster List -->
+        <div id="attendanceRosterContainer" style="padding-bottom: 70px;">
+          <p class="text-muted" style="text-align: center; padding: 30px;">Select a class to load student roster.</p>
+        </div>
+
+        <!-- Sticky Submit Bar -->
+        <div class="sticky-submit-bar">
+          <button type="button" class="btn-primary" id="btnSubmitAttendance" onclick="submitAttendance()">
+            <i class="fa-solid fa-paper-plane"></i>
+            <span>Save & Submit Attendance</span>
+          </button>
+        </div>
+      </main>
+
+      <!-- VIEW 3: RESULTS SUBMISSION -->
+      <main class="view-screen" id="viewResults">
+        <div class="filter-bar-card">
+          <div class="selector-row" style="margin-bottom: 8px;">
+            <select id="resultsClassSelect" class="custom-select" onchange="handleResultsClassChange()">
+              <option value="">-- Select Class --</option>
+            </select>
+            <select id="resultsTermSelect" class="custom-select" onchange="loadResultsRoster()">
+              <option value="">-- Select Term --</option>
+            </select>
+          </div>
+          <div class="selector-row">
+            <select id="resultsSubjectSelect" class="custom-select" onchange="loadResultsRoster()">
+              <option value="">-- Select Subject --</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- Results Roster -->
+        <div id="resultsRosterContainer" style="padding-bottom: 70px;">
+          <p class="text-muted" style="text-align: center; padding: 30px;">Select class, term, and subject to enter marks.</p>
+        </div>
+
+        <!-- Sticky Submit Bar -->
+        <div class="sticky-submit-bar" id="resultsSubmitBar" style="display: none;">
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+            <button type="button" class="btn-secondary" onclick="saveResults(false)">
+              <i class="fa-solid fa-floppy-disk"></i> Save Draft
+            </button>
+            <button type="button" class="btn-primary" onclick="saveResults(true)" style="margin-top: 0;">
+              <i class="fa-solid fa-lock"></i> Submit Marks
+            </button>
+          </div>
+        </div>
+      </main>
+
+      <!-- VIEW 4: MINIMAL PROFILE -->
+      <main class="view-screen" id="viewProfile">
+        <div class="profile-card">
+          <div class="profile-avatar-large" id="profileAvatarLarge">T</div>
+          <div class="profile-name" id="profileName">Teacher Name</div>
+          <div class="profile-role-tag" id="profileRole">Classroom Teacher</div>
+          <div style="font-size: 12px; color: var(--text-muted); margin-top: 4px;" id="profilePhone">-</div>
+        </div>
+
+        <div class="profile-section-card">
+          <div style="font-size: 13px; font-weight: 800; color: var(--color-primary);">My Assigned Classes</div>
+          <div class="profile-classes-list" id="profileClassesList">
+            <!-- Dynamic Class Chips -->
+          </div>
+        </div>
+
+        <button type="button" class="btn-secondary" onclick="openModal('changePasswordModal')">
+          <i class="fa-solid fa-key"></i> Change My Password
+        </button>
+
+        <button type="button" class="btn-danger" onclick="handleTeacherLogout()">
+          <i class="fa-solid fa-right-from-bracket"></i> Sign Out
+        </button>
+      </main>
+
+      <!-- Pinned Bottom Navigation Bar -->
+      <nav id="bottomNavBar">
+        <button type="button" class="nav-tab active" id="navDashboard" onclick="switchView('viewDashboard')">
+          <i class="fa-solid fa-house"></i>
+          <span>Dashboard</span>
+        </button>
+        <button type="button" class="nav-tab" id="navAttendance" onclick="switchView('viewAttendance')">
+          <i class="fa-solid fa-clipboard-user"></i>
+          <span>Attendance</span>
+        </button>
+        <button type="button" class="nav-tab" id="navResults" onclick="switchView('viewResults')">
+          <i class="fa-solid fa-chart-simple"></i>
+          <span>Results</span>
+        </button>
+        <button type="button" class="nav-tab" id="navProfile" onclick="switchView('viewProfile')">
+          <i class="fa-solid fa-user"></i>
+          <span>Profile</span>
+        </button>
+      </nav>
+
+    </div>
+  </div>
+
+  <!-- =====================================================================
+       3. MODALS & BOTTOM SHEETS
+       ===================================================================== -->
+
+  <!-- Change Password Modal -->
+  <div class="modal-backdrop" id="changePasswordModal" onclick="closeModalOnBackdrop(event, 'changePasswordModal')">
+    <div class="modal-bottom-sheet">
+      <div class="sheet-handle"></div>
+      <div class="sheet-header">
+        <h3 class="sheet-title">Change Password</h3>
+        <button type="button" class="sheet-close-btn" onclick="closeModal('changePasswordModal')">
+          <i class="fa-solid fa-xmark"></i>
+        </button>
+      </div>
+
+      <form onsubmit="handleChangePassword(event)">
+        <div class="form-group" style="margin-bottom: 12px;">
+          <label class="form-label">Current Password</label>
+          <input type="password" id="currentPasswordInput" class="form-input" style="padding-left: 14px;" required autocomplete="current-password">
+        </div>
+        <div class="form-group" style="margin-bottom: 18px;">
+          <label class="form-label">New Password</label>
+          <input type="password" id="newPasswordInput" class="form-input" style="padding-left: 14px;" required minlength="4" autocomplete="new-password">
+        </div>
+        <button type="submit" class="btn-primary" id="btnSavePassword">
+          <span>Update Password</span>
+        </button>
+      </form>
+    </div>
+  </div>
+
+  <!-- Forgot Password Modal -->
+  <div class="modal-backdrop" id="forgotModal" onclick="closeModalOnBackdrop(event, 'forgotModal')">
+    <div class="modal-bottom-sheet">
+      <div class="sheet-handle"></div>
+      <div class="sheet-header">
+        <h3 class="sheet-title">Account Recovery</h3>
+        <button type="button" class="sheet-close-btn" onclick="closeModal('forgotModal')">
+          <i class="fa-solid fa-xmark"></i>
+        </button>
+      </div>
+      <p style="font-size: 14px; color: var(--text-muted); line-height: 1.5; margin-bottom: 18px;">
+        To reset your teacher account password, please contact the Unique Scholars Academy administration office or principal.
+      </p>
+      <button type="button" class="btn-primary" onclick="closeModal('forgotModal')">Got It</button>
+    </div>
+  </div>
+
+  <!-- Application Logic -->
+  <script src="app.js"></script>
+</body>
+</html>

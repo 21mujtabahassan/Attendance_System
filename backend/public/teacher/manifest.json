@@ -1,0 +1,31 @@
+{
+  "name": "Unique Scholars Academy - Teacher Portal",
+  "short_name": "USA Teachers",
+  "description": "Teacher classroom attendance and results portal for Unique Scholars Academy",
+  "start_url": "/teacher/",
+  "scope": "/teacher/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#FFFFFF",
+  "theme_color": "#0F2942",
+  "categories": ["education", "productivity"],
+  "icons": [
+    {
+      "src": "/logo.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/logo.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable any"
+    },
+    {
+      "src": "/favicon.png",
+      "sizes": "64x64 32x32 24x24 16x16",
+      "type": "image/png"
+    }
+  ]
+}
