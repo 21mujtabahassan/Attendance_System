@@ -282,24 +282,36 @@ function populateClassDropdowns() {
   const attSelect = document.getElementById('attendanceClassSelect');
   const resSelect = document.getElementById('resultsClassSelect');
 
-  const optionsHtml = '<option value="">-- Choose Class --</option>' +
-    assignedClasses.map(c => `<option value="${c.id}">${c.name}</option>`).join('');
+  if (assignedClasses.length === 0) {
+    if (attSelect) attSelect.innerHTML = '<option value="">No classes assigned</option>';
+    if (resSelect) resSelect.innerHTML = '<option value="">No classes assigned</option>';
+    return;
+  }
 
-  if (attSelect) attSelect.innerHTML = optionsHtml;
-  if (resSelect) resSelect.innerHTML = optionsHtml;
+  const optionsHtml = assignedClasses.map(c => `<option value="${c.id}">${c.name}</option>`).join('');
+
+  if (attSelect) {
+    attSelect.innerHTML = optionsHtml;
+    attSelect.value = assignedClasses[0].id;
+  }
+  if (resSelect) {
+    resSelect.innerHTML = optionsHtml;
+    resSelect.value = assignedClasses[0].id;
+  }
+
+  // Pre-load attendance roster immediately
+  loadAttendanceRoster();
+  // Pre-load results selectors and roster immediately
+  handleResultsClassChange();
 
   // Profile chips
   const profileList = document.getElementById('profileClassesList');
   if (profileList) {
-    if (assignedClasses.length === 0) {
-      profileList.innerHTML = '<span class="text-muted" style="font-size: 12px;">None assigned yet.</span>';
-    } else {
-      profileList.innerHTML = assignedClasses.map(c => `
-        <span class="profile-class-chip">
-          <i class="fa-solid fa-chalkboard"></i> ${c.name} ${c.isIncharge ? '⭐' : ''}
-        </span>
-      `).join('');
-    }
+    profileList.innerHTML = assignedClasses.map(c => `
+      <span class="profile-class-chip">
+        <i class="fa-solid fa-chalkboard"></i> ${c.name} ${c.isIncharge ? '⭐' : ''}
+      </span>
+    `).join('');
   }
 }
 
@@ -512,7 +524,8 @@ async function submitAttendance() {
 // =====================================================================
 
 async function handleResultsClassChange() {
-  const classId = document.getElementById('resultsClassSelect').value;
+  const classSelect = document.getElementById('resultsClassSelect');
+  const classId = classSelect ? classSelect.value : '';
   const termSelect = document.getElementById('resultsTermSelect');
   const subjSelect = document.getElementById('resultsSubjectSelect');
 
@@ -524,17 +537,29 @@ async function handleResultsClassChange() {
     const tRes = await fetch(`${API_BASE}/results/terms?schoolId=${CURRENT_SCHOOL_ID}`, { headers });
     const tData = await tRes.json();
     const terms = tData.terms || [];
-    termSelect.innerHTML = '<option value="">-- Select Term --</option>' +
-      terms.map(t => `<option value="${t.id}">${t.name}</option>`).join('');
-    if (terms.length > 0) termSelect.value = terms[0].id;
+    if (termSelect) {
+      termSelect.innerHTML = terms.map(t => `<option value="${t.id}">${t.name}</option>`).join('');
+      if (terms.length > 0 && !termSelect.value) termSelect.value = terms[0].id;
+    }
+
+    const termId = termSelect ? termSelect.value : '';
 
     // 2. Fetch Subjects for Class
-    const sRes = await fetch(`${API_BASE}/classes/${classId}/subjects?schoolId=${CURRENT_SCHOOL_ID}`, { headers });
+    const sUrl = termId
+      ? `${API_BASE}/classes/${classId}/subjects?schoolId=${CURRENT_SCHOOL_ID}&termId=${termId}`
+      : `${API_BASE}/classes/${classId}/subjects?schoolId=${CURRENT_SCHOOL_ID}`;
+    const sRes = await fetch(sUrl, { headers });
     const sData = await sRes.json();
     const subjects = sData.subjects || [];
-    subjSelect.innerHTML = '<option value="">-- Select Subject --</option>' +
-      subjects.map(s => `<option value="${s.id}" data-max="${s.maxMarks || 100}" data-pass="${s.passingMarks || 33}">${s.name} (${s.maxMarks || 100} Marks)</option>`).join('');
-    if (subjects.length > 0) subjSelect.value = subjects[0].id;
+
+    if (subjSelect) {
+      subjSelect.innerHTML = subjects.map(s => {
+        const max = Number(s.totalMarks || s.maxMarks || 100);
+        const pass = Number(s.passingMarks || Math.round(max * 0.33));
+        return `<option value="${s.name}" data-name="${s.name}" data-max="${max}" data-pass="${pass}">${s.name} (${max} Marks)</option>`;
+      }).join('');
+      if (subjects.length > 0) subjSelect.value = subjects[0].name;
+    }
 
     loadResultsRoster();
   } catch (err) {
@@ -543,29 +568,31 @@ async function handleResultsClassChange() {
 }
 
 async function loadResultsRoster() {
-  const classId = document.getElementById('resultsClassSelect').value;
-  const termId = document.getElementById('resultsTermSelect').value;
-  const subjectId = document.getElementById('resultsSubjectSelect').value;
+  const classId = document.getElementById('resultsClassSelect')?.value;
+  const termId = document.getElementById('resultsTermSelect')?.value;
+  const subjSelect = document.getElementById('resultsSubjectSelect');
+  const subjectName = subjSelect ? subjSelect.value : '';
   const container = document.getElementById('resultsRosterContainer');
   const bar = document.getElementById('resultsSubmitBar');
 
-  if (!classId || !termId || !subjectId) {
-    container.innerHTML = '<p class="text-muted" style="text-align: center; padding: 30px;">Select class, term, and subject.</p>';
+  if (!classId || !termId || !subjectName) {
+    if (container) container.innerHTML = '<p class="text-muted" style="text-align: center; padding: 30px;">Select class, term, and subject.</p>';
     if (bar) bar.style.display = 'none';
     return;
   }
 
-  const subjSelect = document.getElementById('resultsSubjectSelect');
   const selectedOpt = subjSelect.options[subjSelect.selectedIndex];
   currentSubjectMaxMarks = Number(selectedOpt?.getAttribute('data-max')) || 100;
   currentSubjectPassingMarks = Number(selectedOpt?.getAttribute('data-pass')) || 33;
 
-  container.innerHTML = `
-    <div style="text-align: center; padding: 30px; color: var(--text-muted);">
-      <i class="fa-solid fa-circle-notch fa-spin" style="font-size: 24px; color: var(--color-primary-light);"></i>
-      <p style="margin-top: 10px; font-weight: 600;">Loading student marksheet...</p>
-    </div>
-  `;
+  if (container) {
+    container.innerHTML = `
+      <div style="text-align: center; padding: 30px; color: var(--text-muted);">
+        <i class="fa-solid fa-circle-notch fa-spin" style="font-size: 24px; color: var(--color-primary-light);"></i>
+        <p style="margin-top: 10px; font-weight: 600;">Loading student marksheet...</p>
+      </div>
+    `;
+  }
 
   try {
     const headers = { 'Authorization': `Bearer ${currentToken}` };
@@ -582,10 +609,16 @@ async function loadResultsRoster() {
     currentResultsMap = {};
     students.forEach(s => {
       const match = existingResults.find(r => r.studentId === s.id);
-      const subjectMarks = match?.marks ? match.marks[subjectId] : null;
+      let existingObtained = '';
+      if (match && match.marks) {
+        const subData = match.marks[subjectName];
+        if (subData !== undefined && subData !== null) {
+          existingObtained = typeof subData === 'object' ? (subData.obtained ?? '') : subData;
+        }
+      }
       currentResultsMap[s.id] = {
         student: s,
-        marks: subjectMarks != null ? Number(subjectMarks) : ''
+        marks: existingObtained !== '' ? Number(existingObtained) : ''
       };
     });
 
@@ -593,7 +626,7 @@ async function loadResultsRoster() {
     if (bar) bar.style.display = 'block';
   } catch (err) {
     console.error('Error loading results roster:', err);
-    container.innerHTML = '<p class="text-muted" style="text-align: center; padding: 30px; color: var(--status-absent);">Failed to load results roster.</p>';
+    if (container) container.innerHTML = '<p class="text-muted" style="text-align: center; padding: 30px; color: var(--status-absent);">Failed to load results roster.</p>';
   }
 }
 
@@ -602,7 +635,7 @@ function renderResultsRoster(students) {
   if (!container) return;
 
   if (students.length === 0) {
-    container.innerHTML = '<p class="text-muted" style="text-align: center; padding: 30px;">No students enrolled.</p>';
+    container.innerHTML = '<p class="text-muted" style="text-align: center; padding: 30px;">No students enrolled in this class.</p>';
     return;
   }
 
@@ -633,7 +666,9 @@ function renderResultsRoster(students) {
 
 function handleMarkInput(studentId, val) {
   const num = val === '' ? '' : Math.min(Math.max(Number(val), 0), currentSubjectMaxMarks);
-  currentResultsMap[studentId].marks = num;
+  if (currentResultsMap[studentId]) {
+    currentResultsMap[studentId].marks = num;
+  }
 
   const gradeBadge = document.getElementById(`grade-${studentId}`);
   if (gradeBadge) {
@@ -655,25 +690,37 @@ function computeGrade(marks, maxMarks) {
 }
 
 async function saveResults(isFinalSubmit = false) {
-  const classId = document.getElementById('resultsClassSelect').value;
-  const termId = document.getElementById('resultsTermSelect').value;
-  const subjectId = document.getElementById('resultsSubjectSelect').value;
+  const classId = document.getElementById('resultsClassSelect')?.value;
+  const termId = document.getElementById('resultsTermSelect')?.value;
+  const subjSelect = document.getElementById('resultsSubjectSelect');
+  const subjectName = subjSelect ? subjSelect.value : '';
 
-  if (!classId || !termId || !subjectId) return;
+  if (!classId || !termId || !subjectName) {
+    showToast('⚠️ Please select class, term, and subject first.', 'error');
+    return;
+  }
 
   const endpoint = isFinalSubmit ? `${API_BASE}/admin/results/submit` : `${API_BASE}/admin/results/draft`;
   const actionName = isFinalSubmit ? 'Final Submission' : 'Draft Save';
 
-  if (isFinalSubmit && !confirm('Are you sure you want to submit and lock these results?')) return;
+  if (isFinalSubmit && !confirm(`Submit and lock marks for "${subjectName}"?`)) return;
 
   try {
     showToast(`⏳ Processing ${actionName}...`);
 
     const resultsArray = Object.keys(currentResultsMap).map(sId => {
       const entry = currentResultsMap[sId];
+      const val = entry.marks === '' ? 0 : Number(entry.marks);
       return {
         studentId: sId,
-        marks: { [subjectId]: entry.marks === '' ? 0 : Number(entry.marks) }
+        studentName: entry.student?.name || 'Student',
+        parentPhone: entry.student?.parentPhone || '',
+        marks: {
+          [subjectName]: {
+            obtained: val,
+            total: currentSubjectMaxMarks
+          }
+        }
       };
     });
 
@@ -781,8 +828,45 @@ function switchView(viewId) {
     if (activeTab) activeTab.classList.add('active');
   }
 
+  // Auto-ensure data loaded when navigating to Attendance or Results
+  if (viewId === 'viewAttendance') {
+    const attSelect = document.getElementById('attendanceClassSelect');
+    if (attSelect) {
+      if (!attSelect.value && assignedClasses.length > 0) {
+        attSelect.value = assignedClasses[0].id;
+      }
+      if (attSelect.value && currentAttendanceRoster.length === 0) {
+        loadAttendanceRoster();
+      }
+    }
+  } else if (viewId === 'viewResults') {
+    const resSelect = document.getElementById('resultsClassSelect');
+    if (resSelect) {
+      if (!resSelect.value && assignedClasses.length > 0) {
+        resSelect.value = assignedClasses[0].id;
+        handleResultsClassChange();
+      } else if (resSelect.value && Object.keys(currentResultsMap).length === 0) {
+        loadResultsRoster();
+      }
+    }
+  }
+
   // Scroll to top
   window.scrollTo({ top: 0, behavior: 'instant' });
+}
+
+async function syncAllTeacherData() {
+  const syncBtn = document.getElementById('btnSyncData');
+  if (syncBtn) syncBtn.classList.add('fa-spin');
+  showToast('🔄 Synchronizing student & class data...');
+  try {
+    await loadTeacherClasses();
+    showToast('✅ Synchronized with school server!', 'success');
+  } catch (e) {
+    showToast('⚠️ Sync error. Please try again.', 'error');
+  } finally {
+    if (syncBtn) syncBtn.classList.remove('fa-spin');
+  }
 }
 
 function showToast(message, type = 'info') {

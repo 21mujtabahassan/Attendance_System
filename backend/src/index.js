@@ -452,9 +452,9 @@ app.get('/api/schools', async (req, res) => {
   res.json({ schools: await getSchools() });
 });
 
-app.get('/api/schools/:schoolId/classes', async (req, res) => {
-  const { schoolId } = req.params;
-  res.json({ classes: await getClasses(schoolId) });
+app.get(['/api/classes', '/api/schools/:schoolId/classes'], async (req, res) => {
+  const schoolId = req.params.schoolId || req.query.schoolId || 'unique_scholars';
+  res.json({ success: true, classes: await getClasses(schoolId) });
 });
 
 app.post('/api/admin/classes', async (req, res) => {
@@ -728,9 +728,9 @@ ${school.name}`;
 });
 
 app.get('/api/attendance/logs', async (req, res) => {
-  const { schoolId, classId, date } = req.query;
-  const logs = await getAttendanceLogs(schoolId, classId, date);
-  res.json({ logs });
+  const { schoolId = 'unique_scholars', classId, date } = req.query;
+  const logs = await getAttendanceLogs(schoolId, { classId, date });
+  res.json({ success: true, logs });
 });
 
 // -------------------------------------------------------------

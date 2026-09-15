@@ -1045,8 +1045,10 @@ async function saveDraftResults(schoolId = 'unique_scholars', payload) {
         let totalObtained = 0;
         let totalMax = 0;
         Object.values(item.marks || {}).forEach(m => {
-          totalObtained += Number(m.obtained || 0);
-          totalMax += Number(m.total || 100);
+          const obt = typeof m === 'object' && m !== null ? Number(m.obtained ?? 0) : Number(m || 0);
+          const tot = typeof m === 'object' && m !== null ? Number(m.total ?? 100) : 100;
+          totalObtained += obt;
+          totalMax += tot;
         });
         const percentage = totalMax > 0 ? Number(((totalObtained / totalMax) * 100).toFixed(1)) : 0;
         const { grade, passStatus } = computeGradeAndStatus(percentage);
@@ -1073,11 +1075,13 @@ async function saveDraftResults(schoolId = 'unique_scholars', payload) {
         // Normalize marks
         await trx('student_result_marks').where({ result_id: resId }).del();
         for (const [subj, m] of Object.entries(item.marks || {})) {
+          const obt = typeof m === 'object' && m !== null ? Number(m.obtained ?? 0) : Number(m || 0);
+          const tot = typeof m === 'object' && m !== null ? Number(m.total ?? 100) : 100;
           await trx('student_result_marks').insert({
             result_id: resId,
             subject_name: subj,
-            obtained: Number(m.obtained || 0),
-            total: Number(m.total || 100)
+            obtained: obt,
+            total: tot
           });
         }
 
@@ -1153,8 +1157,10 @@ async function submitFinalResults(schoolId = 'unique_scholars', payload) {
     let totalObtained = 0;
     let totalMax = 0;
     Object.values(item.marks || {}).forEach(m => {
-      totalObtained += Number(m.obtained || 0);
-      totalMax += Number(m.total || 100);
+      const obt = typeof m === 'object' && m !== null ? Number(m.obtained ?? 0) : Number(m || 0);
+      const tot = typeof m === 'object' && m !== null ? Number(m.total ?? 100) : 100;
+      totalObtained += obt;
+      totalMax += tot;
     });
     const percentage = totalMax > 0 ? Number(((totalObtained / totalMax) * 100).toFixed(1)) : 0;
     return { ...item, totalObtained, totalMax, percentage };
@@ -1199,11 +1205,13 @@ async function submitFinalResults(schoolId = 'unique_scholars', payload) {
 
         await trx('student_result_marks').where({ result_id: resId }).del();
         for (const [subj, m] of Object.entries(item.marks || {})) {
+          const obt = typeof m === 'object' && m !== null ? Number(m.obtained ?? 0) : Number(m || 0);
+          const tot = typeof m === 'object' && m !== null ? Number(m.total ?? 100) : 100;
           await trx('student_result_marks').insert({
             result_id: resId,
             subject_name: subj,
-            obtained: Number(m.obtained || 0),
-            total: Number(m.total || 100)
+            obtained: obt,
+            total: tot
           });
         }
 
