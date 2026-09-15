@@ -430,23 +430,32 @@ async function sendWhatsAppMessage(phone, message, schoolId = 'unique_scholars',
     try {
       let msgPayload;
       if (docBuffer) {
-        msgPayload = {
-          document: docBuffer,
-          mimetype: media.mimetype || 'application/pdf',
-          fileName: media.fileName || 'Academic_Result_Card.pdf',
-          caption: message
-        };
+        if (media && media.mimetype && media.mimetype.startsWith('image/')) {
+          msgPayload = {
+            image: docBuffer,
+            caption: message || ''
+          };
+        } else {
+          msgPayload = {
+            document: docBuffer,
+            mimetype: (media && media.mimetype) || 'application/pdf',
+            fileName: (media && media.fileName) || 'Attachment.pdf',
+            caption: message || ''
+          };
+        }
       } else {
         msgPayload = { text: message };
       }
 
       const result = await sess.sock.sendMessage(jid, msgPayload);
-      console.log(`📩 [${schoolId}] WhatsApp ${docBuffer ? 'PDF Document + Caption' : 'Message'} sent to parent at ${phone} (JID: ${jid})`);
+      const mediaTypeDesc = docBuffer ? (media && media.mimetype && media.mimetype.startsWith('image/') ? 'Image Photo' : 'Document Attachment') : 'Message';
+      console.log(`📩 [${schoolId}] WhatsApp ${mediaTypeDesc} sent to parent at ${phone} (JID: ${jid})`);
       return {
         success: true,
         messageId: result?.key?.id || `MSG-${Date.now()}`,
         recipient: jid,
         hasAttachment: !!docBuffer,
+        attachmentType: docBuffer ? (media && media.mimetype && media.mimetype.startsWith('image/') ? 'image' : 'document') : null,
         routedVia: 'local_socket'
       };
     } catch (error) {
@@ -482,8 +491,8 @@ async function sendWhatsAppMessage(phone, message, schoolId = 'unique_scholars',
       if (docBuffer) {
         fwdPayload.media = {
           base64: docBuffer.toString('base64'),
-          mimetype: media.mimetype || 'application/pdf',
-          fileName: media.fileName || 'Academic_Result_Card.pdf'
+          mimetype: (media && media.mimetype) || 'application/pdf',
+          fileName: (media && media.fileName) || 'Attachment.pdf'
         };
       } else if (media && media.base64) {
         fwdPayload.media = media;

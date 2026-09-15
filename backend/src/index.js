@@ -65,9 +65,10 @@ const {
 const { getDb, isPostgresConfigured } = require('./db');
 const { generateAcademicResultPdf } = require('./services/pdfGenerator');
 
-// Idempotent column check for students table
+// Idempotent column check for students and dispatch_batches table
 if (isPostgresConfigured()) {
   getDb().raw('ALTER TABLE students ADD COLUMN IF NOT EXISTS father_name VARCHAR(150);').catch(() => {});
+  getDb().raw('ALTER TABLE dispatch_batches ADD COLUMN IF NOT EXISTS media_json JSONB;').catch(() => {});
 }
 
 const app = express();
@@ -85,7 +86,8 @@ app.use((req, res, next) => {
   next();
 });
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '25mb' }));
+app.use(express.urlencoded({ limit: '25mb', extended: true }));
 
 // Serve Static Admin Web Dashboard
 const publicPath = path.join(__dirname, '..', 'public');
@@ -147,7 +149,7 @@ function startCloudDispatchWorker() {
         for (const item of batch.messages) {
           if (!item.phone || !item.message) continue;
 
-          let media = item.media || null;
+          let media = item.media || batch.media || null;
 
           // Strictly determine if this is an academic result marksheet message (NEVER attach result cards to fee reminders, attendance, or receipts)
           const isResultCardMessage = (item.resultId && String(item.resultId).startsWith('RES-')) ||
@@ -1764,8 +1766,8 @@ app.post('/api/admin/broadcast/templates', async (req, res) => {
 
 app.post('/api/admin/broadcast/send', async (req, res) => {
   try {
-    const { schoolId = 'unique_scholars', targetGroup, classId, message } = req.body;
-    if (!message) return res.status(400).json({ success: false, error: 'Message content is required.' });
+    const { schoolId = 'unique_scholars', targetGroup, classId, message = '', media = null } = req.body;
+    if (!message && !media) return res.status(400).json({ success: false, error: 'Message content or media attachment is required.' });
 
     const gatewayUrl = req.headers['x-whatsapp-gateway-url'] || req.body.gatewayUrl || process.env.WHATSAPP_GATEWAY_URL || process.env.PERSISTENT_BACKEND_URL;
 
@@ -1784,24 +1786,28 @@ app.post('/api/admin/broadcast/send', async (req, res) => {
     const pendingBatch = [];
     for (const student of targetStudents) {
       if (!student.parentPhone) continue;
-      const formattedMessage = message
+      const rawMessage = message || '';
+      const formattedMessage = rawMessage
         .replace(/{student_name}/g, student.name)
         .replace(/{class_id}/g, student.classId);
 
-      pendingBatch.push({
+      const batchItem = {
         studentId: student.id,
         studentName: student.name,
         phone: student.parentPhone,
         message: formattedMessage
-      });
+      };
+      if (media) batchItem.media = media;
+      pendingBatch.push(batchItem);
 
-      const waRes = await sendWhatsAppMessage(student.parentPhone, formattedMessage, schoolId, gatewayUrl);
+      const waRes = await sendWhatsAppMessage(student.parentPhone, formattedMessage, schoolId, gatewayUrl, media);
       results.push({
         studentId: student.id,
         name: student.name,
         phone: student.parentPhone,
         success: waRes.success,
         error: waRes.error || null,
+        hasAttachment: !!media,
         routedVia: waRes.routedVia || 'unknown'
       });
     }
@@ -1811,7 +1817,7 @@ app.post('/api/admin/broadcast/send', async (req, res) => {
 
     let queuedRecord = null;
     if (sentCount === 0 && pendingBatch.length > 0) {
-      queuedRecord = await addPendingDispatches(schoolId, pendingBatch, 'broadcast');
+      queuedRecord = await addPendingDispatches(schoolId, pendingBatch, 'broadcast', media);
       console.log(`Queued ${pendingBatch.length} broadcast messages for persistent WhatsApp gateway telecast (Batch: ${queuedRecord?.id})`);
     }
 
@@ -1821,6 +1827,7 @@ app.post('/api/admin/broadcast/send', async (req, res) => {
       sentCount,
       failedCount,
       queuedCount: queuedRecord ? pendingBatch.length : 0,
+      hasAttachment: !!media,
       details: results,
       pendingBatch
     });

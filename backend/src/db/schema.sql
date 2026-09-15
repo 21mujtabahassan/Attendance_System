@@ -203,6 +203,7 @@ CREATE TABLE IF NOT EXISTS dispatch_batches (
   source        VARCHAR(30) NOT NULL DEFAULT 'results'
                 CHECK (source IN ('attendance','results','broadcast')),
   status        VARCHAR(20) NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','completed')),
+  media_json    JSONB,
   created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
   completed_at  TIMESTAMPTZ
 );

@@ -1764,7 +1764,7 @@ async function getAdminRecords(schoolId = 'unique_scholars', filters = {}) {
 // -------------------------------------------------------------
 // 9. WHATSAPP DISPATCH QUEUE (Relational dispatch_batches)
 // -------------------------------------------------------------
-async function addPendingDispatches(schoolId = 'unique_scholars', batch = [], source = 'results') {
+async function addPendingDispatches(schoolId = 'unique_scholars', batch = [], source = 'results', media = null) {
   if (!Array.isArray(batch) || batch.length === 0) return null;
   const batchId = `BATCH-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
   let validSource = 'results';
@@ -1775,12 +1775,17 @@ async function addPendingDispatches(schoolId = 'unique_scholars', batch = [], so
   if (isPostgresConfigured()) {
     const db = getDb();
     await db.transaction(async trx => {
-      await trx('dispatch_batches').insert({
+      const batchPayload = {
         id: batchId,
         school_id: schoolId,
         source: validSource,
         status: 'pending'
-      });
+      };
+      if (media) {
+        batchPayload.media_json = typeof media === 'string' ? media : JSON.stringify(media);
+      }
+
+      await trx('dispatch_batches').insert(batchPayload);
 
       for (const m of batch) {
         await trx('dispatch_messages').insert({
@@ -1794,7 +1799,7 @@ async function addPendingDispatches(schoolId = 'unique_scholars', batch = [], so
       }
     });
 
-    return { id: batchId, schoolId, source: validSource, status: 'pending', messages: batch };
+    return { id: batchId, schoolId, source: validSource, status: 'pending', messages: batch, media };
   }
 
   const db = readJsonDb();
@@ -1805,7 +1810,8 @@ async function addPendingDispatches(schoolId = 'unique_scholars', batch = [], so
     source: validSource,
     createdAt: new Date().toISOString(),
     status: 'pending',
-    messages: batch
+    messages: batch,
+    media: media || null
   };
   db.pendingDispatches.push(record);
   writeJsonDb(db);
@@ -1829,18 +1835,27 @@ async function getPendingDispatches(schoolId = 'unique_scholars') {
       .whereIn('batch_id', batchIds)
       .andWhere({ status: 'pending' });
 
-    return batches.map(b => ({
-      id: b.id,
-      schoolId: b.school_id,
-      source: b.source,
-      status: b.status,
-      messages: messages.filter(m => m.batch_id === b.id).map(m => ({
-        studentId: m.student_id,
-        studentName: m.student_name,
-        phone: m.phone,
-        message: m.message
-      }))
-    }));
+    return batches.map(b => {
+      let parsedMedia = null;
+      if (b.media_json) {
+        try {
+          parsedMedia = typeof b.media_json === 'string' ? JSON.parse(b.media_json) : b.media_json;
+        } catch (e) { }
+      }
+      return {
+        id: b.id,
+        schoolId: b.school_id,
+        source: b.source,
+        status: b.status,
+        media: parsedMedia,
+        messages: messages.filter(m => m.batch_id === b.id).map(m => ({
+          studentId: m.student_id,
+          studentName: m.student_name,
+          phone: m.phone,
+          message: m.message
+        }))
+      };
+    });
   }
 
   const db = readJsonDb();

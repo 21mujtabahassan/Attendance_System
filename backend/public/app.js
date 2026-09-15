@@ -1550,6 +1550,83 @@ function applyBroadcastTemplate() {
   }
 }
 
+let currentBroadcastMedia = null;
+
+function handleBroadcastMediaSelect(event) {
+  const file = event.target.files && event.target.files[0];
+  if (!file) return;
+
+  // Max 5.5MB file size limit
+  const maxBytes = 5.5 * 1024 * 1024;
+  if (file.size > maxBytes) {
+    showToast('⚠️ Selected file exceeds 5MB limit. Please choose a file smaller than 5MB.');
+    event.target.value = '';
+    return;
+  }
+
+  const reader = new FileReader();
+  reader.onload = function(e) {
+    const base64Data = e.target.result.split(',')[1];
+    const mime = file.type || (file.name.endsWith('.pdf') ? 'application/pdf' : 'application/octet-stream');
+    currentBroadcastMedia = {
+      base64: base64Data,
+      mimetype: mime,
+      fileName: file.name,
+      size: file.size,
+      dataUrl: e.target.result
+    };
+
+    renderBroadcastMediaPreview();
+  };
+  reader.onerror = function() {
+    showToast('❌ Failed to read attached file.');
+  };
+  reader.readAsDataURL(file);
+}
+
+function renderBroadcastMediaPreview() {
+  const preview = document.getElementById('broadcastMediaPreview');
+  const thumb = document.getElementById('broadcastMediaThumb');
+  const nameEl = document.getElementById('broadcastMediaName');
+  const typeEl = document.getElementById('broadcastMediaType');
+  const sizeEl = document.getElementById('broadcastMediaSize');
+  const reqMark = document.getElementById('broadcastMsgRequiredMark');
+
+  if (!currentBroadcastMedia || !preview) return;
+
+  nameEl.textContent = currentBroadcastMedia.fileName;
+  const kb = currentBroadcastMedia.size / 1024;
+  sizeEl.textContent = kb >= 1024 ? `${(kb / 1024).toFixed(2)} MB` : `${kb.toFixed(1)} KB`;
+
+  const mime = currentBroadcastMedia.mimetype.toLowerCase();
+  if (mime.startsWith('image/')) {
+    thumb.innerHTML = `<img src="${currentBroadcastMedia.dataUrl}" alt="Preview" />`;
+    typeEl.innerHTML = '<i class="fa-solid fa-image"></i> Photo / Image';
+    typeEl.className = 'status-badge active';
+  } else if (mime.includes('pdf')) {
+    thumb.innerHTML = '<i class="fa-solid fa-file-pdf" style="color: #f43f5e; font-size: 24px;"></i>';
+    typeEl.innerHTML = '<i class="fa-solid fa-file-pdf"></i> PDF Timetable / Doc';
+    typeEl.className = 'status-badge active';
+  } else {
+    thumb.innerHTML = '<i class="fa-solid fa-file-lines" style="color: #38bdf8; font-size: 24px;"></i>';
+    typeEl.innerHTML = '<i class="fa-solid fa-file-lines"></i> Document';
+    typeEl.className = 'status-badge active';
+  }
+
+  preview.style.display = 'flex';
+  if (reqMark) reqMark.style.display = 'none'; // Message is optional caption when media is attached
+}
+
+function clearBroadcastMedia() {
+  currentBroadcastMedia = null;
+  const input = document.getElementById('broadcastMediaInput');
+  if (input) input.value = '';
+  const preview = document.getElementById('broadcastMediaPreview');
+  if (preview) preview.style.display = 'none';
+  const reqMark = document.getElementById('broadcastMsgRequiredMark');
+  if (reqMark) reqMark.style.display = 'inline';
+}
+
 function toggleBroadcastClassSelector() {
   const grp = document.getElementById('broadcastTargetGroup').value;
   const classGrp = document.getElementById('broadcastClassGroup');
@@ -1560,14 +1637,37 @@ async function handleSendBroadcast(e) {
   e.preventDefault();
   const targetGroup = document.getElementById('broadcastTargetGroup').value;
   const classId = document.getElementById('broadcastClassSelect').value;
-  const message = document.getElementById('broadcastMessageInput').value;
+  const message = document.getElementById('broadcastMessageInput').value.trim();
 
-  if (!confirm(`Are you sure you want to dispatch this WhatsApp broadcast to target: ${targetGroup}?`)) return;
+  if (!message && !currentBroadcastMedia) {
+    showToast('⚠️ Please enter a broadcast message or attach a media document.');
+    return;
+  }
+
+  const promptTarget = targetGroup === 'class' ? `selected class` : `all school parents`;
+  const mediaNote = currentBroadcastMedia ? ` with attached ${currentBroadcastMedia.fileName}` : '';
+  if (!confirm(`Are you sure you want to dispatch this WhatsApp broadcast to ${promptTarget}${mediaNote}?`)) return;
 
   try {
     showToast('Dispatching WhatsApp broadcast...');
     const gwBase = await getWaGatewayBase();
     const gatewayUrl = gwBase.replace(/\/api\/?$/, '');
+
+    const broadcastPayload = {
+      schoolId: CURRENT_SCHOOL_ID,
+      targetGroup,
+      classId,
+      message,
+      gatewayUrl
+    };
+
+    if (currentBroadcastMedia) {
+      broadcastPayload.media = {
+        base64: currentBroadcastMedia.base64,
+        mimetype: currentBroadcastMedia.mimetype,
+        fileName: currentBroadcastMedia.fileName
+      };
+    }
 
     const res = await fetch(`${API_BASE}/admin/broadcast/send`, {
       method: 'POST',
@@ -1575,22 +1675,33 @@ async function handleSendBroadcast(e) {
         'Content-Type': 'application/json',
         'x-whatsapp-gateway-url': gatewayUrl
       },
-      body: JSON.stringify({ schoolId: CURRENT_SCHOOL_ID, targetGroup, classId, message, gatewayUrl })
+      body: JSON.stringify(broadcastPayload)
     });
     const data = await res.json();
     if (data.success && data.sentCount > 0) {
       showToast(`🎉 Broadcast delivered to ${data.sentCount} recipients!`);
       document.getElementById('broadcastForm').reset();
+      clearBroadcastMedia();
       initGatewayBadge();
     } else if (data.success && data.sentCount === 0) {
       // Client fallback route to local gateway
       const targetStudents = globalStudents.filter(s => targetGroup === 'all' || s.classId === classId);
-      const batch = targetStudents.filter(s => s.parentPhone).map(s => ({
-        studentId: s.id,
-        studentName: s.name,
-        phone: s.parentPhone,
-        message: message.replace(/{student_name}/g, s.name).replace(/{class_id}/g, s.classId)
-      }));
+      const batch = targetStudents.filter(s => s.parentPhone).map(s => {
+        const item = {
+          studentId: s.id,
+          studentName: s.name,
+          phone: s.parentPhone,
+          message: message.replace(/{student_name}/g, s.name).replace(/{class_id}/g, s.classId)
+        };
+        if (currentBroadcastMedia) {
+          item.media = {
+            base64: currentBroadcastMedia.base64,
+            mimetype: currentBroadcastMedia.mimetype,
+            fileName: currentBroadcastMedia.fileName
+          };
+        }
+        return item;
+      });
 
       if (batch.length > 0) {
         showToast(`📡 Routing broadcast through WhatsApp Gateway (${gatewayUrl})...`);
@@ -1605,6 +1716,7 @@ async function handleSendBroadcast(e) {
           if (gwData.sent > 0) {
             showToast(`🎉 Broadcast delivered to ${gwData.sent} recipients via Gateway!`);
             document.getElementById('broadcastForm').reset();
+            clearBroadcastMedia();
             initGatewayBadge();
             return;
           }
