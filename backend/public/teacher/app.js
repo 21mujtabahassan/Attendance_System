@@ -345,14 +345,15 @@ async function loadAttendanceRoster() {
   `;
 
   try {
+    const headers = { 'Authorization': `Bearer ${currentToken}` };
     // 1. Fetch class students
-    const sRes = await fetch(`${API_BASE}/students?schoolId=${CURRENT_SCHOOL_ID}&classId=${classId}`);
+    const sRes = await fetch(`${API_BASE}/students?schoolId=${CURRENT_SCHOOL_ID}&classId=${classId}`, { headers });
     const sData = await sRes.json();
     currentAttendanceRoster = (sData.students || []).sort((a, b) => (Number(a.rollNumber) || 0) - (Number(b.rollNumber) || 0));
 
     // 2. Fetch existing attendance logs if any
     currentAttendanceMap = {};
-    const logRes = await fetch(`${API_BASE}/attendance/logs?schoolId=${CURRENT_SCHOOL_ID}&classId=${classId}&date=${date}`);
+    const logRes = await fetch(`${API_BASE}/attendance/logs?schoolId=${CURRENT_SCHOOL_ID}&classId=${classId}&date=${date}`, { headers });
     const logData = await logRes.json();
     const existingLogs = logData.logs || [];
     const logMap = {};
@@ -518,8 +519,9 @@ async function handleResultsClassChange() {
   if (!classId) return;
 
   try {
+    const headers = { 'Authorization': `Bearer ${currentToken}` };
     // 1. Fetch Terms
-    const tRes = await fetch(`${API_BASE}/results/terms?schoolId=${CURRENT_SCHOOL_ID}`);
+    const tRes = await fetch(`${API_BASE}/results/terms?schoolId=${CURRENT_SCHOOL_ID}`, { headers });
     const tData = await tRes.json();
     const terms = tData.terms || [];
     termSelect.innerHTML = '<option value="">-- Select Term --</option>' +
@@ -527,7 +529,7 @@ async function handleResultsClassChange() {
     if (terms.length > 0) termSelect.value = terms[0].id;
 
     // 2. Fetch Subjects for Class
-    const sRes = await fetch(`${API_BASE}/classes/${classId}/subjects?schoolId=${CURRENT_SCHOOL_ID}`);
+    const sRes = await fetch(`${API_BASE}/classes/${classId}/subjects?schoolId=${CURRENT_SCHOOL_ID}`, { headers });
     const sData = await sRes.json();
     const subjects = sData.subjects || [];
     subjSelect.innerHTML = '<option value="">-- Select Subject --</option>' +
@@ -566,13 +568,14 @@ async function loadResultsRoster() {
   `;
 
   try {
+    const headers = { 'Authorization': `Bearer ${currentToken}` };
     // 1. Fetch Students
-    const sRes = await fetch(`${API_BASE}/students?schoolId=${CURRENT_SCHOOL_ID}&classId=${classId}`);
+    const sRes = await fetch(`${API_BASE}/students?schoolId=${CURRENT_SCHOOL_ID}&classId=${classId}`, { headers });
     const sData = await sRes.json();
     const students = (sData.students || []).sort((a, b) => (Number(a.rollNumber) || 0) - (Number(b.rollNumber) || 0));
 
     // 2. Fetch Existing Results for Term
-    const rRes = await fetch(`${API_BASE}/results?schoolId=${CURRENT_SCHOOL_ID}&termId=${termId}&classId=${classId}`);
+    const rRes = await fetch(`${API_BASE}/results?schoolId=${CURRENT_SCHOOL_ID}&termId=${termId}&classId=${classId}`, { headers });
     const rData = await rRes.json();
     const existingResults = rData.results || [];
 

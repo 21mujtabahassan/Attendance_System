@@ -507,11 +507,11 @@ app.get('/api/system/status', async (req, res) => {
   });
 });
 
-app.get('/api/schools/:schoolId/students', async (req, res) => {
+app.get(['/api/students', '/api/schools/:schoolId/students'], async (req, res) => {
   try {
     const reqUser = getReqUser(req);
-    const { schoolId } = req.params;
-    let classId = req.query.class;
+    const schoolId = req.params.schoolId || req.query.schoolId || 'unique_scholars';
+    let classId = req.query.classId || req.query.class;
 
     if (reqUser && reqUser.role === 'teacher') {
       const allowed = reqUser.assignedClassIds || [];
@@ -737,7 +737,7 @@ app.get('/api/attendance/logs', async (req, res) => {
 // ACADEMIC RESULTS MODULE ENDPOINTS
 // -------------------------------------------------------------
 
-app.get('/api/admin/results/terms', async (req, res) => {
+app.get(['/api/results/terms', '/api/admin/results/terms'], async (req, res) => {
   try {
     const { schoolId = 'unique_scholars' } = req.query;
     const terms = await getResultTerms(schoolId);
@@ -772,9 +772,11 @@ app.delete('/api/admin/results/terms/:termId', requireAdminOrPrincipal, async (r
   }
 });
 
-app.get('/api/admin/results/subjects', async (req, res) => {
+app.get(['/api/classes/:classId/subjects', '/api/results/subjects', '/api/admin/results/subjects'], async (req, res) => {
   try {
-    const { schoolId = 'unique_scholars', classId, termId } = req.query;
+    const schoolId = req.params.schoolId || req.query.schoolId || 'unique_scholars';
+    const classId = req.params.classId || req.query.classId;
+    const { termId } = req.query;
     const subjects = await getClassSubjects(schoolId, classId, termId);
     res.json({ success: true, subjects });
   } catch (err) {
@@ -804,7 +806,7 @@ app.post('/api/admin/results/subjects', async (req, res) => {
   }
 });
 
-app.get('/api/admin/results/marks', async (req, res) => {
+app.get(['/api/results', '/api/results/marks', '/api/admin/results/marks'], async (req, res) => {
   const reqUser = getReqUser(req);
   const { schoolId = 'unique_scholars', termId, classId, studentId, resultId } = req.query;
 
