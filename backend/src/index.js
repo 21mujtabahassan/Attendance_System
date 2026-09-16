@@ -159,10 +159,13 @@ function startCloudDispatchWorker() {
       }
 
       for (const batch of batchesToProcess) {
-        console.log(`📡 [Cloud Sync Worker] Found queued batch ${batch.id} (${batch.source || 'general'}) with ${batch.messages.length} messages. Telecasting via WhatsApp...`);
+        console.log(`📡 [Human Pacer Dispatcher] Processing batch ${batch.id} (${batch.source || 'general'}) with ${batch.messages.length} message(s)...`);
         const deliveryResults = [];
+        let indexInBatch = 0;
+
         for (const item of batch.messages) {
           if (!item.phone || !item.message) continue;
+          indexInBatch++;
 
           let media = item.media || batch.media || null;
 
@@ -223,6 +226,27 @@ function startCloudDispatchWorker() {
             success: waRes.success,
             error: waRes.error || null
           });
+
+          // Pacing & Anti-Spam Human Texting Simulation between consecutive parents
+          if (indexInBatch < batch.messages.length) {
+            // A. Every 22 messages -> Natural human breathing pause (15s to 24s)
+            if (indexInBatch % 22 === 0) {
+              const breathPauseMs = Math.floor(15000 + Math.random() * 9000);
+              console.log(`☕ [Human Pacer] Natural breathing pause: waiting ${(breathPauseMs / 1000).toFixed(1)}s after 22 messages (${indexInBatch}/${batch.messages.length})...`);
+              await new Promise(r => setTimeout(r, breathPauseMs));
+            }
+            // B. Every 100 messages -> Extended safety cool-down (45s to 65s)
+            else if (indexInBatch % 100 === 0) {
+              const coolDownMs = Math.floor(45000 + Math.random() * 20000);
+              console.log(`🛡️ [Human Pacer] Anti-spam cooling pause: waiting ${(coolDownMs / 1000).toFixed(1)}s (${indexInBatch}/${batch.messages.length})...`);
+              await new Promise(r => setTimeout(r, coolDownMs));
+            }
+            // C. Standard natural human delay between consecutive parents (2.8s to 5.6s with non-linear jitter)
+            else {
+              const naturalDelayMs = Math.floor(2800 + Math.random() * 2800);
+              await new Promise(r => setTimeout(r, naturalDelayMs));
+            }
+          }
         }
 
         // Mark complete locally in database
@@ -412,6 +436,9 @@ app.post('/api/whatsapp/dispatch-batch', async (req, res) => {
         messageId: waRes.messageId || null,
         routedVia: waRes.routedVia || 'unknown'
       });
+      if (messages.indexOf(item) < messages.length - 1) {
+        await new Promise(r => setTimeout(r, Math.floor(2200 + Math.random() * 2200)));
+      }
     }
 
     res.json({
@@ -695,27 +722,37 @@ ${school.name}`;
         phone: item.parentPhone,
         message
       });
+    }
 
-      const result = await sendWhatsAppMessage(item.parentPhone, message, schoolId, gatewayUrl);
-      whatsappResults.push({
-        studentId: item.studentId,
-        name: item.name,
-        parentPhone: item.parentPhone,
-        success: result.success,
-        error: result.error || null,
-        routedVia: result.routedVia || 'unknown'
-      });
+    let queuedRecord = null;
+    // If running on Vercel OR if more than 2 absent alerts to send:
+    // Queue immediately to addPendingDispatches so the teacher's UI locks instantly (<200ms)
+    // while the background human pacer delivers each message with natural typing delays and anti-spam intervals!
+    if (process.env.VERCEL || pendingBatch.length > 2) {
+      if (pendingBatch.length > 0) {
+        queuedRecord = await addPendingDispatches(schoolId, pendingBatch, 'attendance');
+        console.log(`Queued ${pendingBatch.length} attendance alerts for human-paced WhatsApp telecast (Batch: ${queuedRecord?.id})`);
+      }
+    } else {
+      // 1 or 2 absent students on local server: send directly with natural typing latency
+      for (const item of pendingBatch) {
+        const result = await sendWhatsAppMessage(item.phone, item.message, schoolId, gatewayUrl);
+        whatsappResults.push({
+          studentId: item.studentId,
+          name: item.studentName,
+          parentPhone: item.phone,
+          success: result.success,
+          error: result.error || null,
+          routedVia: result.routedVia || 'unknown'
+        });
+        if (pendingBatch.length > 1) {
+          await new Promise(r => setTimeout(r, Math.floor(2500 + Math.random() * 2000)));
+        }
+      }
     }
 
     const dispatchedCount = whatsappResults.filter(r => r.success).length;
     const failedCount = whatsappResults.filter(r => !r.success).length;
-
-    // Queue for persistent cloud sync worker if direct dispatches didn't go through (e.g. running on Vercel)
-    let queuedRecord = null;
-    if (dispatchedCount === 0 && pendingBatch.length > 0) {
-      queuedRecord = await addPendingDispatches(schoolId, pendingBatch, 'attendance');
-      console.log(`Queued ${pendingBatch.length} attendance alerts for persistent WhatsApp gateway telecast (Batch: ${queuedRecord?.id})`);
-    }
 
     res.json({
       success: true,
@@ -952,32 +989,44 @@ ${school.name}`;
         media: pdfMedia ? { base64: pdfMedia.base64, mimetype: pdfMedia.mimetype, fileName: pdfMedia.fileName } : null
       });
 
-      const waRes = await sendWhatsAppMessage(item.parentPhone, message, schoolId, gatewayUrl, pdfMedia);
-      whatsappDetails.push({
-        studentId: item.studentId,
-        studentName: item.studentName,
-        parentPhone: item.parentPhone,
-        success: waRes.success,
-        error: waRes.error || null,
-        routedVia: waRes.routedVia || 'unknown'
-      });
+    }
+
+    let queuedRecord = null;
+    // If running on Vercel OR if more than 2 report cards to send:
+    // Queue immediately to addPendingDispatches so the teacher's UI locks instantly (<200ms)
+    // while the background human pacer delivers each marksheet with natural typing delays and anti-spam intervals!
+    if (process.env.VERCEL || pendingBatch.length > 2) {
+      if (pendingBatch.length > 0) {
+        queuedRecord = await addPendingDispatches(schoolId, pendingBatch, 'results');
+        console.log(`Queued ${pendingBatch.length} academic marksheets for safe human-paced WhatsApp telecast (Batch: ${queuedRecord?.id})`);
+      }
+    } else {
+      for (const item of pendingBatch) {
+        const waRes = await sendWhatsAppMessage(item.phone, item.message, schoolId, gatewayUrl, item.media);
+        whatsappDetails.push({
+          studentId: item.studentId,
+          studentName: item.studentName,
+          parentPhone: item.phone,
+          success: waRes.success,
+          error: waRes.error || null,
+          routedVia: waRes.routedVia || 'unknown'
+        });
+        if (pendingBatch.length > 1) {
+          await new Promise(r => setTimeout(r, Math.floor(2500 + Math.random() * 2000)));
+        }
+      }
     }
 
     const dispatchedCount = whatsappDetails.filter(w => w.success).length;
     const failedCount = whatsappDetails.filter(w => !w.success).length;
 
-    // If serverless could not dispatch directly, queue the batch for the persistent worker to telecast!
-    let queuedRecord = null;
-    if (dispatchedCount === 0 && pendingBatch.length > 0) {
-      queuedRecord = await addPendingDispatches(schoolId, pendingBatch);
-      console.log(`Queued ${pendingBatch.length} marksheets for persistent WhatsApp gateway telecast (Batch: ${queuedRecord?.id})`);
-    }
-
     res.json({
       success: true,
-      message: dispatchedCount > 0
-        ? `Final Academic Results locked and ${dispatchedCount} WhatsApp Report Cards dispatched!`
-        : `Final Academic Results locked! Queued ${pendingBatch.length} WhatsApp report cards for gateway telecast.`,
+      message: (queuedRecord || pendingBatch.length > 2)
+        ? `Final Academic Results locked! Queued ${pendingBatch.length} WhatsApp report cards for safe human-paced telecast.`
+        : (dispatchedCount > 0
+          ? `Final Academic Results locked and ${dispatchedCount} WhatsApp Report Cards dispatched!`
+          : `Final Academic Results locked!`),
       state: 'FINALIZED',
       totalFinalized: finalizedResults.length,
       whatsappDispatched: dispatchedCount,
@@ -1826,31 +1875,43 @@ app.post('/api/admin/broadcast/send', async (req, res) => {
       };
       if (media) batchItem.media = media;
       pendingBatch.push(batchItem);
+    }
 
-      const waRes = await sendWhatsAppMessage(student.parentPhone, formattedMessage, schoolId, gatewayUrl, media);
-      results.push({
-        studentId: student.id,
-        name: student.name,
-        phone: student.parentPhone,
-        success: waRes.success,
-        error: waRes.error || null,
-        hasAttachment: !!media,
-        routedVia: waRes.routedVia || 'unknown'
-      });
+    let queuedRecord = null;
+    // If running on Vercel OR if more than 2 recipients:
+    // Queue immediately to addPendingDispatches so the admin dashboard finishes instantly (<200ms)
+    // while the background human pacer delivers each message with natural typing delays and anti-spam intervals!
+    if (process.env.VERCEL || pendingBatch.length > 2) {
+      if (pendingBatch.length > 0) {
+        queuedRecord = await addPendingDispatches(schoolId, pendingBatch, 'broadcast', media);
+        console.log(`Queued ${pendingBatch.length} broadcast messages for safe human-paced WhatsApp telecast (Batch: ${queuedRecord?.id})`);
+      }
+    } else {
+      for (const item of pendingBatch) {
+        const waRes = await sendWhatsAppMessage(item.phone, item.message, schoolId, gatewayUrl, item.media);
+        results.push({
+          studentId: item.studentId,
+          name: item.studentName,
+          phone: item.phone,
+          success: waRes.success,
+          error: waRes.error || null,
+          hasAttachment: !!item.media,
+          routedVia: waRes.routedVia || 'unknown'
+        });
+        if (pendingBatch.length > 1) {
+          await new Promise(r => setTimeout(r, Math.floor(2500 + Math.random() * 2000)));
+        }
+      }
     }
 
     const sentCount = results.filter(r => r.success).length;
     const failedCount = results.filter(r => !r.success).length;
 
-    let queuedRecord = null;
-    if (sentCount === 0 && pendingBatch.length > 0) {
-      queuedRecord = await addPendingDispatches(schoolId, pendingBatch, 'broadcast', media);
-      console.log(`Queued ${pendingBatch.length} broadcast messages for persistent WhatsApp gateway telecast (Batch: ${queuedRecord?.id})`);
-    }
-
     res.json({
       success: true,
-      message: `Broadcast message dispatched to ${results.length} recipients.`,
+      message: queuedRecord
+        ? `Broadcast of ${pendingBatch.length} message(s) queued for safe, human-paced WhatsApp delivery.`
+        : `Broadcast message dispatched to ${results.length} recipients.`,
       sentCount,
       failedCount,
       queuedCount: queuedRecord ? pendingBatch.length : 0,
@@ -2408,32 +2469,44 @@ Accounts Office: Unique Scholars High School`;
         studentId: item.studentId,
         studentName: item.studentName,
         phone: item.parentPhone,
-        message: reminderMsg
+        message: reminderMsg,
+        dueId: item.id
       });
+    }
 
-      const waRes = await sendWhatsAppMessage(item.parentPhone, reminderMsg, schoolId, gatewayUrl);
-      results.push({
-        studentId: item.studentId,
-        studentName: item.studentName,
-        phone: item.parentPhone,
-        success: waRes.success,
-        error: waRes.error || null,
-        balanceDue: item.balanceDue
-      });
+    let queuedRecord = null;
+    // If running on Vercel OR if more than 2 reminders to send:
+    // Queue immediately to addPendingDispatches so the admin dashboard finishes instantly (<200ms)
+    // while the background human pacer delivers each message with natural typing delays and anti-spam intervals!
+    if (process.env.VERCEL || pendingBatch.length > 2) {
+      if (pendingBatch.length > 0) {
+        queuedRecord = await addPendingDispatches(schoolId, pendingBatch, 'fee_reminder');
+        console.log(`Queued ${pendingBatch.length} fee reminders for safe human-paced WhatsApp telecast (Batch: ${queuedRecord?.id})`);
+      }
+    } else {
+      for (const item of pendingBatch) {
+        const waRes = await sendWhatsAppMessage(item.phone, item.message, schoolId, gatewayUrl);
+        results.push({
+          studentId: item.studentId,
+          studentName: item.studentName,
+          phone: item.phone,
+          success: waRes.success,
+          error: waRes.error || null
+        });
+        if (pendingBatch.length > 1) {
+          await new Promise(r => setTimeout(r, Math.floor(2500 + Math.random() * 2000)));
+        }
+      }
     }
 
     const sentCount = results.filter(r => r.success).length;
     const failedCount = results.filter(r => !r.success).length;
 
-    let queuedRecord = null;
-    if (sentCount === 0 && pendingBatch.length > 0) {
-      queuedRecord = await addPendingDispatches(schoolId, pendingBatch, 'fee_reminder');
-      console.log(`Queued ${pendingBatch.length} fee reminders for WhatsApp gateway telecast (Batch: ${queuedRecord?.id})`);
-    }
-
     res.json({
       success: true,
-      message: `Fee reminders dispatched to ${results.length} parent(s).`,
+      message: queuedRecord
+        ? `Successfully queued ${pendingBatch.length} fee reminder(s) for safe, human-paced WhatsApp delivery.`
+        : `Fee reminders dispatched to ${results.length} parent(s).`,
       sentCount,
       failedCount,
       queuedCount: queuedRecord ? pendingBatch.length : 0,

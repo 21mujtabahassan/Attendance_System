@@ -430,6 +430,20 @@ async function sendWhatsAppMessage(phone, message, schoolId = 'unique_scholars',
     }
 
     try {
+      // 1. Natural Human Texting Simulation: Send "composing" (typing...) presence to recipient
+      try {
+        await sess.sock.sendPresenceUpdate('composing', jid);
+      } catch (presErr) { }
+
+      // 2. Realistic Human Typing Duration with Non-linear Jitter
+      // Calculates reading/composing time based on message length:
+      // ~50 chars -> 1.3s - 2.0s
+      // ~150 chars -> 2.0s - 2.9s
+      // ~350 chars -> 3.0s - 3.8s
+      const charCount = (message && message.length) || 60;
+      const baseTypingMs = Math.min(3800, Math.max(1200, Math.floor(charCount * 11 + Math.random() * 850)));
+      await new Promise(r => setTimeout(r, baseTypingMs));
+
       let msgPayload;
       if (docBuffer) {
         if (media && media.mimetype && media.mimetype.startsWith('image/')) {
@@ -450,8 +464,14 @@ async function sendWhatsAppMessage(phone, message, schoolId = 'unique_scholars',
       }
 
       const result = await sess.sock.sendMessage(jid, msgPayload);
+
+      // 3. Clear typing presence ("paused")
+      try {
+        await sess.sock.sendPresenceUpdate('paused', jid);
+      } catch (presErr) { }
+
       const mediaTypeDesc = docBuffer ? (media && media.mimetype && media.mimetype.startsWith('image/') ? 'Image Photo' : 'Document Attachment') : 'Message';
-      console.log(`📩 [${schoolId}] WhatsApp ${mediaTypeDesc} sent to parent at ${phone} (JID: ${jid})`);
+      console.log(`📩 [${schoolId}] WhatsApp ${mediaTypeDesc} sent to parent at ${phone} (JID: ${jid}) [typed ${(baseTypingMs / 1000).toFixed(1)}s]`);
       return {
         success: true,
         messageId: result?.key?.id || `MSG-${Date.now()}`,
