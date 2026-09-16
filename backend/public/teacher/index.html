@@ -17,7 +17,7 @@
 
   <!-- FontAwesome 6 & CSS -->
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
-  <link rel="stylesheet" href="style.css?v=3">
+  <link rel="stylesheet" href="style.css?v=4">
 </head>
 <body>
 
@@ -90,7 +90,7 @@
          ----------------------------------------------------------------- -->
     <div id="authenticatedApp" style="display: none; flex-direction: column; flex: 1;">
 
-      <!-- Top Pinned Header -->
+      <!-- Top Pinned Header (Matches Mobile App) -->
       <header id="appHeader">
         <div class="header-brand">
           <div class="header-avatar" id="headerAvatar">T</div>
@@ -100,15 +100,28 @@
           </div>
         </div>
         <div class="header-tools" style="display: flex; align-items: center; gap: 8px;">
-          <button type="button" id="btnSyncData" onclick="syncAllTeacherData()" title="Sync Data" style="background: rgba(15, 41, 66, 0.08); border: none; color: var(--color-primary); font-size: 14px; width: 32px; height: 32px; border-radius: 50%; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: all 0.2s ease;">
+          <!-- WA STATUS BADGE (Clickable) -->
+          <button type="button" class="wa-badge offline" id="headerWaBadge" onclick="openModal('waStatusModal')" title="WhatsApp Gateway Status">
+            <div class="status-dot offline" id="waStatusDot"></div>
+            <span id="waStatusText">WA Offline</span>
+          </button>
+          
+          <button type="button" id="btnSyncData" onclick="syncAllTeacherData()" title="Sync Data" class="header-icon-btn">
             <i class="fa-solid fa-rotate"></i>
           </button>
-          <div class="header-badge">
-            <div class="online-dot"></div>
-            <span id="onlineStatusText">Online</span>
-          </div>
         </div>
       </header>
+
+      <!-- LIVE DIGITAL CLOCK & BACKEND STATUS BAR (Exact Expo Parity) -->
+      <div class="clock-bar">
+        <div class="clock-text" id="liveClockText">
+          <i class="fa-regular fa-clock"></i> <span id="clockDateTime">Syncing time...</span>
+        </div>
+        <div class="backend-pill" id="backendPill" onclick="openModal('gatewaySettingsModal')" title="Click to configure Gateway IP">
+          <span class="backend-dot cloud" id="backendDot"></span>
+          <span id="backendText">Detecting server...</span>
+        </div>
+      </div>
 
       <!-- VIEW 1: DASHBOARD -->
       <main class="view-screen" id="viewDashboard">
@@ -141,9 +154,14 @@
 
       <!-- VIEW 2: ATTENDANCE MARKING -->
       <main class="view-screen" id="viewAttendance">
+        <!-- Class chips horizontal scroller -->
+        <div class="class-chips-wrapper" id="classChipsWrapper">
+          <div id="attendanceClassChips"></div>
+        </div>
+
         <div class="filter-bar-card">
           <div class="selector-row">
-            <select id="attendanceClassSelect" class="custom-select" onchange="loadAttendanceRoster()">
+            <select id="attendanceClassSelect" class="custom-select" onchange="handleClassChange(this.value)">
               <option value="">-- Choose Class --</option>
             </select>
             <input type="date" id="attendanceDateInput" class="custom-select" onchange="loadAttendanceRoster()" style="max-width: 140px;">
@@ -161,30 +179,38 @@
             <span class="counter-badge absent" id="countAbsent">0</span>
           </div>
           <div class="counter-item">
-            <span>Late:</span>
+            <span>Leave:</span>
             <span class="counter-badge late" id="countLate">0</span>
           </div>
         </div>
 
-        <!-- Fast Helper Row -->
+        <!-- Fast Helper Row with Mobile Quick Actions -->
         <div class="quick-helpers-row">
-          <span style="font-size: 13px; font-weight: 700; color: var(--color-primary);" id="rosterTitle">Class Roster</span>
-          <button type="button" class="btn-text-helper" onclick="markAllPresent()">
-            <i class="fa-solid fa-check-double"></i> Mark All Present
+          <button type="button" class="quick-btn-present" onclick="markAllPresent()">
+            <i class="fa-solid fa-check-double"></i> All Present
+          </button>
+          <button type="button" class="quick-btn-absent" onclick="markAllAbsent()">
+            <i class="fa-solid fa-xmark"></i> All Absent
           </button>
         </div>
 
         <!-- Student Roster List -->
-        <div id="attendanceRosterContainer" style="padding-bottom: 70px;">
+        <div id="attendanceRosterContainer" style="padding-bottom: 85px;">
           <p class="text-muted" style="text-align: center; padding: 30px;">Select a class to load student roster.</p>
         </div>
 
-        <!-- Sticky Submit Bar -->
+        <!-- Sticky Dual Action Submit Bar (Draft + Finalize) -->
         <div class="sticky-submit-bar">
-          <button type="button" class="btn-primary" id="btnSubmitAttendance" onclick="submitAttendance()">
-            <i class="fa-solid fa-paper-plane"></i>
-            <span>Save & Submit Attendance</span>
-          </button>
+          <div style="display: grid; grid-template-columns: 1fr 1.3fr; gap: 10px; width: 100%;">
+            <button type="button" class="btn-draft" id="btnDraftAttendance" onclick="saveAttendanceDraft()">
+              <i class="fa-solid fa-floppy-disk"></i>
+              <span>Save Draft</span>
+            </button>
+            <button type="button" class="btn-finalize" id="btnSubmitAttendance" onclick="openAttendanceConfirmModal()">
+              <i class="fa-solid fa-lock"></i>
+              <span>Finalize & Lock</span>
+            </button>
+          </div>
         </div>
       </main>
 
@@ -213,7 +239,7 @@
 
         <!-- Sticky Submit Bar -->
         <div class="sticky-submit-bar" id="resultsSubmitBar" style="display: none;">
-          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; width: 100%;">
             <button type="button" class="btn-secondary" onclick="saveResults(false)">
               <i class="fa-solid fa-floppy-disk"></i> Save Draft
             </button>
@@ -224,7 +250,28 @@
         </div>
       </main>
 
-      <!-- VIEW 4: MINIMAL PROFILE -->
+      <!-- VIEW 4: ATTENDANCE AUDIT LOGS & REPORTS (Expo Parity) -->
+      <main class="view-screen" id="viewLogs">
+        <div class="filter-bar-card">
+          <div class="selector-row">
+            <select id="logsClassSelect" class="custom-select" onchange="loadAttendanceLogsView()">
+              <option value="">-- All Classes --</option>
+            </select>
+            <input type="date" id="logsDateInput" class="custom-select" onchange="loadAttendanceLogsView()" style="max-width: 140px;">
+          </div>
+        </div>
+
+        <div class="section-title">
+          <span>Attendance Audit History</span>
+          <span style="font-size: 12px; font-weight: 600; color: var(--text-muted);" id="logsCountBadge">0 Records</span>
+        </div>
+
+        <div id="logsContainer" style="padding-bottom: 70px;">
+          <p class="text-muted" style="text-align: center; padding: 30px;">Loading attendance records...</p>
+        </div>
+      </main>
+
+      <!-- VIEW 5: MINIMAL PROFILE -->
       <main class="view-screen" id="viewProfile">
         <div class="profile-card">
           <div class="profile-avatar-large" id="profileAvatarLarge">T</div>
@@ -263,6 +310,10 @@
           <i class="fa-solid fa-chart-simple"></i>
           <span>Results</span>
         </button>
+        <button type="button" class="nav-tab" id="navLogs" onclick="switchView('viewLogs')">
+          <i class="fa-solid fa-clock-rotate-left"></i>
+          <span>Reports</span>
+        </button>
         <button type="button" class="nav-tab" id="navProfile" onclick="switchView('viewProfile')">
           <i class="fa-solid fa-user"></i>
           <span>Profile</span>
@@ -273,6 +324,105 @@
   </div>
 
   <!-- =====================================================================
+       3. MODALS & BOTTOM SHEETS
+       ===================================================================== -->
+
+  <!-- Attendance Final Lock Confirmation Modal -->
+  <div class="modal-backdrop" id="attendanceConfirmModal" onclick="closeModalOnBackdrop(event, 'attendanceConfirmModal')">
+    <div class="modal-bottom-sheet">
+      <div class="sheet-handle"></div>
+      <div class="sheet-header">
+        <h3 class="sheet-title">Final Submission Lock 🔒</h3>
+        <button type="button" class="sheet-close-btn" onclick="closeModal('attendanceConfirmModal')">
+          <i class="fa-solid fa-xmark"></i>
+        </button>
+      </div>
+      <div style="font-size: 14px; line-height: 1.6; margin-bottom: 16px;">
+        <p style="font-weight: 700; color: var(--color-primary); margin-bottom: 8px;" id="confirmModalClassInfo">Class: -</p>
+        <div style="background: var(--bg-subtle); border-radius: var(--radius-sm); padding: 12px; border: 1px solid var(--border-color); margin-bottom: 12px;">
+          <div style="display: flex; justify-content: space-between; margin-bottom: 6px;">
+            <span>✅ Present Students:</span> <strong id="confirmPresentCount" style="color: var(--status-present);">0</strong>
+          </div>
+          <div style="display: flex; justify-content: space-between; margin-bottom: 6px;">
+            <span>❌ Absent Students:</span> <strong id="confirmAbsentCount" style="color: var(--status-absent);">0</strong>
+          </div>
+          <div style="display: flex; justify-content: space-between;">
+            <span>⏳ On Leave:</span> <strong id="confirmLeaveCount" style="color: var(--status-late);">0</strong>
+          </div>
+        </div>
+        <p style="font-size: 12px; color: var(--status-absent); font-weight: 600; display: flex; align-items: center; gap: 6px;">
+          <i class="fa-solid fa-triangle-exclamation"></i>
+          <span>Absent student parents will automatically receive WhatsApp alerts.</span>
+        </p>
+      </div>
+      <div style="display: grid; grid-template-columns: 1fr 1.3fr; gap: 10px;">
+        <button type="button" class="btn-secondary" onclick="closeModal('attendanceConfirmModal')">Cancel</button>
+        <button type="button" class="btn-finalize" id="btnConfirmSubmitAttendance" onclick="executeFinalAttendanceSubmit()" style="margin-top: 0;">
+          <span>Confirm & Lock</span>
+          <i class="fa-solid fa-paper-plane"></i>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- WhatsApp Gateway Status Modal -->
+  <div class="modal-backdrop" id="waStatusModal" onclick="closeModalOnBackdrop(event, 'waStatusModal')">
+    <div class="modal-bottom-sheet">
+      <div class="sheet-handle"></div>
+      <div class="sheet-header">
+        <h3 class="sheet-title">WhatsApp Gateway 📡</h3>
+        <button type="button" class="sheet-close-btn" onclick="closeModal('waStatusModal')">
+          <i class="fa-solid fa-xmark"></i>
+        </button>
+      </div>
+      <div style="padding: 6px 0 16px 0;">
+        <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 12px;">
+          <div class="status-dot offline" id="modalWaStatusDot" style="width: 12px; height: 12px;"></div>
+          <span id="modalWaStatusText" style="font-weight: 800; font-size: 15px;">Checking WhatsApp...</span>
+        </div>
+        <p style="font-size: 13px; color: var(--text-muted); line-height: 1.5; margin-bottom: 14px;" id="modalWaStatusDesc">
+          Connecting to local Baileys engine...
+        </p>
+        <div style="background: var(--bg-subtle); padding: 10px 14px; border-radius: var(--radius-sm); border: 1px solid var(--border-color); font-size: 12px; margin-bottom: 14px;">
+          <div><strong>Active Server:</strong> <span id="modalWaGatewayUrl" style="word-break: break-all;">-</span></div>
+          <div style="margin-top: 4px;"><strong>School:</strong> <span>Unique Scholars Academy</span></div>
+        </div>
+        <button type="button" class="btn-primary" onclick="checkWhatsAppStatus(true)">
+          <i class="fa-solid fa-rotate"></i> <span>Refresh Gateway Status</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Server & Gateway Config Modal -->
+  <div class="modal-backdrop" id="gatewaySettingsModal" onclick="closeModalOnBackdrop(event, 'gatewaySettingsModal')">
+    <div class="modal-bottom-sheet">
+      <div class="sheet-handle"></div>
+      <div class="sheet-header">
+        <h3 class="sheet-title">Network & Server Info</h3>
+        <button type="button" class="sheet-close-btn" onclick="closeModal('gatewaySettingsModal')">
+          <i class="fa-solid fa-xmark"></i>
+        </button>
+      </div>
+      <div style="padding: 6px 0 16px 0;">
+        <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 12px; line-height: 1.5;">
+          The Teacher PWA automatically connects to the local school server on Wi-Fi for instantaneous WhatsApp dispatches, with transparent fallback to Vercel Cloud.
+        </p>
+        <div class="form-group" style="margin-bottom: 14px;">
+          <label class="form-label">Local Server / Gateway URL</label>
+          <input type="text" id="manualGatewayInput" class="form-input" placeholder="http://192.168.100.37:3000" style="padding-left: 14px;">
+        </div>
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+          <button type="button" class="btn-secondary" onclick="autoDetectGateway(true)">
+            <i class="fa-solid fa-wand-magic-sparkles"></i> Auto-Detect
+          </button>
+          <button type="button" class="btn-primary" onclick="saveManualGateway()" style="margin-top: 0;">
+            <i class="fa-solid fa-check"></i> Save URL
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
        3. MODALS & BOTTOM SHEETS
        ===================================================================== -->
 
@@ -321,6 +471,6 @@
   </div>
 
   <!-- Application Logic -->
-  <script src="app.js?v=3"></script>
+  <script src="app.js?v=4"></script>
 </body>
 </html>

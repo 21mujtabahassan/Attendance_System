@@ -1146,3 +1146,299 @@ body {
   background: #991B1B;
   border: 1px solid #EF4444;
 }
+
+/* =====================================================================
+   12. MOBILE-FIRST ENHANCEMENTS (EXPO PARITY)
+   ===================================================================== */
+
+/* WhatsApp Header Badge */
+.wa-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 11px;
+  border-radius: var(--radius-full);
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: all 0.2s ease;
+  background-color: #7f1d1d;
+  color: #f87171;
+}
+
+.wa-badge.online {
+  background-color: #064e3b;
+  color: #34d399;
+  border-color: rgba(52, 211, 153, 0.3);
+}
+
+.wa-badge.offline {
+  background-color: #7f1d1d;
+  color: #f87171;
+  border-color: rgba(248, 113, 113, 0.3);
+}
+
+.status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background-color: #f87171;
+}
+
+.status-dot.online {
+  background-color: #34d399;
+  box-shadow: 0 0 6px #34d399;
+}
+
+.header-icon-btn {
+  background: rgba(15, 41, 66, 0.08);
+  border: none;
+  color: var(--color-primary);
+  font-size: 13px;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+}
+
+.header-icon-btn:active {
+  transform: scale(0.92);
+  background: rgba(15, 41, 66, 0.15);
+}
+
+/* Live Digital Clock & Backend Server Bar */
+.clock-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: #0f172a;
+  color: #94a3b8;
+  padding: 8px 16px;
+  font-size: 11px;
+  font-weight: 600;
+  border-bottom: 1px solid #1e293b;
+}
+
+.clock-text {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #e2e8f0;
+  font-family: monospace, monospace;
+}
+
+.backend-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 9px;
+  background: #1e293b;
+  border: 1px solid #334155;
+  border-radius: var(--radius-full);
+  font-size: 10px;
+  font-weight: 700;
+  color: #cbd5e1;
+  cursor: pointer;
+}
+
+.backend-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background-color: #38bdf8;
+}
+
+.backend-dot.local {
+  background-color: #10b981;
+  box-shadow: 0 0 6px #10b981;
+}
+
+.backend-dot.cloud {
+  background-color: #38bdf8;
+}
+
+/* Class Chips Horizontal Scroller */
+.class-chips-wrapper {
+  overflow-x: auto;
+  white-space: nowrap;
+  padding: 8px 0 4px 0;
+  margin-bottom: 4px;
+  -webkit-overflow-scrolling: touch;
+}
+
+.class-chips-wrapper::-webkit-scrollbar {
+  display: none;
+}
+
+.class-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 7px 14px;
+  margin-right: 8px;
+  background: var(--bg-card);
+  border: 1.5px solid var(--border-color);
+  border-radius: var(--radius-full);
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-main);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.class-chip.active {
+  background: var(--color-primary);
+  border-color: var(--color-primary);
+  color: #FFFFFF;
+  box-shadow: var(--shadow-sm);
+}
+
+/* Quick Action Buttons (All Present / All Absent) */
+.quick-btn-present {
+  background: var(--status-present-bg);
+  border: 1px solid var(--status-present-border);
+  color: var(--status-present);
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  padding: 6px 14px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  transition: all 0.15s ease;
+}
+
+.quick-btn-present:active {
+  background: var(--status-present);
+  color: #FFFFFF;
+}
+
+.quick-btn-absent {
+  background: var(--status-absent-bg);
+  border: 1px solid var(--status-absent-border);
+  color: var(--status-absent);
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  padding: 6px 14px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  transition: all 0.15s ease;
+}
+
+.quick-btn-absent:active {
+  background: var(--status-absent);
+  color: #FFFFFF;
+}
+
+/* Dual Action Buttons for Attendance (Save Draft + Lock) */
+.btn-draft {
+  background: #FFFFFF;
+  border: 1.5px solid var(--border-color);
+  color: var(--color-primary);
+  font-family: inherit;
+  font-weight: 700;
+  font-size: 13px;
+  border-radius: var(--radius-md);
+  height: 48px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  transition: all 0.15s ease;
+}
+
+.btn-draft:active {
+  background: var(--bg-subtle);
+  transform: scale(0.98);
+}
+
+.btn-finalize {
+  background: linear-gradient(135deg, var(--color-primary), var(--color-primary-light));
+  color: #FFFFFF;
+  border: none;
+  font-family: inherit;
+  font-weight: 700;
+  font-size: 14px;
+  border-radius: var(--radius-md);
+  height: 48px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  box-shadow: var(--shadow-md);
+  transition: all 0.15s ease;
+}
+
+.btn-finalize:active {
+  transform: scale(0.98);
+  box-shadow: var(--shadow-sm);
+}
+
+/* Reports & Audit Logs List Items */
+.log-item-card {
+  background: #FFFFFF;
+  border: 1.5px solid var(--border-color);
+  border-radius: var(--radius-md);
+  padding: 12px 14px;
+  margin-bottom: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  box-shadow: var(--shadow-sm);
+}
+
+.log-item-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.log-student-name {
+  font-size: 14px;
+  font-weight: 800;
+  color: var(--text-main);
+}
+
+.log-meta-text {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.log-badge {
+  padding: 4px 10px;
+  border-radius: var(--radius-full);
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.log-badge.present {
+  background-color: var(--status-present-bg);
+  color: var(--status-present);
+  border: 1px solid var(--status-present-border);
+}
+
+.log-badge.absent {
+  background-color: var(--status-absent-bg);
+  color: var(--status-absent);
+  border: 1px solid var(--status-absent-border);
+}
+
+.log-badge.late {
+  background-color: var(--status-late-bg);
+  color: var(--status-late);
+  border: 1px solid var(--status-late-border);
+}
+
