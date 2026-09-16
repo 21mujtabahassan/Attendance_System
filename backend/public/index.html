@@ -1473,11 +1473,20 @@
         </div>
 
         <div class="form-group" style="margin-bottom: 14px;">
-          <label>Assign Class Incharge</label>
-          <select id="teacherInchargeClass">
-            <option value="">-- No Class Incharge (General Staff) --</option>
-          </select>
-          <small class="text-muted">Teacher will have direct attendance & marksheet access restricted to this class.</small>
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+            <label style="font-weight: 600; margin: 0;"><i class="fa-solid fa-chalkboard-user"></i> Assigned Class(es) *</label>
+            <div style="display: flex; gap: 8px; font-size: 11px;">
+              <span style="color: var(--primary); cursor: pointer; text-decoration: underline;" onclick="toggleSelectAllTeacherClasses('addTeacherClassesList', true)">Select All</span>
+              <span style="color: var(--text-muted);">|</span>
+              <span style="color: var(--text-muted); cursor: pointer; text-decoration: underline;" onclick="toggleSelectAllTeacherClasses('addTeacherClassesList', false)">Clear</span>
+            </div>
+          </div>
+          <div id="addTeacherClassesList" style="max-height: 130px; overflow-y: auto; padding: 8px 10px; background: rgba(15, 23, 42, 0.6); border: 1px solid var(--border-color); border-radius: var(--radius-md); display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 8px;">
+            <!-- Checkbox chips injected dynamically -->
+          </div>
+          <small class="text-muted" style="display: block; margin-top: 4px; font-size: 11px;">
+            Select one or more classes for this teacher. They will have full attendance & marksheet access for all checked classes.
+          </small>
         </div>
 
         <div class="modal-actions" style="margin-top: 20px;">
@@ -1533,20 +1542,29 @@
           </div>
         </div>
 
-        <div class="grid-2-col" style="gap: 14px; margin-bottom: 14px;">
-          <div class="form-group">
-            <label>Class Incharge</label>
-            <select id="editTeacherInchargeClass">
-              <option value="">-- No Class Incharge --</option>
-            </select>
+        <div class="form-group" style="margin-bottom: 14px;">
+          <label>Account Status</label>
+          <select id="editTeacherActiveStatus">
+            <option value="true">Active (Allowed to Login)</option>
+            <option value="false">Suspended / Inactive</option>
+          </select>
+        </div>
+
+        <div class="form-group" style="margin-bottom: 14px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+            <label style="font-weight: 600; margin: 0;"><i class="fa-solid fa-chalkboard-user"></i> Assigned Class(es) *</label>
+            <div style="display: flex; gap: 8px; font-size: 11px;">
+              <span style="color: var(--primary); cursor: pointer; text-decoration: underline;" onclick="toggleSelectAllTeacherClasses('editTeacherClassesList', true)">Select All</span>
+              <span style="color: var(--text-muted);">|</span>
+              <span style="color: var(--text-muted); cursor: pointer; text-decoration: underline;" onclick="toggleSelectAllTeacherClasses('editTeacherClassesList', false)">Clear</span>
+            </div>
           </div>
-          <div class="form-group">
-            <label>Account Status</label>
-            <select id="editTeacherActiveStatus">
-              <option value="true">Active (Allowed to Login)</option>
-              <option value="false">Suspended / Inactive</option>
-            </select>
+          <div id="editTeacherClassesList" style="max-height: 130px; overflow-y: auto; padding: 8px 10px; background: rgba(15, 23, 42, 0.6); border: 1px solid var(--border-color); border-radius: var(--radius-md); display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 8px;">
+            <!-- Checkbox chips injected dynamically -->
           </div>
+          <small class="text-muted" style="display: block; margin-top: 4px; font-size: 11px;">
+            Check all classes this faculty member will manage. You can assign 1, 2, 3, or multiple classes to a single teacher.
+          </small>
         </div>
 
         <div class="modal-actions" style="margin-top: 20px;">

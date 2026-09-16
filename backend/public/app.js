@@ -563,15 +563,32 @@ function populateClassDropdowns() {
 }
 
 function populateTeacherClassDropdowns() {
-  const addSelect = document.getElementById('teacherInchargeClass');
-  const editSelect = document.getElementById('editTeacherInchargeClass');
-  let html = '<option value="">-- No Class Incharge (General Staff) --</option>';
-  globalClasses.forEach(c => {
-    const inchargeInfo = c.inchargeTeacher ? ` (Currently: ${escapeHtml(c.inchargeTeacher.fullName)})` : '';
-    html += `<option value="${c.id}">${escapeHtml(c.name)}${inchargeInfo}</option>`;
-  });
-  if (addSelect) addSelect.innerHTML = html;
-  if (editSelect) editSelect.innerHTML = html;
+  const addContainer = document.getElementById('addTeacherClassesList');
+  const editContainer = document.getElementById('editTeacherClassesList');
+
+  const renderClassCheckboxes = (container, prefix) => {
+    if (!container) return;
+    if (!globalClasses || globalClasses.length === 0) {
+      container.innerHTML = '<p class="text-muted" style="grid-column: 1 / -1; font-size: 11px; margin: 4px 0;">No classes found. Add classes in Classes tab first.</p>';
+      return;
+    }
+    container.innerHTML = globalClasses.map(c => `
+      <label class="class-checkbox-pill" style="display: flex; align-items: center; gap: 7px; padding: 6px 10px; background: rgba(30, 41, 59, 0.85); border: 1px solid #334155; border-radius: 6px; cursor: pointer; font-size: 12px; color: var(--text-main); user-select: none; transition: border-color 0.2s;">
+        <input type="checkbox" name="${prefix}_class_checkbox" value="${c.id}" style="cursor: pointer; accent-color: var(--primary);">
+        <span style="font-weight: 500;">${escapeHtml(c.name)}</span>
+      </label>
+    `).join('');
+  };
+
+  renderClassCheckboxes(addContainer, 'addTeacher');
+  renderClassCheckboxes(editContainer, 'editTeacher');
+}
+
+function toggleSelectAllTeacherClasses(containerId, checkAll) {
+  const container = document.getElementById(containerId);
+  if (!container) return;
+  const checkboxes = container.querySelectorAll('input[type="checkbox"]');
+  checkboxes.forEach(cb => { cb.checked = checkAll; });
 }
 
 function populateTermDropdowns() {
@@ -3339,7 +3356,17 @@ function renderTeachersTable(filteredList = null) {
 
   tbody.innerHTML = list.map(t => {
     const initials = t.fullName.split(' ').map(w => w[0]).filter(Boolean).slice(0, 2).join('').toUpperCase();
-    const inchargeNames = (t.inchargeClasses || []).map(c => `<span class="incharge-tag"><i class="fa-solid fa-school"></i> ${escapeHtml(c.name)}</span>`).join(' ') || '<span class="text-muted" style="font-size: 11px;">-- Unassigned --</span>';
+    const classesToShow = (t.assignedClasses && t.assignedClasses.length > 0)
+      ? t.assignedClasses
+      : (t.inchargeClasses || []);
+
+    const inchargeNames = classesToShow.length > 0
+      ? classesToShow.map(c => `
+          <span class="incharge-tag" style="background: rgba(56, 189, 248, 0.12); color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.3); padding: 2px 7px; border-radius: 6px; font-size: 11px; margin-right: 4px; display: inline-flex; align-items: center; gap: 4px;">
+            <i class="fa-solid fa-school"></i> ${escapeHtml(c.name)}${c.isIncharge ? ' ⭐' : ''}
+          </span>
+        `).join('')
+      : '<span class="text-muted" style="font-size: 11px;">-- Unassigned --</span>';
     const roleBadgeClass = t.role === 'principal' ? 'principal' : (t.role === 'admin' ? 'admin' : 'teacher');
     const statusClass = t.isActive ? 'active' : 'inactive';
     const statusLabel = t.isActive ? 'Active' : 'Inactive';
@@ -3398,7 +3425,7 @@ async function handleSaveNewTeacher(e) {
   const phone = document.getElementById('teacherPhone').value.trim();
   const password = document.getElementById('teacherPassword').value.trim();
   const role = document.getElementById('teacherRole').value;
-  const inchargeClassId = document.getElementById('teacherInchargeClass').value;
+  const assignedClassIds = Array.from(document.querySelectorAll('#addTeacherClassesList input[type="checkbox"]:checked')).map(cb => cb.value);
   const btn = document.getElementById('btnSaveTeacherSubmit');
 
   if (!fullName || !username || !password) {
@@ -3420,14 +3447,16 @@ async function handleSaveNewTeacher(e) {
         phone,
         password,
         role,
-        inchargeClassId: inchargeClassId || null
+        inchargeClassId: assignedClassIds[0] || null,
+        assignedClassIds
       })
     });
     const data = await res.json();
     if (data.success) {
-      showToast('Teacher added successfully! 🎓');
+      showToast('Teacher added successfully with assigned classes! 🎓');
       closeModal('addTeacherModal');
       document.getElementById('addTeacherForm').reset();
+      toggleSelectAllTeacherClasses('addTeacherClassesList', false);
       await fetchClasses();
       await fetchTeachers();
     } else {
@@ -3454,8 +3483,18 @@ function openEditTeacherModal(teacherId) {
   document.getElementById('editTeacherActiveStatus').value = String(teacher.isActive);
 
   populateTeacherClassDropdowns();
-  const inchargeClass = (teacher.inchargeClasses && teacher.inchargeClasses[0]) ? teacher.inchargeClasses[0].id : '';
-  document.getElementById('editTeacherInchargeClass').value = inchargeClass;
+
+  // Pre-check all classes assigned to this teacher
+  const assignedSet = new Set([
+    ...(teacher.assignedClassIds || []),
+    ...((teacher.assignedClasses || []).map(c => c.id)),
+    ...((teacher.inchargeClasses || []).map(c => c.id))
+  ]);
+
+  const checkboxes = document.querySelectorAll('#editTeacherClassesList input[type="checkbox"]');
+  checkboxes.forEach(cb => {
+    cb.checked = assignedSet.has(cb.value);
+  });
 
   openModal('editTeacherModal');
 }
@@ -3469,7 +3508,7 @@ async function handleUpdateTeacherSubmit(e) {
   const password = document.getElementById('editTeacherPassword').value.trim();
   const role = document.getElementById('editTeacherRole').value;
   const isActive = document.getElementById('editTeacherActiveStatus').value === 'true';
-  const inchargeClassId = document.getElementById('editTeacherInchargeClass').value;
+  const assignedClassIds = Array.from(document.querySelectorAll('#editTeacherClassesList input[type="checkbox"]:checked')).map(cb => cb.value);
   const btn = document.getElementById('btnUpdateTeacherSubmit');
 
   btn.disabled = true;
@@ -3483,7 +3522,8 @@ async function handleUpdateTeacherSubmit(e) {
       phone,
       role,
       isActive,
-      inchargeClassId: inchargeClassId || null
+      inchargeClassId: assignedClassIds[0] || null,
+      assignedClassIds
     };
     if (password) payload.password = password;
 
@@ -3494,7 +3534,7 @@ async function handleUpdateTeacherSubmit(e) {
     });
     const data = await res.json();
     if (data.success) {
-      showToast('Staff member updated successfully! 💾');
+      showToast('Staff member & assigned classes updated! 💾');
       closeModal('editTeacherModal');
       await fetchClasses();
       await fetchTeachers();

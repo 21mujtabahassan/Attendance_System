@@ -1443,23 +1443,49 @@ async function getTeachers(schoolId = 'unique_scholars') {
         lastLoginAt: u.last_login_at,
         createdAt: u.created_at,
         inchargeClasses,
-        assignedClasses: Array.from(assignedMap.values())
+        assignedClasses: Array.from(assignedMap.values()),
+        assignedClassIds: Array.from(assignedMap.values()).map(c => c.id)
       };
     });
   }
 
   const db = readJsonDb();
-  return (db.adminUsers || []).filter(u => u.schoolId === schoolId);
+  const classes = db.classes || [];
+  return (db.adminUsers || []).filter(u => u.schoolId === schoolId).map(u => {
+    const rawIds = u.assignedClassIds || (u.inchargeClassId ? [u.inchargeClassId] : []);
+    const assignedIds = Array.isArray(rawIds) ? rawIds : [rawIds];
+    const assignedClasses = classes.filter(c => assignedIds.includes(c.id)).map(c => ({
+      id: c.id,
+      name: c.name,
+      isIncharge: c.id === u.inchargeClassId || assignedIds.length === 1
+    }));
+    const inchargeClasses = classes.filter(c => c.inchargeTeacherId === u.id || c.id === u.inchargeClassId).map(c => ({
+      id: c.id,
+      name: c.name
+    }));
+    return {
+      ...u,
+      inchargeClasses,
+      assignedClasses,
+      assignedClassIds: assignedClasses.map(c => c.id)
+    };
+  });
 }
 
 async function addTeacher(schoolId = 'unique_scholars', teacherData) {
-  const { fullName, username, phone, email, password, role = 'teacher', inchargeClassId } = teacherData;
+  const { fullName, username, phone, email, password, role = 'teacher', inchargeClassId, assignedClassIds } = teacherData;
   if (!fullName || !fullName.trim()) throw new Error('Teacher full name is required.');
   if (!username || !username.trim()) throw new Error('Teacher username is required.');
   if (!password || !password.trim()) throw new Error('Teacher password is required.');
 
   const cleanUsername = username.trim().toLowerCase();
   const pinHash = bcrypt.hashSync(password.trim(), 10);
+
+  const rawAssigned = assignedClassIds !== undefined
+    ? (Array.isArray(assignedClassIds) ? assignedClassIds.filter(Boolean) : [assignedClassIds])
+    : (inchargeClassId ? [inchargeClassId] : []);
+  const targetClassIds = Array.from(new Set(rawAssigned));
+  const primaryInchargeId = inchargeClassId || targetClassIds[0] || null;
 
   if (isPostgresConfigured()) {
     const db = getDb();
@@ -1479,8 +1505,22 @@ async function addTeacher(schoolId = 'unique_scholars', teacherData) {
       is_active: true
     }).returning('*');
 
-    if (inchargeClassId) {
-      await assignClassIncharge(schoolId, inchargeClassId, newUser.id);
+    // Assign all classes to class_teachers table
+    for (const cId of targetClassIds) {
+      const isInc = (cId === primaryInchargeId);
+      await db('class_teachers').insert({
+        school_id: schoolId,
+        class_id: cId,
+        teacher_id: newUser.id,
+        is_incharge: isInc
+      }).onConflict(['class_id', 'teacher_id']).merge();
+
+      if (isInc) {
+        await db('classes').where({ school_id: schoolId, id: cId }).update({
+          incharge_teacher_id: newUser.id,
+          updated_at: new Date()
+        });
+      }
     }
 
     // Mirror to JSON db
@@ -1496,7 +1536,8 @@ async function addTeacher(schoolId = 'unique_scholars', teacherData) {
         email: newUser.email || '',
         role: newUser.role,
         isActive: true,
-        inchargeClassId: inchargeClassId || null,
+        inchargeClassId: primaryInchargeId,
+        assignedClassIds: targetClassIds,
         createdAt: new Date().toISOString()
       });
       writeJsonDb(jDb);
@@ -1511,7 +1552,8 @@ async function addTeacher(schoolId = 'unique_scholars', teacherData) {
       email: newUser.email,
       role: newUser.role,
       isActive: newUser.is_active,
-      inchargeClassId: inchargeClassId || null
+      inchargeClassId: primaryInchargeId,
+      assignedClassIds: targetClassIds
     };
   }
 
@@ -1527,16 +1569,22 @@ async function addTeacher(schoolId = 'unique_scholars', teacherData) {
     role: role || 'teacher',
     pinHash,
     isActive: true,
-    inchargeClassId: inchargeClassId || null,
+    inchargeClassId: primaryInchargeId,
+    assignedClassIds: targetClassIds,
     createdAt: new Date().toISOString()
   };
   db.adminUsers.push(newTeacher);
+  (db.classes || []).forEach(c => {
+    if (c.id === primaryInchargeId) {
+      c.inchargeTeacherId = newTeacher.id;
+    }
+  });
   writeJsonDb(db);
   return newTeacher;
 }
 
 async function updateTeacher(schoolId = 'unique_scholars', teacherId, updateData) {
-  const { fullName, username, phone, email, password, role, isActive, inchargeClassId } = updateData;
+  const { fullName, username, phone, email, password, role, isActive, inchargeClassId, assignedClassIds } = updateData;
 
   if (isPostgresConfigured()) {
     const db = getDb();
@@ -1558,12 +1606,38 @@ async function updateTeacher(schoolId = 'unique_scholars', teacherId, updateData
 
     await db('admin_users').where({ school_id: schoolId, id: teacherId }).update(updatePayload);
 
-    if (inchargeClassId !== undefined) {
-      await db('classes').where({ school_id: schoolId, incharge_teacher_id: teacherId }).update({ incharge_teacher_id: null });
-      await db('class_teachers').where({ school_id: schoolId, teacher_id: teacherId, is_incharge: true }).del();
+    if (assignedClassIds !== undefined || inchargeClassId !== undefined) {
+      const rawAssigned = assignedClassIds !== undefined
+        ? (Array.isArray(assignedClassIds) ? assignedClassIds.filter(Boolean) : [assignedClassIds])
+        : (inchargeClassId ? [inchargeClassId] : []);
+      const targetClassIds = Array.from(new Set(rawAssigned));
+      const primaryInchargeId = inchargeClassId || targetClassIds[0] || null;
 
-      if (inchargeClassId) {
-        await assignClassIncharge(schoolId, inchargeClassId, teacherId);
+      // 1. Remove this teacher from class_teachers to refresh assignment
+      await db('class_teachers').where({ school_id: schoolId, teacher_id: teacherId }).del();
+
+      // 2. Clear incharge_teacher_id on classes that are no longer assigned
+      await db('classes')
+        .where({ school_id: schoolId, incharge_teacher_id: teacherId })
+        .whereNotIn('id', targetClassIds)
+        .update({ incharge_teacher_id: null, updated_at: new Date() });
+
+      // 3. Re-insert all assigned classes
+      for (const cId of targetClassIds) {
+        const isInc = (cId === primaryInchargeId);
+        await db('class_teachers').insert({
+          school_id: schoolId,
+          class_id: cId,
+          teacher_id: teacherId,
+          is_incharge: isInc
+        }).onConflict(['class_id', 'teacher_id']).merge();
+
+        if (isInc) {
+          await db('classes').where({ school_id: schoolId, id: cId }).update({
+            incharge_teacher_id: teacherId,
+            updated_at: new Date()
+          });
+        }
       }
     }
 
@@ -1582,7 +1656,27 @@ async function updateTeacher(schoolId = 'unique_scholars', teacherId, updateData
     if (role) db.adminUsers[idx].role = role;
     if (isActive !== undefined) db.adminUsers[idx].isActive = Boolean(isActive);
     if (password && password.trim()) db.adminUsers[idx].pinHash = bcrypt.hashSync(password.trim(), 10);
-    if (inchargeClassId !== undefined) db.adminUsers[idx].inchargeClassId = inchargeClassId;
+
+    if (assignedClassIds !== undefined || inchargeClassId !== undefined) {
+      const rawAssigned = assignedClassIds !== undefined
+        ? (Array.isArray(assignedClassIds) ? assignedClassIds.filter(Boolean) : [assignedClassIds])
+        : (inchargeClassId ? [inchargeClassId] : []);
+      const targetClassIds = Array.from(new Set(rawAssigned));
+      const primaryInchargeId = inchargeClassId || targetClassIds[0] || null;
+
+      db.adminUsers[idx].assignedClassIds = targetClassIds;
+      db.adminUsers[idx].inchargeClassId = primaryInchargeId;
+
+      (db.classes || []).forEach(c => {
+        if (c.inchargeTeacherId === teacherId && !targetClassIds.includes(c.id)) {
+          c.inchargeTeacherId = null;
+        }
+        if (c.id === primaryInchargeId) {
+          c.inchargeTeacherId = teacherId;
+        }
+      });
+    }
+
     writeJsonDb(db);
     return db.adminUsers[idx];
   }
@@ -1672,9 +1766,14 @@ async function getTeacherAssignedClasses(schoolId = 'unique_scholars', teacherId
 
   const db = readJsonDb();
   const user = (db.adminUsers || []).find(u => u.id === teacherId);
-  if (user && user.inchargeClassId) {
-    const cl = (db.classes || []).find(c => c.id === user.inchargeClassId);
-    return cl ? [{ id: cl.id, name: cl.name, isIncharge: true }] : [];
+  if (user) {
+    const rawIds = user.assignedClassIds || (user.inchargeClassId ? [user.inchargeClassId] : []);
+    const userClassIds = Array.isArray(rawIds) ? rawIds : [rawIds];
+    return (db.classes || []).filter(c => userClassIds.includes(c.id)).map(c => ({
+      id: c.id,
+      name: c.name,
+      isIncharge: c.id === user.inchargeClassId || userClassIds.length === 1
+    }));
   }
   return [];
 }

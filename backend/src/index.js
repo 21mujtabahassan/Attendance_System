@@ -2060,8 +2060,8 @@ app.post('/api/admin/teachers', async (req, res) => {
     if (reqUser && reqUser.role === 'teacher') {
       return res.status(403).json({ success: false, error: 'Access Denied: Only Administrators can create teachers.' });
     }
-    const { schoolId = 'unique_scholars', fullName, username, phone, email, password, role, inchargeClassId } = req.body;
-    const newTeacher = await addTeacher(schoolId, { fullName, username, phone, email, password, role, inchargeClassId });
+    const { schoolId = 'unique_scholars', fullName, username, phone, email, password, role, inchargeClassId, assignedClassIds } = req.body;
+    const newTeacher = await addTeacher(schoolId, { fullName, username, phone, email, password, role, inchargeClassId, assignedClassIds });
     res.json({ success: true, message: 'Teacher added successfully!', teacher: newTeacher });
   } catch (err) {
     res.status(400).json({ success: false, error: err.message });
@@ -2074,8 +2074,8 @@ app.put('/api/admin/teachers/:id', async (req, res) => {
     if (reqUser && reqUser.role === 'teacher' && reqUser.id !== req.params.id) {
       return res.status(403).json({ success: false, error: 'Access Denied: Cannot modify other staff records.' });
     }
-    const { schoolId = 'unique_scholars', fullName, username, phone, email, password, role, isActive, inchargeClassId } = req.body;
-    const updated = await updateTeacher(schoolId, req.params.id, { fullName, username, phone, email, password, role, isActive, inchargeClassId });
+    const { schoolId = 'unique_scholars', fullName, username, phone, email, password, role, isActive, inchargeClassId, assignedClassIds } = req.body;
+    const updated = await updateTeacher(schoolId, req.params.id, { fullName, username, phone, email, password, role, isActive, inchargeClassId, assignedClassIds });
     res.json({ success: true, message: 'Teacher updated successfully!', teacher: updated });
   } catch (err) {
     res.status(400).json({ success: false, error: err.message });
