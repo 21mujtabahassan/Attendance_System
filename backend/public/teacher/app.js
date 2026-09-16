@@ -145,10 +145,10 @@ async function autoDetectGateway(notify = false) {
   candidates.push('http://localhost:3000');
 
   // Probe candidates
-  for (const base of candidates) {
+  for (const base of [...new Set(candidates)]) {
     try {
       const res = await fetch(`${base}/api/whatsapp/gateway-info`, {
-        signal: AbortSignal.timeout(1800)
+        signal: AbortSignal.timeout(1600)
       });
       if (res.ok) {
         const data = await res.json();
@@ -164,15 +164,18 @@ async function autoDetectGateway(notify = false) {
     } catch (e) { }
   }
 
-  // Cloud Fallback
+  // Cloud Fallback: If hosted on Vercel use relative '/api', otherwise use full VERCEL_API_BASE
+  const isVercelHost = window.location.hostname.includes('vercel.app');
+  const cloudUrl = isVercelHost ? '/api' : VERCEL_API_BASE;
+
   backendState = {
     mode: 'cloud',
-    url: '/api',
-    gatewayUrl: candidates[0] || 'http://192.168.100.37:3000'
+    url: cloudUrl,
+    gatewayUrl: 'http://192.168.100.37:3000'
   };
   updateBackendUI();
   if (notify) showToast('☁️ Connected to Cloud Server (Vercel)', 'info');
-  return '/api';
+  return cloudUrl;
 }
 
 function updateBackendUI() {
@@ -220,6 +223,10 @@ async function safeFetch(path, options = {}) {
   const cleanPath = path.startsWith('/') ? path : `/${path}`;
   const fullUrl = cleanPath.startsWith('http') ? cleanPath : `${apiBase}${cleanPath}`;
 
+  const timeoutMs = options.timeout || 6000;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+
   const headers = {
     'Content-Type': 'application/json',
     ...(currentToken ? { 'Authorization': `Bearer ${currentToken}` } : {}),
@@ -228,15 +235,19 @@ async function safeFetch(path, options = {}) {
   };
 
   try {
-    const res = await fetch(fullUrl, { ...options, headers });
+    const res = await fetch(fullUrl, { ...options, headers, signal: controller.signal });
+    clearTimeout(timer);
     return res;
   } catch (err) {
+    clearTimeout(timer);
     // If local fails, transparently retry on Cloud
     if (backendState.mode === 'local') {
-      backendState = { mode: 'cloud', url: '/api', gatewayUrl: backendState.gatewayUrl };
+      const isVercelHost = window.location.hostname.includes('vercel.app');
+      const cloudBase = isVercelHost ? '/api' : VERCEL_API_BASE;
+      backendState = { mode: 'cloud', url: cloudBase, gatewayUrl: backendState.gatewayUrl };
       updateBackendUI();
-      const cloudUrl = `/api${cleanPath}`;
-      return await fetch(cloudUrl, { ...options, headers });
+      const cloudUrl = `${cloudBase}${cleanPath}`;
+      return await fetch(cloudUrl, { ...options, headers, signal: AbortSignal.timeout(6000) });
     }
     throw err;
   }
@@ -248,7 +259,20 @@ async function safeFetch(path, options = {}) {
 
 async function checkWhatsAppStatus(notify = false) {
   try {
-    const res = await safeFetch('/whatsapp/status');
+    let res = null;
+    try {
+      res = await safeFetch('/whatsapp/status', { timeout: 3500 });
+    } catch (e) {
+      // Direct cloud fallback
+      res = await fetch(`${VERCEL_API_BASE}/whatsapp/status?schoolId=${CURRENT_SCHOOL_ID}`, {
+        signal: AbortSignal.timeout(4000)
+      });
+    }
+
+    if (!res || !res.ok) {
+      throw new Error('Status fetch failed');
+    }
+
     const data = await res.json();
     currentWaStatus = data;
 
@@ -273,9 +297,9 @@ async function checkWhatsAppStatus(notify = false) {
     if (modalDesc) {
       modalDesc.textContent = isConnected
         ? 'School WhatsApp Gateway is active. Parent attendance alerts, broadcast notices, and marksheet report cards will dispatch automatically.'
-        : 'WhatsApp is currently offline. Ensure your PC is running "npm run dev" to keep the WhatsApp engine active.';
+        : 'WhatsApp is currently offline. If you are using your phone, ensure your PC is running "npm run dev", or connect to the school Wi-Fi.';
     }
-    if (modalUrl) modalUrl.textContent = backendState.gatewayUrl || (backendState.mode === 'local' ? backendState.url : 'Local Gateway not connected');
+    if (modalUrl) modalUrl.textContent = backendState.gatewayUrl || (backendState.mode === 'local' ? backendState.url : 'Local Gateway: http://192.168.100.37:3000');
 
     if (notify) {
       showToast(isConnected ? '🟢 WhatsApp Gateway is Active & Online!' : '🔴 WhatsApp Gateway is Offline.', isConnected ? 'success' : 'error');

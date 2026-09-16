@@ -13,7 +13,8 @@ const {
   sendWhatsAppMessage,
   disconnectWhatsApp,
   initAllSessions,
-  getLocalIpAddresses
+  getLocalIpAddresses,
+  syncSessionToDb
 } = require('./services/whatsapp');
 
 const {
@@ -99,7 +100,7 @@ app.use('/teacher', express.static(teacherPath));
 
 app.use(express.static(publicPath));
 
-app.get(['/teacher', '/teacher/*'], (req, res) => {
+app.get(['/teacher', '/teacher/*', '/admin/teacher', '/admin/teacher/*'], (req, res) => {
   res.sendFile(path.join(teacherPath, 'index.html'));
 });
 
@@ -114,6 +115,11 @@ function startCloudDispatchWorker() {
 
   const CLOUD_URL = 'https://unique-scholars-attendance.vercel.app/api';
   let isWorking = false;
+
+  // Periodic status heartbeat to Cloud DB (every 15 seconds) so Vercel always knows WA is connected
+  setInterval(() => {
+    syncSessionToDb('unique_scholars').catch(() => {});
+  }, 15000);
 
   setInterval(async () => {
     if (isWorking) return;

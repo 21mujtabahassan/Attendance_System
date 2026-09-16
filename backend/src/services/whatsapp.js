@@ -17,7 +17,9 @@ const path = require('path');
 const fs = require('fs');
 const pino = require('pino');
 
-const BASE_SESSION_DIR = path.join(__dirname, '..', '..', 'whatsapp_session');
+const BASE_SESSION_DIR = process.env.VERCEL
+  ? path.join('/tmp', 'whatsapp_session')
+  : path.join(__dirname, '..', '..', 'whatsapp_session');
 let ioInstance = null;
 
 // Map of schoolId -> Session object
@@ -534,31 +536,46 @@ async function sendWhatsAppMessage(phone, message, schoolId = 'unique_scholars',
 }
 
 async function getWhatsAppStatus(schoolId = 'unique_scholars') {
+  if (process.env.VERCEL) {
+    if (isPostgresConfigured()) {
+      try {
+        const db = getDb();
+        const row = await db('whatsapp_sessions').where({ school_id: schoolId }).first();
+        if (row) {
+          return {
+            schoolId,
+            status: row.status,
+            qr: '',
+            qrTimestamp: null,
+            qrVersion: 0,
+            lastError: row.last_error || '',
+            gatewayUrl: row.gateway_url,
+            lastConnectedAt: row.last_connected_at,
+            isConnected: row.status === 'connected',
+            hasSessionFiles: false
+          };
+        }
+      } catch (e) {
+        console.error('getWhatsAppStatus DB query error on Vercel:', e.message);
+      }
+    }
+    return {
+      schoolId,
+      status: 'disconnected',
+      qr: '',
+      qrTimestamp: null,
+      qrVersion: 0,
+      lastError: 'WhatsApp engine running locally on PC',
+      isConnected: false,
+      hasSessionFiles: false
+    };
+  }
+
   const sess = getSessionState(schoolId);
   const sessionDir = getSchoolSessionDir(schoolId);
   const credsPath = path.join(sessionDir, 'creds.json');
   const hasSessionFiles = fs.existsSync(credsPath) && fs.statSync(credsPath).size > 100;
 
-  if (process.env.VERCEL && isPostgresConfigured()) {
-    try {
-      const db = getDb();
-      const row = await db('whatsapp_sessions').where({ school_id: schoolId }).first();
-      if (row) {
-        return {
-          schoolId,
-          status: row.status,
-          qr: '',
-          qrTimestamp: null,
-          qrVersion: 0,
-          lastError: row.last_error || '',
-          gatewayUrl: row.gateway_url,
-          lastConnectedAt: row.last_connected_at,
-          isConnected: row.status === 'connected',
-          hasSessionFiles: false
-        };
-      }
-    } catch (e) { }
-  }
   return {
     schoolId,
     status: sess.status,
@@ -573,6 +590,35 @@ async function getWhatsAppStatus(schoolId = 'unique_scholars') {
 }
 
 async function getGatewayInfo(schoolId = 'unique_scholars') {
+  if (process.env.VERCEL) {
+    let status = 'disconnected';
+    let isConnected = false;
+    let gatewayUrlConfigured = process.env.WHATSAPP_GATEWAY_URL || process.env.PERSISTENT_BACKEND_URL || null;
+
+    if (isPostgresConfigured()) {
+      try {
+        const db = getDb();
+        const row = await db('whatsapp_sessions').where({ school_id: schoolId }).first();
+        if (row) {
+          status = row.status;
+          isConnected = row.status === 'connected';
+          if (row.gateway_url) gatewayUrlConfigured = row.gateway_url;
+        }
+      } catch (e) { }
+    }
+
+    return {
+      schoolId,
+      status,
+      isConnected,
+      isVercel: true,
+      gatewayUrlConfigured,
+      hasSessionFiles: false,
+      uptime: process.uptime(),
+      localIps: []
+    };
+  }
+
   const sess = getSessionState(schoolId);
   const sessionDir = path.join(BASE_SESSION_DIR, schoolId);
   const credsPath = path.join(sessionDir, 'creds.json');
@@ -580,23 +626,11 @@ async function getGatewayInfo(schoolId = 'unique_scholars') {
   let status = sess.status;
   let gatewayUrlConfigured = process.env.WHATSAPP_GATEWAY_URL || process.env.PERSISTENT_BACKEND_URL || null;
 
-  if (process.env.VERCEL && isPostgresConfigured()) {
-    try {
-      const db = getDb();
-      const row = await db('whatsapp_sessions').where({ school_id: schoolId }).first();
-      if (row) {
-        status = row.status;
-        isConnected = row.status === 'connected';
-        if (row.gateway_url) gatewayUrlConfigured = row.gateway_url;
-      }
-    } catch (e) { }
-  }
-
   return {
     schoolId,
     status,
     isConnected,
-    isVercel: !!process.env.VERCEL,
+    isVercel: false,
     gatewayUrlConfigured,
     hasSessionFiles: fs.existsSync(credsPath) && fs.statSync(credsPath).size > 100,
     uptime: process.uptime(),
