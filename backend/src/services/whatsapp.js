@@ -469,6 +469,37 @@ async function sendWhatsAppMessage(phone, message, schoolId = 'unique_scholars',
     }
   }
 
+function isPrivateLanUrl(urlStr) {
+  if (!urlStr) return true;
+  try {
+    const parsed = new URL(urlStr);
+    const host = parsed.hostname;
+    return host === 'localhost' ||
+           host === '127.0.0.1' ||
+           host.startsWith('192.168.') ||
+           host.startsWith('10.') ||
+           host.startsWith('172.16.') ||
+           host.startsWith('172.17.') ||
+           host.startsWith('172.18.') ||
+           host.startsWith('172.19.') ||
+           host.startsWith('172.20.') ||
+           host.startsWith('172.21.') ||
+           host.startsWith('172.22.') ||
+           host.startsWith('172.23.') ||
+           host.startsWith('172.24.') ||
+           host.startsWith('172.25.') ||
+           host.startsWith('172.26.') ||
+           host.startsWith('172.27.') ||
+           host.startsWith('172.28.') ||
+           host.startsWith('172.29.') ||
+           host.startsWith('172.30.') ||
+           host.startsWith('172.31.') ||
+           host.endsWith('.local');
+  } catch (e) {
+    return true;
+  }
+}
+
   // 2. If running on Vercel or local socket not active, check for a persistent WhatsApp Gateway URL
   let gatewayUrl = gatewayUrlOverride || process.env.WHATSAPP_GATEWAY_URL || process.env.PERSISTENT_BACKEND_URL;
   if (!gatewayUrl && process.env.VERCEL && isPostgresConfigured()) {
@@ -481,13 +512,24 @@ async function sendWhatsAppMessage(phone, message, schoolId = 'unique_scholars',
     } catch (e) { }
   }
 
+  // If running on Vercel and the gateway is on a private LAN (192.168.x.x / localhost),
+  // skip trying to fetch private IP from AWS cloud to prevent 15s timeout.
+  // The persistent cloud dispatch worker on the local PC will immediately telecast it!
+  if (process.env.VERCEL && isPrivateLanUrl(gatewayUrl)) {
+    return {
+      success: false,
+      queuedForSyncWorker: true,
+      error: 'Gateway is on private local Wi-Fi. Queued for instant background worker telecast.'
+    };
+  }
+
   if (gatewayUrl) {
     try {
       const cleanUrl = gatewayUrl.replace(/\/+$/, '');
       const targetUrl = `${cleanUrl}/api/whatsapp/send`;
       console.log(`Forwarding WhatsApp dispatch to remote gateway: ${targetUrl}`);
       const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), 15000);
+      const timer = setTimeout(() => controller.abort(), 4000);
 
       const fwdPayload = { phone, message, schoolId };
       if (docBuffer) {

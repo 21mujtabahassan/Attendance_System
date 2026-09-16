@@ -1,9 +1,9 @@
-const CACHE_NAME = 'usa-teacher-pwa-v5';
+const CACHE_NAME = 'usa-teacher-pwa-v6';
 const STATIC_ASSETS = [
   '/teacher/',
   '/teacher/index.html',
-  '/teacher/style.css?v=5',
-  '/teacher/app.js?v=5',
+  '/teacher/style.css?v=6',
+  '/teacher/app.js?v=6',
   '/teacher/manifest.json',
   '/logo.png',
   '/favicon.png'

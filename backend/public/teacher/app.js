@@ -223,7 +223,7 @@ async function safeFetch(path, options = {}) {
   const cleanPath = path.startsWith('/') ? path : `/${path}`;
   const fullUrl = cleanPath.startsWith('http') ? cleanPath : `${apiBase}${cleanPath}`;
 
-  const timeoutMs = options.timeout || 6000;
+  const timeoutMs = options.timeout || 30000;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
 
@@ -247,7 +247,7 @@ async function safeFetch(path, options = {}) {
       backendState = { mode: 'cloud', url: cloudBase, gatewayUrl: backendState.gatewayUrl };
       updateBackendUI();
       const cloudUrl = `${cloudBase}${cleanPath}`;
-      return await fetch(cloudUrl, { ...options, headers, signal: AbortSignal.timeout(6000) });
+      return await fetch(cloudUrl, { ...options, headers, signal: AbortSignal.timeout(30000) });
     }
     throw err;
   }
@@ -746,7 +746,8 @@ async function saveAttendanceDraft() {
 
     const res = await safeFetch('/attendance/draft', {
       method: 'POST',
-      body: JSON.stringify(payload)
+      body: JSON.stringify(payload),
+      timeout: 30000
     });
 
     const data = await res.json();
@@ -828,7 +829,8 @@ async function executeFinalAttendanceSubmit() {
 
     const res = await safeFetch('/attendance/submit', {
       method: 'POST',
-      body: JSON.stringify(payload)
+      body: JSON.stringify(payload),
+      timeout: 35000
     });
 
     const data = await res.json();
@@ -1129,7 +1131,8 @@ async function saveResults(isFinalSubmit = false) {
         termId,
         classId,
         results: resultsArray
-      })
+      }),
+      timeout: 35000
     });
 
     const data = await res.json();
