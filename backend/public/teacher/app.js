@@ -474,17 +474,21 @@ async function submitAttendance() {
     classId,
     date,
     time: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true }),
-    attendance: currentAttendanceRoster.map(s => ({
-      studentId: s.id,
-      name: s.name,
-      parentPhone: s.parentPhone,
-      status: currentAttendanceMap[s.id] || 'present'
-    }))
+    attendance: currentAttendanceRoster.map(s => {
+      const st = (currentAttendanceMap[s.id] || 'present').toLowerCase();
+      const norm = st === 'absent' ? 'Absent' : (st === 'leave' ? 'Leave' : 'Present');
+      return {
+        studentId: s.id,
+        name: s.name,
+        parentPhone: s.parentPhone,
+        status: norm
+      };
+    })
   };
 
-  const pCount = payload.attendance.filter(a => a.status === 'present').length;
-  const aCount = payload.attendance.filter(a => a.status === 'absent').length;
-  const lCount = payload.attendance.filter(a => a.status === 'leave').length;
+  const pCount = payload.attendance.filter(a => a.status === 'Present').length;
+  const aCount = payload.attendance.filter(a => a.status === 'Absent').length;
+  const lCount = payload.attendance.filter(a => a.status === 'Leave').length;
 
   if (!confirm(`Submit Attendance for ${date}?\n• Present: ${pCount}\n• Absent: ${aCount}\n• Leave: ${lCount}`)) return;
 
@@ -507,12 +511,12 @@ async function submitAttendance() {
       return;
     }
 
-    showToast(`🎉 Attendance recorded! (${pCount} Present, ${aCount} Absent)`, 'success');
+    showToast(`🎉 Attendance recorded! (${pCount} Present, ${aCount} Absent, ${lCount} Leave)`, 'success');
     const todayStat = document.getElementById('statTodayStatus');
     if (todayStat) todayStat.textContent = 'Submitted ✅';
   } catch (err) {
     console.error('Submit attendance error:', err);
-    showToast('❌ Connection error. Attendance saved locally.', 'error');
+    showToast('❌ Connection error. Failed to save attendance.', 'error');
   } finally {
     btn.disabled = false;
     btn.innerHTML = '<i class="fa-solid fa-paper-plane"></i> <span>Save & Submit Attendance</span>';

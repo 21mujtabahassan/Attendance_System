@@ -627,21 +627,26 @@ app.delete('/api/admin/students/:studentId', async (req, res) => {
 // -------------------------------------------------------------
 
 app.post('/api/attendance/draft', async (req, res) => {
-  const { schoolId = 'unique_scholars', classId, date: attendanceDate, time: attendanceTime, attendance } = req.body;
-  if (!classId || !attendance || !Array.isArray(attendance)) {
-    return res.status(400).json({ error: 'Invalid attendance draft payload.' });
+  try {
+    const { schoolId = 'unique_scholars', classId, date: attendanceDate, time: attendanceTime, attendance } = req.body;
+    if (!classId || !attendance || !Array.isArray(attendance)) {
+      return res.status(400).json({ success: false, error: 'Invalid attendance draft payload.' });
+    }
+
+    const dateStr = attendanceDate || new Date().toISOString().split('T')[0];
+    const timeStr = attendanceTime || new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true });
+
+    await saveDraftAttendance(schoolId, classId, dateStr, attendance, timeStr);
+    res.json({
+      success: true,
+      message: `Draft attendance saved for ${classId} at ${timeStr}.`,
+      state: 'DRAFT',
+      time: timeStr
+    });
+  } catch (err) {
+    console.error('Error saving draft attendance:', err);
+    res.status(500).json({ success: false, error: err.message || 'Failed to save draft attendance.' });
   }
-
-  const dateStr = attendanceDate || new Date().toISOString().split('T')[0];
-  const timeStr = attendanceTime || new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true });
-
-  await saveDraftAttendance(schoolId, classId, dateStr, attendance, timeStr);
-  res.json({
-    success: true,
-    message: `Draft attendance saved for ${classId} at ${timeStr}.`,
-    state: 'DRAFT',
-    time: timeStr
-  });
 });
 
 app.post('/api/attendance/submit', async (req, res) => {
@@ -712,7 +717,7 @@ ${school.name}`;
       state: 'SUBMITTED',
       summary: {
         total: attendance.length,
-        present: attendance.filter(a => a.status.toLowerCase() !== 'absent').length,
+        present: attendance.filter(a => String(a.status || '').toLowerCase() !== 'absent').length,
         absent: absentStudentsToAlert.length,
         whatsappAlertsSent: dispatchedCount,
         whatsappAlertsFailed: failedCount,
@@ -723,7 +728,7 @@ ${school.name}`;
     });
   } catch (error) {
     console.error('Error in submit attendance:', error);
-    res.status(500).json({ error: 'Internal server error during attendance submission.' });
+    res.status(500).json({ success: false, error: error.message || 'Internal server error during attendance submission.' });
   }
 });
 
@@ -828,19 +833,24 @@ app.get(['/api/results', '/api/results/marks', '/api/admin/results/marks'], asyn
 });
 
 app.post('/api/admin/results/draft', async (req, res) => {
-  const reqUser = getReqUser(req);
-  const { schoolId = 'unique_scholars', termId, classId, results } = req.body;
-  if (!termId || !classId || !Array.isArray(results)) {
-    return res.status(400).json({ success: false, error: 'termId, classId, and results list are required.' });
-  }
-  if (reqUser && reqUser.role === 'teacher') {
-    const allowed = reqUser.assignedClassIds || [];
-    if (!allowed.includes(classId)) {
-      return res.status(403).json({ success: false, error: 'Access Denied: You can only save marks for your assigned class.' });
+  try {
+    const reqUser = getReqUser(req);
+    const { schoolId = 'unique_scholars', termId, classId, results } = req.body;
+    if (!termId || !classId || !Array.isArray(results)) {
+      return res.status(400).json({ success: false, error: 'termId, classId, and results list are required.' });
     }
+    if (reqUser && reqUser.role === 'teacher') {
+      const allowed = reqUser.assignedClassIds || [];
+      if (!allowed.includes(classId)) {
+        return res.status(403).json({ success: false, error: 'Access Denied: You can only save marks for your assigned class.' });
+      }
+    }
+    const saved = await saveDraftResults(schoolId, { termId, classId, results });
+    res.json({ success: true, message: 'Draft result marks saved successfully!', results: saved });
+  } catch (err) {
+    console.error('Error saving draft results:', err);
+    res.status(500).json({ success: false, error: err.message || 'Failed to save draft results.' });
   }
-  const saved = await saveDraftResults(schoolId, { termId, classId, results });
-  res.json({ success: true, message: 'Draft result marks saved successfully!', results: saved });
 });
 
 app.post('/api/admin/results/submit', async (req, res) => {

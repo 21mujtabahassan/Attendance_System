@@ -529,6 +529,17 @@ async function deleteStudent(schoolId = 'unique_scholars', studentId) {
 // -------------------------------------------------------------
 // 4. ATTENDANCE (Draft -> Submit with transactional lock)
 // -------------------------------------------------------------
+
+function normalizeAttendanceStatus(rawStatus) {
+  if (!rawStatus) return 'Present';
+  const s = String(rawStatus).trim().toLowerCase();
+  if (s === 'present' || s === 'p') return 'Present';
+  if (s === 'absent' || s === 'a') return 'Absent';
+  if (s === 'leave' || s === 'l') return 'Leave';
+  if (s === 'late') return 'Late';
+  return 'Present';
+}
+
 async function saveDraftAttendance(schoolId = 'unique_scholars', classId, dateStr, records, timeStr) {
   if (isPostgresConfigured()) {
     const db = getDb();
@@ -563,6 +574,7 @@ async function saveDraftAttendance(schoolId = 'unique_scholars', classId, dateSt
           continue;
         }
 
+        const normalizedStatus = normalizeAttendanceStatus(r.status);
         const logRecord = {
           log_key: logKey,
           school_id: schoolId,
@@ -570,7 +582,7 @@ async function saveDraftAttendance(schoolId = 'unique_scholars', classId, dateSt
           student_id: r.studentId,
           attendance_date: dateStr,
           attendance_time: timeStr || new Date().toLocaleTimeString('en-US', { hour12: true }),
-          status: r.status || 'Present',
+          status: normalizedStatus,
           state: 'DRAFT',
           updated_at: new Date()
         };
@@ -601,14 +613,15 @@ async function saveDraftAttendance(schoolId = 'unique_scholars', classId, dateSt
   const saved = [];
   records.forEach(r => {
     const logId = `${dateStr}_${r.studentId}`;
+    const normStatus = normalizeAttendanceStatus(r.status);
     const idx = db.attendanceLogs.findIndex(l => l.id === logId);
     if (idx >= 0) {
       if (db.attendanceLogs[idx].state !== 'SUBMITTED') {
-        db.attendanceLogs[idx] = { ...db.attendanceLogs[idx], status: r.status, time: timeStr, state: 'DRAFT' };
+        db.attendanceLogs[idx] = { ...db.attendanceLogs[idx], status: normStatus, time: timeStr, state: 'DRAFT' };
       }
       saved.push(db.attendanceLogs[idx]);
     } else {
-      const entry = { id: logId, schoolId, classId, studentId: r.studentId, date: dateStr, time: timeStr, status: r.status, state: 'DRAFT' };
+      const entry = { id: logId, schoolId, classId, studentId: r.studentId, date: dateStr, time: timeStr, status: normStatus, state: 'DRAFT' };
       db.attendanceLogs.push(entry);
       saved.push(entry);
     }
@@ -635,6 +648,7 @@ async function submitFinalAttendance(schoolId = 'unique_scholars', classId, date
     await db.transaction(async trx => {
       for (const r of records) {
         const logKey = `${dateStr}_${r.studentId}`;
+        const normalizedStatus = normalizeAttendanceStatus(r.status);
         const logRecord = {
           log_key: logKey,
           school_id: schoolId,
@@ -642,7 +656,7 @@ async function submitFinalAttendance(schoolId = 'unique_scholars', classId, date
           student_id: r.studentId,
           attendance_date: dateStr,
           attendance_time: timeStr || new Date().toLocaleTimeString('en-US', { hour12: true }),
-          status: r.status || 'Present',
+          status: normalizedStatus,
           state: 'SUBMITTED',
           submitted_at: new Date(),
           updated_at: new Date()
@@ -664,7 +678,7 @@ async function submitFinalAttendance(schoolId = 'unique_scholars', classId, date
           state: 'SUBMITTED'
         });
 
-        if (r.status === 'Absent') {
+        if (normalizedStatus === 'Absent') {
           let parentPhone = r.parentPhone;
           let name = r.name;
           if (!parentPhone || !name) {
@@ -695,15 +709,16 @@ async function submitFinalAttendance(schoolId = 'unique_scholars', classId, date
   const absentToAlert = [];
   records.forEach(r => {
     const logId = `${dateStr}_${r.studentId}`;
+    const normalizedStatus = normalizeAttendanceStatus(r.status);
     const idx = db.attendanceLogs.findIndex(l => l.id === logId);
     const entry = {
       id: logId, schoolId, classId, studentId: r.studentId,
-      date: dateStr, time: timeStr, status: r.status, state: 'SUBMITTED', submittedAt: new Date().toISOString()
+      date: dateStr, time: timeStr, status: normalizedStatus, state: 'SUBMITTED', submittedAt: new Date().toISOString()
     };
     if (idx >= 0) db.attendanceLogs[idx] = entry;
     else db.attendanceLogs.push(entry);
 
-    if (r.status === 'Absent') {
+    if (normalizedStatus === 'Absent') {
       let parentPhone = r.parentPhone;
       let name = r.name;
       if (!parentPhone || !name) {
@@ -1033,8 +1048,26 @@ async function saveDraftResults(schoolId = 'unique_scholars', payload) {
     const db = getDb();
     const saved = [];
 
+    let resolvedClassId = classId;
+    try {
+      const matched = await db('classes')
+        .where({ school_id: schoolId, is_active: true })
+        .andWhere(function() {
+          this.where('id', classId)
+            .orWhere('name', classId)
+            .orWhereRaw('LOWER(id) = LOWER(?)', [classId])
+            .orWhereRaw('LOWER(name) = LOWER(?)', [classId]);
+        })
+        .first();
+      if (matched) resolvedClassId = matched.id;
+    } catch (e) {}
+
     await db.transaction(async trx => {
       for (const item of results) {
+        if (!item.studentId) continue;
+        const stuRow = await trx('students').where({ id: item.studentId }).first();
+        if (!stuRow) continue;
+
         const existing = await trx('student_results')
           .where({ school_id: schoolId, term_id: termId, student_id: item.studentId })
           .first();
@@ -1042,14 +1075,24 @@ async function saveDraftResults(schoolId = 'unique_scholars', payload) {
         const resId = existing ? existing.id : `RES-${item.studentId}-${termId}`;
         const recordState = (existing && existing.state === 'FINALIZED') ? 'FINALIZED' : 'DRAFT';
 
-        let totalObtained = 0;
-        let totalMax = 0;
-        Object.values(item.marks || {}).forEach(m => {
+        // Fetch existing marks for this resultId if any to merge (so entering one subject does not wipe others)
+        const existingMarksRows = await trx('student_result_marks').where({ result_id: resId });
+        const mergedMarks = {};
+        for (const em of existingMarksRows) {
+          mergedMarks[em.subject_name] = { obtained: Number(em.obtained), total: Number(em.total) };
+        }
+        for (const [subj, m] of Object.entries(item.marks || {})) {
           const obt = typeof m === 'object' && m !== null ? Number(m.obtained ?? 0) : Number(m || 0);
           const tot = typeof m === 'object' && m !== null ? Number(m.total ?? 100) : 100;
-          totalObtained += obt;
-          totalMax += tot;
-        });
+          mergedMarks[subj] = { obtained: isNaN(obt) ? 0 : obt, total: isNaN(tot) || tot <= 0 ? 100 : tot };
+        }
+
+        let totalObtained = 0;
+        let totalMax = 0;
+        for (const m of Object.values(mergedMarks)) {
+          totalObtained += m.obtained;
+          totalMax += m.total;
+        }
         const percentage = totalMax > 0 ? Number(((totalObtained / totalMax) * 100).toFixed(1)) : 0;
         const { grade, passStatus } = computeGradeAndStatus(percentage);
 
@@ -1058,7 +1101,7 @@ async function saveDraftResults(schoolId = 'unique_scholars', payload) {
             id: resId,
             school_id: schoolId,
             term_id: termId,
-            class_id: classId,
+            class_id: resolvedClassId,
             student_id: item.studentId,
             total_obtained: totalObtained,
             total_max: totalMax,
@@ -1072,16 +1115,14 @@ async function saveDraftResults(schoolId = 'unique_scholars', payload) {
           .onConflict('id')
           .merge();
 
-        // Normalize marks
+        // Save merged marks
         await trx('student_result_marks').where({ result_id: resId }).del();
-        for (const [subj, m] of Object.entries(item.marks || {})) {
-          const obt = typeof m === 'object' && m !== null ? Number(m.obtained ?? 0) : Number(m || 0);
-          const tot = typeof m === 'object' && m !== null ? Number(m.total ?? 100) : 100;
+        for (const [subj, m] of Object.entries(mergedMarks)) {
           await trx('student_result_marks').insert({
             result_id: resId,
             subject_name: subj,
-            obtained: obt,
-            total: tot
+            obtained: m.obtained,
+            total: m.total
           });
         }
 
@@ -1089,11 +1130,11 @@ async function saveDraftResults(schoolId = 'unique_scholars', payload) {
           id: resId,
           schoolId,
           termId,
-          classId,
+          classId: resolvedClassId,
           studentId: item.studentId,
-          studentName: item.studentName,
-          parentPhone: item.parentPhone,
-          marks: item.marks,
+          studentName: item.studentName || stuRow.name,
+          parentPhone: item.parentPhone || stuRow.parent_phone,
+          marks: mergedMarks,
           totalObtained,
           totalMax,
           percentage,
@@ -1112,14 +1153,24 @@ async function saveDraftResults(schoolId = 'unique_scholars', payload) {
   const savedList = [];
   results.forEach(item => {
     const resId = `RES-${item.studentId}-${termId}`;
+    const idx = db.studentResults.findIndex(r => r.id === resId || (r.termId === termId && r.studentId === item.studentId));
+    const existingRecord = idx >= 0 ? db.studentResults[idx] : null;
+    const existingMarks = existingRecord && existingRecord.marks ? existingRecord.marks : {};
+    const mergedMarks = { ...existingMarks };
+
+    for (const [subj, m] of Object.entries(item.marks || {})) {
+      const obt = typeof m === 'object' && m !== null ? Number(m.obtained ?? 0) : Number(m || 0);
+      const tot = typeof m === 'object' && m !== null ? Number(m.total ?? 100) : 100;
+      mergedMarks[subj] = { obtained: isNaN(obt) ? 0 : obt, total: isNaN(tot) || tot <= 0 ? 100 : tot };
+    }
+
     let totalObtained = 0, totalMax = 0;
-    Object.values(item.marks || {}).forEach(m => {
+    Object.values(mergedMarks).forEach(m => {
       totalObtained += Number(m.obtained || 0);
       totalMax += Number(m.total || 100);
     });
     const percentage = totalMax > 0 ? Number(((totalObtained / totalMax) * 100).toFixed(1)) : 0;
     const { grade, passStatus } = computeGradeAndStatus(percentage);
-    const idx = db.studentResults.findIndex(r => r.id === resId || (r.termId === termId && r.studentId === item.studentId));
     const existingState = idx >= 0 ? (db.studentResults[idx].state || 'DRAFT') : 'DRAFT';
     const record = {
       id: idx >= 0 ? db.studentResults[idx].id : resId,
@@ -1129,7 +1180,7 @@ async function saveDraftResults(schoolId = 'unique_scholars', payload) {
       studentId: item.studentId,
       studentName: item.studentName,
       parentPhone: item.parentPhone,
-      marks: item.marks,
+      marks: mergedMarks,
       totalObtained,
       totalMax,
       percentage,
@@ -1152,42 +1203,80 @@ async function saveDraftResults(schoolId = 'unique_scholars', payload) {
 async function submitFinalResults(schoolId = 'unique_scholars', payload) {
   const { termId, classId, results } = payload;
 
-  // Calculate ranks across class
-  const studentList = results.map(item => {
-    let totalObtained = 0;
-    let totalMax = 0;
-    Object.values(item.marks || {}).forEach(m => {
-      const obt = typeof m === 'object' && m !== null ? Number(m.obtained ?? 0) : Number(m || 0);
-      const tot = typeof m === 'object' && m !== null ? Number(m.total ?? 100) : 100;
-      totalObtained += obt;
-      totalMax += tot;
-    });
-    const percentage = totalMax > 0 ? Number(((totalObtained / totalMax) * 100).toFixed(1)) : 0;
-    return { ...item, totalObtained, totalMax, percentage };
-  });
-
-  studentList.sort((a, b) => b.percentage - a.percentage);
-  studentList.forEach((s, index) => { s.rank = index + 1; });
-
   if (isPostgresConfigured()) {
     const db = getDb();
     const finalized = [];
 
-    await db.transaction(async trx => {
-      for (const item of studentList) {
-        const existing = await trx('student_results')
-          .where({ school_id: schoolId, term_id: termId, student_id: item.studentId })
-          .first();
+    let resolvedClassId = classId;
+    try {
+      const matched = await db('classes')
+        .where({ school_id: schoolId, is_active: true })
+        .andWhere(function() {
+          this.where('id', classId)
+            .orWhere('name', classId)
+            .orWhereRaw('LOWER(id) = LOWER(?)', [classId])
+            .orWhereRaw('LOWER(name) = LOWER(?)', [classId]);
+        })
+        .first();
+      if (matched) resolvedClassId = matched.id;
+    } catch (e) {}
 
-        const resId = existing ? existing.id : `RES-${item.studentId}-${termId}`;
+    // First, calculate merged marks for ranking
+    const studentListWithMerged = [];
+    for (const item of results) {
+      if (!item.studentId) continue;
+      const stuRow = await db('students').where({ id: item.studentId }).first();
+      if (!stuRow) continue;
+
+      const existing = await db('student_results')
+        .where({ school_id: schoolId, term_id: termId, student_id: item.studentId })
+        .first();
+
+      const resId = existing ? existing.id : `RES-${item.studentId}-${termId}`;
+      const existingMarksRows = await db('student_result_marks').where({ result_id: resId });
+      const mergedMarks = {};
+      for (const em of existingMarksRows) {
+        mergedMarks[em.subject_name] = { obtained: Number(em.obtained), total: Number(em.total) };
+      }
+      for (const [subj, m] of Object.entries(item.marks || {})) {
+        const obt = typeof m === 'object' && m !== null ? Number(m.obtained ?? 0) : Number(m || 0);
+        const tot = typeof m === 'object' && m !== null ? Number(m.total ?? 100) : 100;
+        mergedMarks[subj] = { obtained: isNaN(obt) ? 0 : obt, total: isNaN(tot) || tot <= 0 ? 100 : tot };
+      }
+
+      let totalObtained = 0;
+      let totalMax = 0;
+      for (const m of Object.values(mergedMarks)) {
+        totalObtained += m.obtained;
+        totalMax += m.total;
+      }
+      const percentage = totalMax > 0 ? Number(((totalObtained / totalMax) * 100).toFixed(1)) : 0;
+      studentListWithMerged.push({
+        ...item,
+        studentName: item.studentName || stuRow.name,
+        parentPhone: item.parentPhone || stuRow.parent_phone,
+        rollNumber: stuRow.roll_number,
+        resId,
+        mergedMarks,
+        totalObtained,
+        totalMax,
+        percentage
+      });
+    }
+
+    studentListWithMerged.sort((a, b) => b.percentage - a.percentage);
+    studentListWithMerged.forEach((s, index) => { s.rank = index + 1; });
+
+    await db.transaction(async trx => {
+      for (const item of studentListWithMerged) {
         const { grade, passStatus } = computeGradeAndStatus(item.percentage);
 
         await trx('student_results')
           .insert({
-            id: resId,
+            id: item.resId,
             school_id: schoolId,
             term_id: termId,
-            class_id: classId,
+            class_id: resolvedClassId,
             student_id: item.studentId,
             total_obtained: item.totalObtained,
             total_max: item.totalMax,
@@ -1203,27 +1292,26 @@ async function submitFinalResults(schoolId = 'unique_scholars', payload) {
           .onConflict('id')
           .merge();
 
-        await trx('student_result_marks').where({ result_id: resId }).del();
-        for (const [subj, m] of Object.entries(item.marks || {})) {
-          const obt = typeof m === 'object' && m !== null ? Number(m.obtained ?? 0) : Number(m || 0);
-          const tot = typeof m === 'object' && m !== null ? Number(m.total ?? 100) : 100;
+        await trx('student_result_marks').where({ result_id: item.resId }).del();
+        for (const [subj, m] of Object.entries(item.mergedMarks)) {
           await trx('student_result_marks').insert({
-            result_id: resId,
+            result_id: item.resId,
             subject_name: subj,
-            obtained: obt,
-            total: tot
+            obtained: m.obtained,
+            total: m.total
           });
         }
 
         finalized.push({
-          id: resId,
+          id: item.resId,
           schoolId,
           termId,
-          classId,
+          classId: resolvedClassId,
           studentId: item.studentId,
           studentName: item.studentName,
           parentPhone: item.parentPhone,
-          marks: item.marks,
+          rollNumber: item.rollNumber,
+          marks: item.mergedMarks,
           totalObtained: item.totalObtained,
           totalMax: item.totalMax,
           percentage: item.percentage,
@@ -1238,6 +1326,23 @@ async function submitFinalResults(schoolId = 'unique_scholars', payload) {
 
     return finalized;
   }
+
+  // Calculate ranks across class for JSON fallback
+  const studentList = results.map(item => {
+    let totalObtained = 0;
+    let totalMax = 0;
+    Object.values(item.marks || {}).forEach(m => {
+      const obt = typeof m === 'object' && m !== null ? Number(m.obtained ?? 0) : Number(m || 0);
+      const tot = typeof m === 'object' && m !== null ? Number(m.total ?? 100) : 100;
+      totalObtained += obt;
+      totalMax += tot;
+    });
+    const percentage = totalMax > 0 ? Number(((totalObtained / totalMax) * 100).toFixed(1)) : 0;
+    return { ...item, totalObtained, totalMax, percentage };
+  });
+
+  studentList.sort((a, b) => b.percentage - a.percentage);
+  studentList.forEach((s, index) => { s.rank = index + 1; });
 
   const db = readJsonDb();
   if (!db.studentResults) db.studentResults = [];
@@ -1616,6 +1721,7 @@ async function authenticateUser(loginId, password, schoolId = 'unique_scholars')
             id: user.id,
             schoolId: user.school_id,
             fullName: user.full_name,
+            name: user.full_name,
             username: user.username || '',
             phone: user.phone || '',
             email: user.email || '',
