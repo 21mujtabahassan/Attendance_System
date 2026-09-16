@@ -201,8 +201,24 @@ async function getStudents(schoolId = 'unique_scholars', classId = null) {
   if (isPostgresConfigured()) {
     const db = getDb();
     const query = db('students')
+      .leftJoin('classes', function() {
+        this.on('students.class_id', '=', 'classes.id')
+          .orOn('students.class_id', '=', 'classes.name');
+      })
+      .select(
+        'students.*',
+        'classes.name as class_name'
+      )
       .where({ 'students.school_id': schoolId, 'students.is_active': true });
-    if (classId) query.andWhere({ 'students.class_id': classId });
+
+    if (classId) {
+      query.andWhere(function() {
+        this.where('students.class_id', classId)
+          .orWhere('classes.id', classId)
+          .orWhere('classes.name', classId)
+          .orWhereRaw('LOWER(classes.name) = ?', [String(classId).toLowerCase()]);
+      });
+    }
 
     // Order primarily by roll number asc, then by id
     const rows = await query.orderBy([
@@ -215,6 +231,7 @@ async function getStudents(schoolId = 'unique_scholars', classId = null) {
       rollNumber: r.roll_number !== null && r.roll_number !== undefined ? Number(r.roll_number) : null,
       schoolId: r.school_id,
       classId: r.class_id,
+      className: r.class_name || r.class_id,
       sectionId: r.section_id,
       section: r.section_name || 'Section A',
       name: r.name,
@@ -225,9 +242,23 @@ async function getStudents(schoolId = 'unique_scholars', classId = null) {
   }
 
   const db = readJsonDb();
-  let list = (db.students || []).filter(s => s.schoolId === schoolId && s.isActive !== false && (!classId || s.classId === classId));
+  const classes = db.classes || [];
+  let list = (db.students || []).filter(s => {
+    if (s.schoolId !== schoolId || s.isActive === false) return false;
+    if (!classId) return true;
+    if (s.classId === classId) return true;
+    const cl = classes.find(c => c.id === s.classId || c.name === s.classId);
+    if (cl && (cl.id === classId || cl.name === classId || cl.name.toLowerCase() === String(classId).toLowerCase())) return true;
+    return false;
+  });
   list.sort((a, b) => (a.rollNumber || 999999) - (b.rollNumber || 999999));
-  return list;
+  return list.map(s => {
+    const cl = classes.find(c => c.id === s.classId || c.name === s.classId);
+    return {
+      ...s,
+      className: cl ? cl.name : s.classId
+    };
+  });
 }
 
 async function addStudent(schoolId = 'unique_scholars', studentData) {
@@ -640,7 +671,10 @@ async function submitFinalAttendance(schoolId = 'unique_scholars', classId, date
     try {
       const matched = await db('classes')
         .where({ school_id: schoolId, is_active: true })
-        .whereRaw('LOWER(id) = LOWER(?)', [classId])
+        .andWhere(function() {
+          this.whereRaw('LOWER(id) = LOWER(?)', [classId])
+            .orWhereRaw('LOWER(name) = LOWER(?)', [classId]);
+        })
         .first();
       if (matched) resolvedClassId = matched.id;
     } catch (e) {}
@@ -747,7 +781,21 @@ async function getAttendanceLogs(schoolId = 'unique_scholars', filters = {}) {
   if (isPostgresConfigured()) {
     const db = getDb();
     const query = db('attendance_logs').where({ school_id: schoolId });
-    if (filters.classId) query.andWhere({ class_id: filters.classId });
+    if (filters.classId) {
+      const matchedCls = await db('classes')
+        .where({ school_id: schoolId })
+        .andWhere(function() {
+          this.whereRaw('LOWER(id) = LOWER(?)', [filters.classId])
+            .orWhereRaw('LOWER(name) = LOWER(?)', [filters.classId]);
+        })
+        .first();
+      const possibleIds = [filters.classId];
+      if (matchedCls) {
+        possibleIds.push(matchedCls.id);
+        possibleIds.push(matchedCls.name);
+      }
+      query.whereIn('class_id', Array.from(new Set(possibleIds)));
+    }
     if (filters.date) query.andWhere({ attendance_date: filters.date });
     if (filters.status) query.andWhere({ status: filters.status });
 
@@ -765,9 +813,14 @@ async function getAttendanceLogs(schoolId = 'unique_scholars', filters = {}) {
   }
 
   const db = readJsonDb();
+  const classes = db.classes || [];
   return (db.attendanceLogs || []).filter(l => {
     if (l.schoolId !== schoolId) return false;
-    if (filters.classId && l.classId !== filters.classId) return false;
+    if (filters.classId) {
+      const cl = classes.find(c => c.id === filters.classId || c.name === filters.classId);
+      const allowed = new Set([filters.classId, cl?.id, cl?.name].filter(Boolean));
+      if (!allowed.has(l.classId)) return false;
+    }
     if (filters.date && l.date !== filters.date) return false;
     if (filters.status && l.status !== filters.status) return false;
     return true;

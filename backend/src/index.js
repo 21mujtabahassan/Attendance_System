@@ -547,11 +547,30 @@ app.get(['/api/students', '/api/schools/:schoolId/students'], async (req, res) =
     let classId = req.query.classId || req.query.class;
 
     if (reqUser && reqUser.role === 'teacher') {
-      const allowed = reqUser.assignedClassIds || [];
-      if (allowed.length === 0) {
+      const rawAllowed = reqUser.assignedClassIds || [];
+      let freshClasses = [];
+      try {
+        freshClasses = await getTeacherAssignedClasses(schoolId, reqUser.id);
+      } catch (e) {}
+
+      const classes = await getClasses(schoolId);
+      const allClassKeys = [
+        ...rawAllowed,
+        ...freshClasses.map(c => c.id),
+        ...freshClasses.map(c => c.name)
+      ];
+      const matched = classes.filter(c => allClassKeys.includes(c.id) || allClassKeys.includes(c.name));
+      const allowedSet = new Set([
+        ...allClassKeys,
+        ...matched.map(c => c.id),
+        ...matched.map(c => c.name),
+        ...matched.map(c => c.name.toLowerCase())
+      ]);
+
+      if (allowedSet.size === 0) {
         return res.json({ success: true, students: [] });
       }
-      if (classId && !allowed.includes(classId)) {
+      if (classId && !allowedSet.has(classId) && !allowedSet.has(String(classId).toLowerCase())) {
         return res.status(403).json({
           success: false,
           error: 'Access Denied: You cannot view students of other classes.',
@@ -563,8 +582,22 @@ app.get(['/api/students', '/api/schools/:schoolId/students'], async (req, res) =
     let students = await getStudents(schoolId, classId);
 
     if (reqUser && reqUser.role === 'teacher') {
-      const allowedSet = new Set(reqUser.assignedClassIds || []);
-      students = students.filter(s => allowedSet.has(s.classId));
+      const rawAllowed = reqUser.assignedClassIds || [];
+      let freshClasses = [];
+      try { freshClasses = await getTeacherAssignedClasses(schoolId, reqUser.id); } catch (e) {}
+      const classes = await getClasses(schoolId);
+      const allClassKeys = [
+        ...rawAllowed,
+        ...freshClasses.map(c => c.id),
+        ...freshClasses.map(c => c.name)
+      ];
+      const matched = classes.filter(c => allClassKeys.includes(c.id) || allClassKeys.includes(c.name));
+      const allowedSet = new Set([
+        ...allClassKeys,
+        ...matched.map(c => c.id),
+        ...matched.map(c => c.name)
+      ]);
+      students = students.filter(s => allowedSet.has(s.classId) || (s.className && allowedSet.has(s.className)));
     }
 
     res.json({ success: true, students });

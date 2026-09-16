@@ -25,6 +25,12 @@ function escapeHtml(str) {
     .replace(/'/g, '&#039;');
 }
 
+function getClassName(classId) {
+  if (!classId) return '-';
+  const c = (globalClasses || []).find(x => x.id === classId || x.name === classId);
+  return c ? c.name : classId;
+}
+
 document.addEventListener('DOMContentLoaded', async () => {
   initClock();
   initServerBadge();
@@ -512,9 +518,9 @@ function populateClassDropdowns() {
   let allowedClasses = globalClasses;
   if (isTeacher) {
     const assignedIds = new Set(currentUser.assignedClassIds || []);
-    allowedClasses = globalClasses.filter(c => assignedIds.has(c.id));
+    allowedClasses = globalClasses.filter(c => assignedIds.has(c.id) || assignedIds.has(c.name));
     if (allowedClasses.length === 0 && (currentUser.assignedClassIds || []).length > 0) {
-      allowedClasses = globalClasses.filter(c => (currentUser.assignedClassIds || []).includes(c.id));
+      allowedClasses = globalClasses.filter(c => (currentUser.assignedClassIds || []).includes(c.id) || (currentUser.assignedClassIds || []).includes(c.name));
     }
   }
 
@@ -666,7 +672,7 @@ async function loadOverviewData() {
         <div style="display: flex; justify-content: space-between; align-items: center; background: #0f172a; padding: 10px 14px; border-radius: 8px; margin-bottom: 8px; border-left: 3px solid #ef4444;">
           <div>
             <strong style="color: #fff; font-size: 14px;">${a.name}</strong>
-            <p style="font-size: 11px; color: #94a3b8; margin: 0;">Class: ${a.classId}</p>
+            <p style="font-size: 11px; color: #94a3b8; margin: 0;">Class: ${escapeHtml(a.className || getClassName(a.classId))}</p>
           </div>
           <span style="background: rgba(239, 68, 68, 0.2); color: #ef4444; font-weight: bold; font-size: 12px; padding: 3px 8px; border-radius: 12px;">${a.absentCount} Absences</span>
         </div>
@@ -1196,7 +1202,7 @@ async function loadFinalizedResultsHistory() {
       <tr>
         <td><strong>${r.studentId}</strong></td>
         <td>${r.studentName}</td>
-        <td>${r.classId}</td>
+        <td><span class="badge" style="background: rgba(59, 130, 246, 0.15); color: #60a5fa; font-weight: 600;">${escapeHtml(r.className || getClassName(r.classId))}</span></td>
         <td>${r.termId}</td>
         <td style="font-weight: bold; color: #38bdf8;">${r.totalObtained} / ${r.totalMax}</td>
         <td style="font-weight: bold;">${r.percentage}%</td>
@@ -1330,7 +1336,7 @@ function populateResultTelecastModal(ctx) {
   document.getElementById('telecastClassId').value = ctx.classId || '';
 
   document.getElementById('telecastStudentName').innerText = ctx.studentName || 'Student';
-  document.getElementById('telecastStudentMeta').innerText = `Class: ${ctx.classId} | ID: ${ctx.studentId} | ${ctx.termName || ctx.termId}`;
+  document.getElementById('telecastStudentMeta').innerText = `Class: ${ctx.className || getClassName(ctx.classId)} | ID: ${ctx.studentId} | ${ctx.termName || ctx.termId}`;
 
   const phoneEl = document.getElementById('telecastParentPhoneDisplay');
   if (ctx.parentPhone) {
@@ -1416,7 +1422,7 @@ Respected Parents of *${currentTelecastContext.studentName}*,
 The official examination statement of marks for *${currentTelecastContext.termName || currentTelecastContext.termId}* has been generated.
 
 👤 *Student ID:* ${currentTelecastContext.studentId}
-🏫 *Class:* ${currentTelecastContext.classId}
+🏫 *Class:* ${currentTelecastContext.className || getClassName(currentTelecastContext.classId)}
 📅 *Exam Term:* ${currentTelecastContext.termName || currentTelecastContext.termId}
 ${subjectsText}
 📊 *Performance Summary:*
@@ -1702,13 +1708,13 @@ async function handleSendBroadcast(e) {
       initGatewayBadge();
     } else if (data.success && data.sentCount === 0) {
       // Client fallback route to local gateway
-      const targetStudents = globalStudents.filter(s => targetGroup === 'all' || s.classId === classId);
+      const targetStudents = globalStudents.filter(s => targetGroup === 'all' || s.classId === classId || s.className === classId);
       const batch = targetStudents.filter(s => s.parentPhone).map(s => {
         const item = {
           studentId: s.id,
           studentName: s.name,
           phone: s.parentPhone,
-          message: message.replace(/{student_name}/g, s.name).replace(/{class_id}/g, s.classId)
+          message: message.replace(/{student_name}/g, s.name).replace(/{class_id}/g, s.className || getClassName(s.classId))
         };
         if (currentBroadcastMedia) {
           item.media = {
@@ -1917,9 +1923,9 @@ function filterStudentTable() {
   let list = globalStudents;
   if (isTeacher) {
     const assignedSet = new Set(currentUser.assignedClassIds || []);
-    list = list.filter(s => assignedSet.has(s.classId));
+    list = list.filter(s => assignedSet.has(s.classId) || assignedSet.has(s.className));
   }
-  if (classFilter) list = list.filter(s => s.classId === classFilter);
+  if (classFilter) list = list.filter(s => s.classId === classFilter || s.className === classFilter);
   if (query) {
     list = list.filter(s =>
       s.name.toLowerCase().includes(query) ||
@@ -1940,7 +1946,7 @@ function filterStudentTable() {
       <td><strong>${escapeHtml(s.id)}</strong></td>
       <td>${escapeHtml(s.name)}</td>
       <td>${escapeHtml(s.fatherName || '-')}</td>
-      <td>${escapeHtml(s.classId)}</td>
+      <td><span class="badge badge-info" style="font-weight:600; font-size: 0.85rem;">${escapeHtml(s.className || getClassName(s.classId))}</span></td>
       <td>${escapeHtml(s.section || 'Section A')}</td>
       <td><span class="phone-badge">📞 ${escapeHtml(s.parentPhone || 'Not Provided')}</span></td>
       <td>${escapeHtml(s.parentEmail || '-')}</td>
@@ -2010,7 +2016,7 @@ function openEditStudentModal(studentId) {
   const isTeacher = currentUser && currentUser.role === 'teacher';
   if (isTeacher) {
     const assignedIds = currentUser.assignedClassIds || [];
-    if (!assignedIds.includes(stu.classId)) {
+    if (!assignedIds.includes(stu.classId) && !assignedIds.includes(stu.className)) {
       showToast('Access Denied: You cannot modify students of other classes.');
       return;
     }
@@ -2028,6 +2034,10 @@ function openEditStudentModal(studentId) {
   const classSelect = document.getElementById('editStudentClass');
   if (classSelect) {
     classSelect.value = stu.classId;
+    if (!classSelect.value && stu.className) {
+      const found = Array.from(classSelect.options).find(o => o.text.trim() === stu.className.trim() || o.value === stu.className);
+      if (found) classSelect.value = found.value;
+    }
     classSelect.disabled = isTeacher; // Teachers cannot change student class
   }
   populateSectionDropdown('editStudentClass', 'editStudentSection');
@@ -2100,7 +2110,7 @@ async function handleDeleteStudent(studentId) {
 
 function viewClassRoster(classId, className) {
   document.getElementById('classDetailsTitle').innerHTML = `<i class="fa-solid fa-graduation-cap"></i> ${className} Student Roster`;
-  const classStudents = globalStudents.filter(s => s.classId === classId);
+  const classStudents = globalStudents.filter(s => s.classId === classId || s.className === classId || s.className === className);
   const tbody = document.getElementById('classRosterTableBody');
 
   if (classStudents.length === 0) {
@@ -2149,7 +2159,7 @@ async function loadRecordsData() {
         <td><strong>${r.date}</strong> <br><small class="text-muted">${r.time || ''}</small></td>
         <td>${r.studentId}</td>
         <td>${r.name}</td>
-        <td>${r.classId}</td>
+        <td><span class="badge" style="background: rgba(59, 130, 246, 0.15); color: #60a5fa; font-weight: 600;">${escapeHtml(r.className || getClassName(r.classId))}</span></td>
         <td><span class="badge ${r.status === 'Present' ? 'badge-success' : r.status === 'Absent' ? 'badge-danger' : 'badge-warning'}">${r.status}</span></td>
         <td><span class="badge">${r.state || 'SUBMITTED'}</span></td>
         <td>${r.status === 'Absent' ? '<span style="color: #34d399; font-weight: 600;">📩 Sent via WhatsApp</span>' : '-'}</td>
@@ -2636,9 +2646,9 @@ async function loadFeeStructures() {
 
     container.innerHTML = '';
     globalClasses.forEach(cls => {
-      const struct = globalFeeStructures.find(s => s.classId === cls.name);
+      const struct = globalFeeStructures.find(s => s.classId === cls.id || s.classId === cls.name);
       const currentFee = struct ? struct.baseFee : 3000;
-      const studentCount = globalStudents.filter(s => s.classId === cls.name).length;
+      const studentCount = globalStudents.filter(s => s.classId === cls.id || s.classId === cls.name || s.className === cls.name).length;
 
       const card = document.createElement('div');
       card.className = 'fee-struct-card';
@@ -2759,6 +2769,7 @@ function filterFeeLedgerRows() {
       (f.studentName && f.studentName.toLowerCase().includes(search)) ||
       (f.rollNo && String(f.rollNo).toLowerCase().includes(search)) ||
       (f.classId && f.classId.toLowerCase().includes(search)) ||
+      (getClassName(f.classId) && getClassName(f.classId).toLowerCase().includes(search)) ||
       (f.parentPhone && f.parentPhone.includes(search))
     );
   }
@@ -2802,7 +2813,7 @@ function filterFeeLedgerRows() {
         <div style="font-size: 11px; color: var(--text-muted);">Roll #${item.rollNo || '-'}</div>
       </td>
       <td>
-        <span class="badge" style="background: rgba(59, 130, 246, 0.15); color: #60a5fa;">${item.classId || '-'}</span>
+        <span class="badge" style="background: rgba(59, 130, 246, 0.15); color: #60a5fa;">${escapeHtml(item.className || getClassName(item.classId) || item.classId || '-')}</span>
         ${item.section ? `<span style="font-size: 11px; color: var(--text-muted); margin-left: 4px;">(${item.section})</span>` : ''}
       </td>
       <td>${phoneDisplay}</td>
@@ -3012,7 +3023,7 @@ function openFeePaymentModal(feeId) {
   document.getElementById('payStudentId').value = item.studentId || '';
   document.getElementById('payStudentPhone').value = item.parentPhone || '';
   document.getElementById('payStudentName').innerText = item.studentName || 'Student';
-  document.getElementById('payStudentClassRoll').innerText = `Class: ${item.classId} | Roll #${item.rollNo || '-'} | ID: ${item.studentId || '-'}`;
+  document.getElementById('payStudentClassRoll').innerText = `Class: ${item.className || getClassName(item.classId)} | Roll #${item.rollNo || '-'} | ID: ${item.studentId || '-'}`;
   document.getElementById('payCurrentBalance').innerText = `PKR ${Number(item.balanceDue).toLocaleString()}`;
 
   const classRate = item.classBaseFee || (item.baseFee > 0 ? item.baseFee : 3000);

@@ -909,7 +909,7 @@ async function loadAttendanceLogsView() {
         <div class="log-item-card">
           <div class="log-item-info">
             <span class="log-student-name">${l.studentName || l.studentId}</span>
-            <span class="log-meta-text">Class: ${l.classId} • ${l.date} ${l.time ? 'at ' + l.time : ''}</span>
+            <span class="log-meta-text">Class: ${l.className || (assignedClasses.find(c => c.id === l.classId || c.name === l.classId)?.name) || l.classId} • ${l.date} ${l.time ? 'at ' + l.time : ''}</span>
           </div>
           <span class="log-badge ${badgeClass}">${l.status || 'Present'}</span>
         </div>
