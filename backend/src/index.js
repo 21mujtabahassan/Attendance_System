@@ -1886,10 +1886,13 @@ app.post('/api/admin/broadcast/send', async (req, res) => {
     if (targetGroup === 'all') {
       targetStudents = students;
     } else if (targetGroup === 'class' && classId) {
-      targetStudents = students.filter(s => s.classId === classId);
+      targetStudents = students.filter(s => s.classId === classId || s.className === classId);
     } else {
       targetStudents = students;
     }
+
+    const now = new Date();
+    const dateStr = now.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
 
     const results = [];
     const pendingBatch = [];
@@ -1898,7 +1901,11 @@ app.post('/api/admin/broadcast/send', async (req, res) => {
       const rawMessage = message || '';
       const formattedMessage = rawMessage
         .replace(/{student_name}/g, student.name)
-        .replace(/{class_id}/g, student.classId);
+        .replace(/{class_id}/g, student.className || student.classId)
+        .replace(/{class_name}/g, student.className || student.classId)
+        .replace(/{father_name}/g, student.fatherName || '')
+        .replace(/{school_name}/g, 'Unique Scholars Academy')
+        .replace(/{date}/g, dateStr);
 
       const batchItem = {
         studentId: student.id,

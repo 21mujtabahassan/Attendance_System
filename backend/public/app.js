@@ -495,6 +495,8 @@ async function fetchStudents() {
     const data = await res.json();
     globalStudents = data.students || [];
     filterStudentTable();
+    populateSampleStudentDropdown();
+    renderLiveWhatsAppPreview();
   } catch (e) {
     console.error('Error fetching students:', e);
   }
@@ -1523,10 +1525,76 @@ async function handleDispatchResultFromModal() {
 }
 
 // -------------------------------------------------------------
-// TAB 3: WHATSAPP BROADCAST CENTER
+// TAB 3: WHATSAPP BROADCAST CENTER (Live Preview & School Scenarios)
 // -------------------------------------------------------------
+
+const BUILTIN_SCHOOL_TEMPLATES = [
+  {
+    id: 'TPL-WEATHER-HOLIDAY',
+    title: '🌧️ Weather / Emergency Holiday Notice',
+    category: 'Urgent Announcement',
+    body: `Assalam-o-Alaikum! 🌧️\nRespected Parents,\n\nHukoomat / Zila Administration ki hidayat aur shadeed mausam (barish / smog) ke pesh-e-nazar, kal school mukammal band rahega.\n\n📅 Re-opening: Insha'Allah kal ke baad school mamool ke mutabiq khulega.\nBache ghar par reh kar apni parhai aur homework jari rakhein.\n\nShukriya & Regards,\n{school_name}`
+  },
+  {
+    id: 'TPL-PTM-MEETING',
+    title: '🤝 Parent-Teacher Meeting (PTM) Notice',
+    category: 'Academics',
+    body: `Assalam-o-Alaikum! 🤝\nRespected Parents of *{student_name}* ({class_id}),\n\nAap ko muttala kiya jata hai ke bache ki taleemi karkardagi aur tarbiyat par tabadla-e-khayal ke liye Parent-Teacher Meeting (PTM) munaqqid ki ja rahi hai:\n\n📅 Date: Is baroz Shanichar (Saturday)\n⏰ Timings: 09:00 AM se 01:00 PM tak\n\nBarah-e-karam muqarrara waqt par tashreef la kar apne bache ki progress par asateza se rabta karein.\n\nShukriya,\n{school_name}`
+  },
+  {
+    id: 'TPL-FEE-REMINDER',
+    title: '💰 Monthly Tuition Fee Reminder',
+    category: 'Fee Accounts',
+    body: `Assalam-o-Alaikum! 📢\nRespected Parents of *{student_name}* ({class_id}),\n\nYeh ek muaddabana yaad dehani hai ke maah-e-rawan ki school tuition fee jama karwane ki aakhri tareekh qareeb hai. Barah-e-karam timely payment ensure farmaiye taake bache ki taleem baghair kisi rukawat ke jari rahe.\n\n*(Agar aap fee ada kar chuke hain to is paigham ko sarf-e-nazar farmaiye)*.\n\nJazakAllah Khair,\nAccounts Office - {school_name}`
+  },
+  {
+    id: 'TPL-EXAM-DATESHEET',
+    title: '📝 Examination Date Sheet & Syllabus Notice',
+    category: 'Examinations',
+    body: `Assalam-o-Alaikum! 📝\nRespected Parents of *{student_name}* ({class_id}),\n\nAap ko aagah kiya jata hai ke aainda imtehanat ka rasmi aaghaz hone ja raha hai. Mukammal Date Sheet aur Syllabus sath munsalik (attach) kar diya gaya hai.\n\n📌 Barah-e-karam bachon ki daily preparation aur attendance par khas tawajjah dein.\n\nBest of Luck to all students!\nExamination Branch - {school_name}`
+  },
+  {
+    id: 'TPL-TIMINGS-CHANGE',
+    title: '⏰ School Timings Change Notice',
+    category: 'General Notice',
+    body: `Assalam-o-Alaikum! ⏰\nRespected Parents,\n\nMausam ki tabdeeli ke pesh-e-nazar school ke naye auqat (timings) darj zail honge:\n\n• Morning Assembly & Arrival: 08:00 AM\n• Dismissal (Chutti): 01:30 PM (Jummah: 12:00 PM)\n\nTamam walidain se guzarish hai ke bachon ko waqt par school pohanchayein aur chutti ke waqt timely pick karein.\n\nAdministration,\n{school_name}`
+  },
+  {
+    id: 'TPL-UNIFORM-DISCIPLINE',
+    title: '👔 Uniform & Grooming Discipline Notice',
+    category: 'Discipline',
+    body: `Assalam-o-Alaikum! 👔\nRespected Parents of *{student_name}* ({class_id}),\n\nUmeed hai aap khairiyat se honge. Yeh yaad dehani karwayi jati hai ke tamam talba ka rozana mukammal aur saaf suthray school uniform, neat haircut, aur polished black shoes ke sath school aana lazmi hai.\n\nSchool discipline aur nazm-o-zabt barqarar rakhne mein taawun farmaiye.\n\nPrincipal,\n{school_name}`
+  },
+  {
+    id: 'TPL-VACATIONS-BREAK',
+    title: '🏖️ Summer / Winter Vacations Announcement',
+    category: 'Holidays',
+    body: `Assalam-o-Alaikum! 🏖️\nRespected Parents,\n\nAap ko aagah kiya jata hai ke salana ta'teelat (vacations) ka aaghaz ho raha hai:\n\n• Chuttiyan: [Start Date] se shuru hon gi\n• Vacation Task/Pack: Bachon ko supply kar diya gaya hai\n• School Re-opening: [Reopening Date] ko mamool ke mutabiq classes shuru hon gi\n\nBachon ki sehat aur hifazat ka khas khayal rakhein aur rozaana thora waqt taleem ko dein.\n\nHappy Holidays!\n{school_name}`
+  },
+  {
+    id: 'TPL-SPORTS-GALA',
+    title: '🏆 Sports Day / Annual Function Invitation',
+    category: 'Events',
+    body: `Assalam-o-Alaikum! 🏆\nRespected Parents,\n\n{school_name} ke Salana Sports Gala aur Prize Distribution Function ka in'iqaad kiya ja raha hai.\n\n📅 Date: [Date, e.g. 25th Oct]\n⏰ Time: [Time, e.g. 10:00 AM]\n📍 Venue: School Campus Grounds\n\nAap tamam walidain ko is pur-musarrat taqreeb mein shirkat ki purkholoos dawat di jati hai. Aap ki aamad bachon ka hosla barhaye gi.\n\nManagement,\n{school_name}`
+  },
+  {
+    id: 'TPL-ABSENCE-INQUIRY',
+    title: '🩺 Consecutive Absence & Health Inquiry',
+    category: 'Attendance Care',
+    body: `Assalam-o-Alaikum! 🩺\nRespected Parents of *{student_name}* ({class_id}),\n\nDekha gaya hai ke bacha guzishta kuch dino se school hazir nahi ho raha. Agar bacha beemar hai ya koi gharelu masla darpaish hai to barah-e-karam school office ko aagah farmaiye taake missing class work facilitate kiya ja sake.\n\nBache ki sehat aur mustaqbil ke liye dua-go,\nClass Incharge & Principal,\n{school_name}`
+  },
+  {
+    id: 'TPL-GENERAL-CIRCULAR',
+    title: '📢 General Official School Circular',
+    category: 'General Notice',
+    body: `Assalam-o-Alaikum! 📢\nRespected Parents,\n\nYeh zaroori paigham aap ki itla'a ke liye dispatch kiya ja raha hai:\n\n[Apna ahem paigham yahan darj karein / Enter your important circular details here]\n\nAap ke musalsal taawun ka dili shukriya.\n\nWassalam,\nAdministration Office,\n{school_name}`
+  }
+];
+
 async function loadBroadcastTabData() {
   fetchTemplates();
+  populateSampleStudentDropdown();
+  renderLiveWhatsAppPreview();
 }
 
 async function fetchTemplates() {
@@ -1534,42 +1602,179 @@ async function fetchTemplates() {
     const res = await fetch(`${API_BASE}/admin/broadcast/templates?schoolId=${CURRENT_SCHOOL_ID}`);
     const data = await res.json();
     globalTemplates = data.templates || [];
-    renderTemplatesList();
     populateBroadcastTemplateDropdown();
   } catch (e) {
     console.error('Error fetching templates:', e);
   }
 }
 
-function renderTemplatesList() {
-  const container = document.getElementById('templatesListContainer');
-  if (globalTemplates.length > 0) {
-    container.innerHTML = globalTemplates.map(t => `
-      <div class="tpl-item-card">
-        <div class="tpl-title-row">
-          <strong style="color: #fff; font-size: 14px;">${t.title}</strong>
-          <span class="badge">${t.category}</span>
-        </div>
-        <div class="tpl-body-preview">${t.body}</div>
-      </div>
-    `).join('');
-  } else {
-    container.innerHTML = '<p class="text-muted">No message templates saved yet.</p>';
-  }
-}
-
 function populateBroadcastTemplateDropdown() {
   const select = document.getElementById('broadcastTemplateSelect');
   if (!select) return;
-  select.innerHTML = '<option value="">-- Choose a pre-configured template --</option>' +
-    globalTemplates.map(t => `<option value="${t.id}">${t.title} (${t.category})</option>`).join('');
+
+  let html = '<option value="">-- Choose a pre-configured school scenario --</option>';
+  html += '<optgroup label="🎒 Common School Life Scenarios">';
+  BUILTIN_SCHOOL_TEMPLATES.forEach(t => {
+    html += `<option value="${t.id}">${t.title}</option>`;
+  });
+  html += '</optgroup>';
+
+  if (globalTemplates && globalTemplates.length > 0) {
+    html += '<optgroup label="💾 Saved Custom Templates">';
+    globalTemplates.forEach(t => {
+      html += `<option value="${t.id}">${t.title} (${t.category})</option>`;
+    });
+    html += '</optgroup>';
+  }
+
+  select.innerHTML = html;
 }
 
 function applyBroadcastTemplate() {
-  const id = document.getElementById('broadcastTemplateSelect').value;
-  const tpl = globalTemplates.find(t => t.id === id);
+  const id = document.getElementById('broadcastTemplateSelect')?.value;
+  if (!id) return;
+
+  const allTemplates = [...BUILTIN_SCHOOL_TEMPLATES, ...globalTemplates];
+  const tpl = allTemplates.find(t => t.id === id);
   if (tpl) {
-    document.getElementById('broadcastMessageInput').value = tpl.body;
+    const input = document.getElementById('broadcastMessageInput');
+    if (input) {
+      input.value = tpl.body;
+      renderLiveWhatsAppPreview();
+    }
+  }
+}
+
+function insertBroadcastTag(tag) {
+  const input = document.getElementById('broadcastMessageInput');
+  if (!input) return;
+
+  const start = input.selectionStart || 0;
+  const end = input.selectionEnd || 0;
+  const val = input.value || '';
+
+  input.value = val.substring(0, start) + tag + val.substring(end);
+  const newPos = start + tag.length;
+  input.focus();
+  input.setSelectionRange(newPos, newPos);
+
+  renderLiveWhatsAppPreview();
+}
+
+function populateSampleStudentDropdown() {
+  const select = document.getElementById('waPreviewStudentSelect');
+  if (!select) return;
+
+  let list = (globalStudents || []).slice(0, 15);
+  if (list.length === 0) {
+    list = [
+      { id: 'STU-000020', name: 'Aswad Ali', fatherName: 'Hamza Ali', className: 'Nursery', classId: 'Nursery' },
+      { id: 'STU-000018', name: 'Hazan Hussain', fatherName: 'M.Qasim', className: 'Class Play', classId: 'Class-Play' },
+      { id: 'STU-000022', name: 'Arham Ali', fatherName: 'Rehman Ali', className: 'Prep', classId: 'Prep' }
+    ];
+  }
+
+  select.innerHTML = list.map(s => {
+    const cName = s.className || getClassName(s.classId);
+    return `<option value="${s.id}" data-name="${escapeHtml(s.name)}" data-father="${escapeHtml(s.fatherName || '')}" data-class="${escapeHtml(cName)}">${escapeHtml(s.name)} (${escapeHtml(cName)})</option>`;
+  }).join('');
+}
+
+function renderLiveWhatsAppPreview() {
+  const bubbleText = document.getElementById('waBubbleText');
+  const bubbleMedia = document.getElementById('waBubbleMedia');
+  const timeEl = document.getElementById('waMsgTime');
+  const counterEl = document.getElementById('broadcastWordCounter');
+  const rawMessage = (document.getElementById('broadcastMessageInput')?.value || '').trim();
+
+  // 1. Get sample student details
+  const studentSelect = document.getElementById('waPreviewStudentSelect');
+  let sample = { name: 'Aswad Ali', fatherName: 'Hamza Ali', className: 'Nursery' };
+
+  if (studentSelect && studentSelect.selectedIndex >= 0) {
+    const opt = studentSelect.options[studentSelect.selectedIndex];
+    if (opt) {
+      sample = {
+        name: opt.getAttribute('data-name') || 'Aswad Ali',
+        fatherName: opt.getAttribute('data-father') || 'Hamza Ali',
+        className: opt.getAttribute('data-class') || 'Nursery'
+      };
+    }
+  }
+
+  // 2. Format current date & time
+  const now = new Date();
+  const dateStr = now.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+  const timeStr = now.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+  if (timeEl) timeEl.textContent = timeStr;
+
+  // 3. Render message text with replaced placeholders & WhatsApp markdown
+  if (!rawMessage) {
+    if (bubbleText) {
+      bubbleText.innerHTML = 'Assalam-o-Alaikum! 📢<br><span style="color: rgba(255,255,255,0.6); font-style: italic;">Choose a quick scenario template above or type your broadcast message on the left...</span>';
+    }
+  } else {
+    let formatted = rawMessage
+      .replace(/{student_name}/g, sample.name)
+      .replace(/{class_id}/g, sample.className)
+      .replace(/{class_name}/g, sample.className)
+      .replace(/{father_name}/g, sample.fatherName || 'Hamza Ali')
+      .replace(/{school_name}/g, 'Unique Scholars Academy')
+      .replace(/{date}/g, dateStr);
+
+    // Escape HTML first to prevent injection
+    formatted = escapeHtml(formatted);
+
+    // Parse WhatsApp markdown: *bold* -> <strong>, _italic_ -> <em>, ~strikethrough~ -> <del>
+    formatted = formatted
+      .replace(/\*([^*\n]+)\*/g, '<strong>$1</strong>')
+      .replace(/_([^_\n]+)_/g, '<em>$1</em>')
+      .replace(/~([^~\n]+)~/g, '<del>$1</del>')
+      .replace(/\n/g, '<br>');
+
+    if (bubbleText) bubbleText.innerHTML = formatted;
+  }
+
+  // 4. Update Word & Character Counter
+  if (counterEl) {
+    const words = rawMessage ? rawMessage.trim().split(/\s+/).length : 0;
+    const chars = rawMessage.length;
+    counterEl.innerHTML = `<i class="fa-solid fa-keyboard"></i> ${chars} characters (${words} words) • Live preview updated`;
+  }
+
+  // 5. Handle attached media preview in chat bubble
+  if (bubbleMedia) {
+    if (currentBroadcastMedia) {
+      const mime = (currentBroadcastMedia.mimetype || '').toLowerCase();
+      const kb = (currentBroadcastMedia.size || 0) / 1024;
+      const sizeStr = kb >= 1024 ? `${(kb / 1024).toFixed(1)} MB` : `${Math.round(kb)} KB`;
+
+      if (mime.startsWith('image/')) {
+        bubbleMedia.innerHTML = `
+          <div style="border-radius: 6px; overflow: hidden; max-height: 220px; background: rgba(0,0,0,0.3); margin-bottom: 6px;">
+            <img src="${currentBroadcastMedia.dataUrl}" alt="Attached Image" style="width: 100%; height: auto; max-height: 220px; object-fit: cover; display: block;" />
+          </div>
+        `;
+        bubbleMedia.style.display = 'block';
+      } else {
+        const isPdf = mime.includes('pdf');
+        bubbleMedia.innerHTML = `
+          <div class="wa-media-doc-card" style="margin-bottom: 6px;">
+            <div class="wa-media-doc-icon" style="background: ${isPdf ? '#ef4444' : '#3b82f6'};">
+              <i class="${isPdf ? 'fa-solid fa-file-pdf' : 'fa-solid fa-file-lines'}"></i>
+            </div>
+            <div class="wa-media-doc-details">
+              <div class="wa-media-doc-name">${escapeHtml(currentBroadcastMedia.fileName)}</div>
+              <div class="wa-media-doc-meta">${sizeStr} • ${isPdf ? 'PDF Document' : 'Attachment'}</div>
+            </div>
+          </div>
+        `;
+        bubbleMedia.style.display = 'block';
+      }
+    } else {
+      bubbleMedia.style.display = 'none';
+      bubbleMedia.innerHTML = '';
+    }
   }
 }
 
@@ -1600,6 +1805,7 @@ function handleBroadcastMediaSelect(event) {
     };
 
     renderBroadcastMediaPreview();
+    renderLiveWhatsAppPreview();
   };
   reader.onerror = function() {
     showToast('❌ Failed to read attached file.');
@@ -1648,6 +1854,7 @@ function clearBroadcastMedia() {
   if (preview) preview.style.display = 'none';
   const reqMark = document.getElementById('broadcastMsgRequiredMark');
   if (reqMark) reqMark.style.display = 'inline';
+  renderLiveWhatsAppPreview();
 }
 
 function toggleBroadcastClassSelector() {
@@ -1708,13 +1915,21 @@ async function handleSendBroadcast(e) {
       initGatewayBadge();
     } else if (data.success && data.sentCount === 0) {
       // Client fallback route to local gateway
+      const now = new Date();
+      const dateStr = now.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
       const targetStudents = globalStudents.filter(s => targetGroup === 'all' || s.classId === classId || s.className === classId);
       const batch = targetStudents.filter(s => s.parentPhone).map(s => {
         const item = {
           studentId: s.id,
           studentName: s.name,
           phone: s.parentPhone,
-          message: message.replace(/{student_name}/g, s.name).replace(/{class_id}/g, s.className || getClassName(s.classId))
+          message: message
+            .replace(/{student_name}/g, s.name)
+            .replace(/{class_id}/g, s.className || getClassName(s.classId))
+            .replace(/{class_name}/g, s.className || getClassName(s.classId))
+            .replace(/{father_name}/g, s.fatherName || '')
+            .replace(/{school_name}/g, 'Unique Scholars Academy')
+            .replace(/{date}/g, dateStr)
         };
         if (currentBroadcastMedia) {
           item.media = {

@@ -496,9 +496,9 @@
               </div>
 
               <div class="form-group">
-                <label>Quick Message Template (Optional)</label>
-                <select id="broadcastTemplateSelect" onchange="applyBroadcastTemplate()">
-                  <option value="">-- Choose a pre-configured template --</option>
+                <label><i class="fa-solid fa-bolt" style="color: #f59e0b;"></i> Quick School Scenario Template</label>
+                <select id="broadcastTemplateSelect" onchange="applyBroadcastTemplate()" style="border-color: rgba(56, 189, 248, 0.4); background: #0f172a; font-weight: 600;">
+                  <option value="">-- Choose a pre-configured school scenario --</option>
                 </select>
               </div>
 
@@ -509,9 +509,32 @@
                     <i class="fa-solid fa-paperclip" style="color: #38bdf8;"></i> Attach Timetable / Media
                   </button>
                 </div>
-                <textarea id="broadcastMessageInput" rows="6" placeholder="Type your WhatsApp broadcast message or caption here..."></textarea>
+
+                <!-- 1-CLICK CLICKABLE TAG INSERTER CHIPS -->
+                <div class="tag-chips-wrapper">
+                  <span class="tag-chips-label"><i class="fa-solid fa-wand-magic-sparkles"></i> 1-Click Insert Variable:</span>
+                  <div class="tag-chips-group">
+                    <button type="button" class="tag-chip" onclick="insertBroadcastTag('{student_name}')" title="Insert Student's Name">
+                      <span>👤 Student Name</span>
+                    </button>
+                    <button type="button" class="tag-chip" onclick="insertBroadcastTag('{class_id}')" title="Insert Student's Class">
+                      <span>🏫 Class</span>
+                    </button>
+                    <button type="button" class="tag-chip" onclick="insertBroadcastTag('{date}')" title="Insert Today's Date">
+                      <span>📅 Today's Date</span>
+                    </button>
+                    <button type="button" class="tag-chip" onclick="insertBroadcastTag('{school_name}')" title="Insert School Name">
+                      <span>🏢 School Name</span>
+                    </button>
+                    <button type="button" class="tag-chip" onclick="insertBroadcastTag('{father_name}')" title="Insert Father's Name">
+                      <span>👨 Father Name</span>
+                    </button>
+                  </div>
+                </div>
+
+                <textarea id="broadcastMessageInput" rows="7" placeholder="Type your WhatsApp broadcast message or choose a scenario template above..." oninput="renderLiveWhatsAppPreview()" onkeyup="renderLiveWhatsAppPreview()"></textarea>
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 4px; flex-wrap: wrap; gap: 4px;">
-                  <small class="text-muted">Placeholders: <code>{student_name}</code>, <code>{class_id}</code></small>
+                  <small class="text-muted" id="broadcastWordCounter"><i class="fa-solid fa-keyboard"></i> Live formatting enabled (*bold*, _italic_)</small>
                   <small class="text-muted" id="broadcastMediaHint" style="font-size: 11px;">PDF, Timetable, Date Sheet, Images (Max 5MB)</small>
                 </div>
 
@@ -536,21 +559,85 @@
                 </div>
               </div>
 
-              <button type="submit" class="btn btn-primary" id="btnSendBroadcast" style="width: 100%;">
-                <i class="fa-brands fa-whatsapp"></i> Send WhatsApp Broadcast Now
+              <button type="submit" class="btn btn-primary" id="btnSendBroadcast" style="width: 100%; font-size: 15px; padding: 12px;">
+                <i class="fa-brands fa-whatsapp" style="font-size: 18px;"></i> Send WhatsApp Broadcast Now
               </button>
             </form>
           </div>
 
-          <!-- TEMPLATE LIBRARY -->
-          <div class="card">
-            <div class="card-header">
-              <h3><i class="fa-solid fa-box-archive"></i> Message Template Library</h3>
-              <button class="btn btn-secondary btn-sm" onclick="openModal('addTemplateModal')"><i
-                  class="fa-solid fa-plus"></i> New Template</button>
+          <!-- LIVE WHATSAPP PHONE PREVIEW -->
+          <div class="card broadcast-preview-card">
+            <div class="card-header" style="justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
+              <div>
+                <h3 style="margin-bottom: 2px;"><i class="fa-brands fa-whatsapp" style="color: #22c55e;"></i> Live WhatsApp Preview</h3>
+                <p style="font-size: 11px; color: var(--text-muted); margin: 0;">Real-time preview of what parents will receive</p>
+              </div>
+              <div class="sample-student-picker">
+                <label for="waPreviewStudentSelect"><i class="fa-solid fa-user-check" style="color: #38bdf8;"></i> Preview with:</label>
+                <select id="waPreviewStudentSelect" onchange="renderLiveWhatsAppPreview()"></select>
+              </div>
             </div>
-            <div id="templatesListContainer">
-              <p class="text-muted">Loading message templates...</p>
+
+            <!-- SMARTPHONE FRAME -->
+            <div class="wa-phone-frame">
+              <!-- WhatsApp Chat Top Bar -->
+              <div class="wa-chat-header">
+                <div class="wa-chat-header-left">
+                  <i class="fa-solid fa-arrow-left wa-back-icon"></i>
+                  <div class="wa-avatar">
+                    <img src="/logo.png" alt="School" onerror="this.src='https://ui-avatars.com/api/?name=Unique+Scholars&background=059669&color=fff&size=100'" />
+                  </div>
+                  <div class="wa-contact-info">
+                    <div class="wa-contact-name">Unique Scholars Academy <i class="fa-solid fa-circle-check wa-verified-badge" title="Official Verified School Gateway"></i></div>
+                    <div class="wa-contact-status">online</div>
+                  </div>
+                </div>
+                <div class="wa-chat-header-actions">
+                  <i class="fa-solid fa-video"></i>
+                  <i class="fa-solid fa-phone"></i>
+                  <i class="fa-solid fa-ellipsis-vertical"></i>
+                </div>
+              </div>
+
+              <!-- WhatsApp Chat Conversation Body -->
+              <div class="wa-chat-screen">
+                <!-- Encryption Notice -->
+                <div class="wa-encrypted-pill">
+                  <i class="fa-solid fa-lock"></i> Messages and calls are end-to-end encrypted. No one outside of this chat, not even WhatsApp, can read or listen to them.
+                </div>
+
+                <div class="wa-date-pill">TODAY</div>
+
+                <!-- Outgoing WhatsApp Chat Bubble -->
+                <div class="wa-bubble-wrapper">
+                  <div class="wa-bubble" id="waPreviewBubble">
+                    <!-- Attached Media Container (if any) -->
+                    <div class="wa-bubble-media" id="waBubbleMedia" style="display: none;"></div>
+
+                    <!-- Message Text -->
+                    <div class="wa-bubble-text" id="waBubbleText">
+                      Assalam-o-Alaikum! 📢<br>
+                      Please select a scenario template or type your broadcast message on the left.
+                    </div>
+
+                    <!-- Time & Blue Ticks -->
+                    <div class="wa-bubble-meta">
+                      <span class="wa-msg-time" id="waMsgTime">10:45 AM</span>
+                      <span class="wa-double-ticks"><i class="fa-solid fa-check-double"></i></span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Action Bar Under Phone -->
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 12px; padding-top: 8px; border-top: 1px solid rgba(255, 255, 255, 0.05);">
+              <span style="font-size: 11px; color: var(--text-muted);">
+                <i class="fa-solid fa-circle-info" style="color: #38bdf8;"></i> Placeholders automatically personalize per student upon sending.
+              </span>
+              <button type="button" class="btn btn-secondary btn-sm" onclick="openModal('addTemplateModal')" style="font-size: 11px; padding: 4px 8px;">
+                <i class="fa-solid fa-plus"></i> Save Custom Template
+              </button>
             </div>
           </div>
         </div>
