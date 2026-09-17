@@ -31,6 +31,7 @@ let backendState = {
   gatewayUrl: ''
 };
 let currentWaStatus = { status: 'disconnected', isConnected: false };
+let currentAttendanceSessionLocked = false;
 
 // =====================================================================
 // 1. INITIALIZATION & DUAL GATEWAY AUTO-DETECTION
@@ -598,6 +599,23 @@ async function loadAttendanceRoster() {
       }
     });
 
+    // 3. Check Session Lock status from backend
+    currentAttendanceSessionLocked = false;
+    try {
+      const lockRes = await safeFetch(`/attendance/lock-status?schoolId=${CURRENT_SCHOOL_ID}&classId=${classId}&date=${date}`);
+      if (lockRes.ok) {
+        const lockData = await lockRes.json();
+        if (lockData.isLocked) {
+          currentAttendanceSessionLocked = true;
+        }
+      }
+    } catch (e) {}
+
+    // Fallback: if logs say SUBMITTED or isLocked, also mark as locked
+    if (existingLogs.some(l => l.isLocked || l.state === 'SUBMITTED')) {
+      currentAttendanceSessionLocked = true;
+    }
+
     renderAttendanceRoster();
     updateAttendanceCounters();
   } catch (err) {
@@ -610,6 +628,36 @@ function renderAttendanceRoster() {
   const container = document.getElementById('attendanceRosterContainer');
   if (!container) return;
 
+  const date = document.getElementById('attendanceDateInput')?.value || 'today';
+
+  // Sync button states with lock status
+  const draftBtn = document.getElementById('btnDraftAttendance');
+  const submitBtn = document.getElementById('btnSubmitAttendance');
+  const btnAllP = document.getElementById('btnAllPresent');
+  const btnAllA = document.getElementById('btnAllAbsent');
+
+  if (currentAttendanceSessionLocked) {
+    if (draftBtn) { draftBtn.disabled = true; draftBtn.style.opacity = '0.4'; draftBtn.style.cursor = 'not-allowed'; }
+    if (submitBtn) {
+      submitBtn.disabled = true;
+      submitBtn.innerHTML = '<i class="fa-solid fa-lock"></i> <span>Finalized & Locked</span>';
+      submitBtn.style.opacity = '0.6';
+      submitBtn.style.cursor = 'not-allowed';
+    }
+    if (btnAllP) { btnAllP.disabled = true; btnAllP.style.opacity = '0.4'; }
+    if (btnAllA) { btnAllA.disabled = true; btnAllA.style.opacity = '0.4'; }
+  } else {
+    if (draftBtn) { draftBtn.disabled = false; draftBtn.style.opacity = '1'; draftBtn.style.cursor = 'pointer'; }
+    if (submitBtn) {
+      submitBtn.disabled = false;
+      submitBtn.innerHTML = '<i class="fa-solid fa-lock"></i> <span>Finalize & Lock</span>';
+      submitBtn.style.opacity = '1';
+      submitBtn.style.cursor = 'pointer';
+    }
+    if (btnAllP) { btnAllP.disabled = false; btnAllP.style.opacity = '1'; }
+    if (btnAllA) { btnAllA.disabled = false; btnAllA.style.opacity = '1'; }
+  }
+
   if (currentAttendanceRoster.length === 0) {
     container.innerHTML = `
       <div style="text-align: center; padding: 30px 16px; color: var(--text-muted);">
@@ -620,10 +668,21 @@ function renderAttendanceRoster() {
     return;
   }
 
-  container.innerHTML = currentAttendanceRoster.map(s => {
+  const lockedBannerHtml = currentAttendanceSessionLocked ? `
+    <div class="attendance-locked-banner" style="background: rgba(239, 68, 68, 0.14); border: 1px solid rgba(239, 68, 68, 0.35); border-radius: 12px; padding: 12px 16px; margin-bottom: 14px; display: flex; align-items: center; gap: 12px; color: #fca5a5;">
+      <i class="fa-solid fa-lock" style="font-size: 22px; color: #ef4444; flex-shrink: 0;"></i>
+      <div style="font-size: 13px; line-height: 1.4;">
+        <strong style="color: #fff; display: block; font-size: 14px; margin-bottom: 2px;">Attendance Finalized & Locked</strong>
+        Attendance for this date (${date}) has been marked & finalized. Edits and re-submissions are disabled.
+      </div>
+    </div>
+  ` : '';
+
+  const cardsHtml = currentAttendanceRoster.map(s => {
     const status = currentAttendanceMap[s.id] || 'present';
+    const cardStyle = currentAttendanceSessionLocked ? 'pointer-events: none; opacity: 0.82; cursor: not-allowed;' : '';
     return `
-      <div class="student-att-card state-${status}" id="card-${s.id}" onclick="toggleStudentStatus('${s.id}')">
+      <div class="student-att-card state-${status}" id="card-${s.id}" style="${cardStyle}" onclick="toggleStudentStatus('${s.id}')">
         <div class="student-info-col">
           <span class="student-roll">Roll #${s.rollNumber || '-'}</span>
           <span class="student-name">${s.name}</span>
@@ -638,9 +697,15 @@ function renderAttendanceRoster() {
       </div>
     `;
   }).join('');
+
+  container.innerHTML = lockedBannerHtml + cardsHtml;
 }
 
 function toggleStudentStatus(studentId) {
+  if (currentAttendanceSessionLocked) {
+    showToast('🔒 Attendance is finalized and locked for this date.', 'error');
+    return;
+  }
   const current = currentAttendanceMap[studentId] || 'present';
   let next = 'present';
   if (current === 'present') next = 'absent';
@@ -651,6 +716,10 @@ function toggleStudentStatus(studentId) {
 }
 
 function setStudentAttendance(studentId, status) {
+  if (currentAttendanceSessionLocked) {
+    showToast('🔒 Attendance is finalized and locked for this date.', 'error');
+    return;
+  }
   currentAttendanceMap[studentId] = status;
   const card = document.getElementById(`card-${studentId}`);
   if (card) {
@@ -665,6 +734,10 @@ function setStudentAttendance(studentId, status) {
 }
 
 function markAllPresent() {
+  if (currentAttendanceSessionLocked) {
+    showToast('🔒 Attendance is finalized and locked for this date.', 'error');
+    return;
+  }
   currentAttendanceRoster.forEach(s => {
     currentAttendanceMap[s.id] = 'present';
     const card = document.getElementById(`card-${s.id}`);
@@ -680,6 +753,10 @@ function markAllPresent() {
 }
 
 function markAllAbsent() {
+  if (currentAttendanceSessionLocked) {
+    showToast('🔒 Attendance is finalized and locked for this date.', 'error');
+    return;
+  }
   currentAttendanceRoster.forEach(s => {
     currentAttendanceMap[s.id] = 'absent';
     const card = document.getElementById(`card-${s.id}`);
@@ -713,6 +790,11 @@ function updateAttendanceCounters() {
 // -------------------------------------------------------------
 
 async function saveAttendanceDraft() {
+  if (currentAttendanceSessionLocked) {
+    showToast('🔒 Attendance for this date is already finalized and cannot be modified.', 'error');
+    return;
+  }
+
   const classId = document.getElementById('attendanceClassSelect').value;
   const date = document.getElementById('attendanceDateInput').value;
   const btn = document.getElementById('btnDraftAttendance');
@@ -751,6 +833,13 @@ async function saveAttendanceDraft() {
     });
 
     const data = await res.json();
+    if (res.status === 409 || data.isLocked) {
+      currentAttendanceSessionLocked = true;
+      renderAttendanceRoster();
+      showToast(`🔒 ${data.error || 'Attendance for this date is already finalized and cannot be modified.'}`, 'error');
+      return;
+    }
+
     if (!res.ok || data.error) {
       showToast(`❌ ${data.error || 'Failed to save draft.'}`, 'error');
       return;
@@ -761,8 +850,10 @@ async function saveAttendanceDraft() {
     console.error('Draft error:', err);
     showToast('❌ Connection error while saving draft.', 'error');
   } finally {
-    btn.disabled = false;
-    btn.innerHTML = '<i class="fa-solid fa-floppy-disk"></i> <span>Save Draft</span>';
+    if (!currentAttendanceSessionLocked) {
+      btn.disabled = false;
+      btn.innerHTML = '<i class="fa-solid fa-floppy-disk"></i> <span>Save Draft</span>';
+    }
   }
 }
 
@@ -771,6 +862,11 @@ async function saveAttendanceDraft() {
 // -------------------------------------------------------------
 
 function openAttendanceConfirmModal() {
+  if (currentAttendanceSessionLocked) {
+    showToast('🔒 Attendance for this date is already finalized and cannot be modified.', 'error');
+    return;
+  }
+
   const classId = document.getElementById('attendanceClassSelect').value;
   const date = document.getElementById('attendanceDateInput').value;
   if (!classId || currentAttendanceRoster.length === 0) {
@@ -796,6 +892,11 @@ function openAttendanceConfirmModal() {
 
 async function executeFinalAttendanceSubmit() {
   closeModal('attendanceConfirmModal');
+
+  if (currentAttendanceSessionLocked) {
+    showToast('🔒 Attendance for this date is already finalized and cannot be modified.', 'error');
+    return;
+  }
 
   const classId = document.getElementById('attendanceClassSelect').value;
   const date = document.getElementById('attendanceDateInput').value;
@@ -834,18 +935,29 @@ async function executeFinalAttendanceSubmit() {
     });
 
     const data = await res.json();
+    if (res.status === 409 || data.isLocked) {
+      currentAttendanceSessionLocked = true;
+      renderAttendanceRoster();
+      showToast(`🔒 ${data.error || 'Attendance for this date is already finalized and cannot be modified.'}`, 'error');
+      return;
+    }
+
     if (!res.ok || data.error) {
       showToast(`❌ ${data.error || 'Failed to submit attendance.'}`, 'error');
       return;
     }
 
+    // Attendance successfully finalized and locked
+    currentAttendanceSessionLocked = true;
+    renderAttendanceRoster();
+
     const sum = data.summary || { total: payload.attendance.length, present: pCount, absent: aCount, whatsappAlertsSent: 0 };
-    const waSent = sum.whatsappAlertsSent || sum.whatsappQueued || 0;
+    const waQueued = sum.whatsappQueued || sum.whatsappAlertsSent || 0;
 
     if (aCount > 0) {
-      showToast(`🎉 Attendance Locked! Dispatched WhatsApp alerts to ${waSent} absent parent(s).`, 'success');
+      showToast(`🎉 Attendance Finalized & Locked! Queued ${waQueued} WhatsApp alert(s).`, 'success');
     } else {
-      showToast(`🎉 Attendance Locked! All ${pCount} students are Present ✅`, 'success');
+      showToast(`🎉 Attendance Finalized & Locked! All ${pCount} students are Present ✅`, 'success');
     }
 
     const todayStat = document.getElementById('statTodayStatus');
@@ -854,10 +966,13 @@ async function executeFinalAttendanceSubmit() {
     console.error('Submit attendance error:', err);
     showToast('❌ Connection error. Failed to finalize attendance.', 'error');
   } finally {
-    btn.disabled = false;
-    btn.innerHTML = '<i class="fa-solid fa-lock"></i> <span>Finalize & Lock</span>';
+    if (!currentAttendanceSessionLocked) {
+      btn.disabled = false;
+      btn.innerHTML = '<i class="fa-solid fa-lock"></i> <span>Finalize & Lock</span>';
+    }
   }
 }
+
 
 // =====================================================================
 // 7. ATTENDANCE AUDIT LOGS & REPORTS VIEW (Expo Parity)

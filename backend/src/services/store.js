@@ -1,7 +1,11 @@
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 const bcrypt = require('bcryptjs');
 const { getDb, isPostgresConfigured } = require('../db');
+
+// In-flight mutex to strictly prevent concurrent WhatsApp batch executions per school
+const inFlightSendingLocks = new Set();
 
 // -------------------------------------------------------------
 // JSON FALLBACK HELPERS (used only when DATABASE_URL is not set)
@@ -571,7 +575,181 @@ function normalizeAttendanceStatus(rawStatus) {
   return 'Present';
 }
 
+async function checkAttendanceSessionLock(schoolId = 'unique_scholars', classId, dateStr) {
+  if (!classId || !dateStr) return { isLocked: false, status: 'OPEN' };
+
+  if (isPostgresConfigured()) {
+    const db = getDb();
+    let resolvedClassId = classId;
+    try {
+      const matched = await db('classes')
+        .where({ school_id: schoolId, is_active: true })
+        .andWhere(function() {
+          this.whereRaw('LOWER(id) = LOWER(?)', [classId])
+            .orWhereRaw('LOWER(name) = LOWER(?)', [classId]);
+        })
+        .first();
+      if (matched) resolvedClassId = matched.id;
+    } catch (e) {}
+
+    // Check attendance_sessions table
+    try {
+      const session = await db('attendance_sessions')
+        .where({ school_id: schoolId, class_id: resolvedClassId, attendance_date: dateStr })
+        .first();
+      if (session) {
+        return {
+          isLocked: !!session.is_locked,
+          lockedAt: session.locked_at,
+          lockedBy: session.locked_by,
+          status: session.is_locked ? 'LOCKED' : 'UNLOCKED'
+        };
+      }
+    } catch (sessionErr) {
+      console.warn('attendance_sessions check warning:', sessionErr.message);
+    }
+
+    // Fallback: check attendance_logs for finalized records
+    try {
+      const log = await db('attendance_logs')
+        .where({ school_id: schoolId, class_id: resolvedClassId, attendance_date: dateStr })
+        .where(function() {
+          this.where({ is_locked: true }).orWhere({ state: 'SUBMITTED' });
+        })
+        .first();
+      if (log) {
+        return {
+          isLocked: true,
+          lockedAt: log.locked_at || log.submitted_at || log.created_at,
+          lockedBy: log.locked_by || 'teacher',
+          status: 'LOCKED'
+        };
+      }
+    } catch (logErr) {}
+
+    return { isLocked: false, status: 'OPEN' };
+  }
+
+  // JSON fallback
+  const db = readJsonDb();
+  const session = (db.attendanceSessions || []).find(s =>
+    s.schoolId === schoolId &&
+    (s.classId === classId || String(s.classId).toLowerCase() === String(classId).toLowerCase()) &&
+    s.date === dateStr
+  );
+  if (session) {
+    return {
+      isLocked: !!session.isLocked,
+      lockedAt: session.lockedAt,
+      lockedBy: session.lockedBy,
+      status: session.isLocked ? 'LOCKED' : 'UNLOCKED'
+    };
+  }
+
+  const logs = (db.attendanceLogs || []).filter(l =>
+    l.schoolId === schoolId &&
+    (l.classId === classId || String(l.classId).toLowerCase() === String(classId).toLowerCase()) &&
+    l.date === dateStr
+  );
+  const isSubmitted = logs.some(l => l.isLocked || l.state === 'SUBMITTED');
+  return {
+    isLocked: isSubmitted,
+    lockedAt: isSubmitted ? logs[0]?.submittedAt : null,
+    lockedBy: 'teacher',
+    status: isSubmitted ? 'LOCKED' : 'OPEN'
+  };
+}
+
+async function unlockAttendanceSession(schoolId = 'unique_scholars', classId, dateStr, adminUser = 'admin', reason = '') {
+  if (!classId || !dateStr) return { success: false, error: 'Missing classId or date' };
+
+  if (isPostgresConfigured()) {
+    const db = getDb();
+    let resolvedClassId = classId;
+    try {
+      const matched = await db('classes')
+        .where({ school_id: schoolId, is_active: true })
+        .andWhere(function() {
+          this.whereRaw('LOWER(id) = LOWER(?)', [classId])
+            .orWhereRaw('LOWER(name) = LOWER(?)', [classId]);
+        })
+        .first();
+      if (matched) resolvedClassId = matched.id;
+    } catch (e) {}
+
+    await db.transaction(async trx => {
+      // 1. Update or upsert session as unlocked
+      await trx('attendance_sessions')
+        .insert({
+          id: `SESS-${schoolId}-${resolvedClassId}-${dateStr}`,
+          school_id: schoolId,
+          class_id: resolvedClassId,
+          attendance_date: dateStr,
+          status: 'open',
+          is_locked: false,
+          locked_at: null,
+          locked_by: null,
+          unlocked_at: new Date(),
+          unlocked_by: adminUser,
+          unlock_reason: reason || 'Admin unlock override',
+          updated_at: new Date()
+        })
+        .onConflict(['school_id', 'class_id', 'attendance_date'])
+        .merge({
+          status: 'open',
+          is_locked: false,
+          locked_at: null,
+          locked_by: null,
+          unlocked_at: new Date(),
+          unlocked_by: adminUser,
+          unlock_reason: reason || 'Admin unlock override',
+          updated_at: new Date()
+        });
+
+      // 2. Unlock attendance logs back to DRAFT so modifications can occur
+      await trx('attendance_logs')
+        .where({ school_id: schoolId, class_id: resolvedClassId, attendance_date: dateStr })
+        .update({
+          is_locked: false,
+          state: 'DRAFT',
+          updated_at: new Date()
+        });
+    });
+
+    console.log(`🔓 [Attendance Lock Override] Class ${resolvedClassId} on ${dateStr} UNLOCKED by ${adminUser}. Reason: ${reason || 'Admin override'}`);
+    return { success: true, message: `Attendance for ${resolvedClassId} on ${dateStr} has been unlocked.` };
+  }
+
+  // JSON fallback
+  const db = readJsonDb();
+  if (!db.attendanceSessions) db.attendanceSessions = [];
+  const sIdx = db.attendanceSessions.findIndex(s => s.schoolId === schoolId && s.classId === classId && s.date === dateStr);
+  if (sIdx >= 0) {
+    db.attendanceSessions[sIdx].isLocked = false;
+    db.attendanceSessions[sIdx].unlockedBy = adminUser;
+    db.attendanceSessions[sIdx].unlockReason = reason;
+  }
+  (db.attendanceLogs || []).forEach(l => {
+    if (l.schoolId === schoolId && l.classId === classId && l.date === dateStr) {
+      l.isLocked = false;
+      l.state = 'DRAFT';
+    }
+  });
+  writeJsonDb(db);
+  return { success: true, message: `Attendance for ${classId} on ${dateStr} unlocked.` };
+}
+
 async function saveDraftAttendance(schoolId = 'unique_scholars', classId, dateStr, records, timeStr) {
+  // Business rule: Enforce locked state check
+  const lockStatus = await checkAttendanceSessionLock(schoolId, classId, dateStr);
+  if (lockStatus.isLocked) {
+    const err = new Error(`Attendance for ${dateStr} is already finalized and cannot be modified.`);
+    err.code = 'ATTENDANCE_LOCKED';
+    err.isLocked = true;
+    err.lockedAt = lockStatus.lockedAt;
+    throw err;
+  }
+
   if (isPostgresConfigured()) {
     const db = getDb();
     const saved = [];
@@ -590,8 +768,8 @@ async function saveDraftAttendance(schoolId = 'unique_scholars', classId, dateSt
         const logKey = `${dateStr}_${r.studentId}`;
         const existing = await trx('attendance_logs').where({ log_key: logKey }).first();
 
-        // Business rule: Once SUBMITTED, do not overwrite silently with draft
-        if (existing && existing.state === 'SUBMITTED') {
+        // Business rule: Once SUBMITTED or locked, do not overwrite silently with draft
+        if (existing && (existing.state === 'SUBMITTED' || existing.is_locked)) {
           saved.push({
             id: existing.log_key,
             schoolId: existing.school_id,
@@ -600,7 +778,8 @@ async function saveDraftAttendance(schoolId = 'unique_scholars', classId, dateSt
             date: existing.attendance_date,
             time: existing.attendance_time,
             status: existing.status,
-            state: existing.state
+            state: existing.state,
+            isLocked: true
           });
           continue;
         }
@@ -615,6 +794,7 @@ async function saveDraftAttendance(schoolId = 'unique_scholars', classId, dateSt
           attendance_time: timeStr || new Date().toLocaleTimeString('en-US', { hour12: true }),
           status: normalizedStatus,
           state: 'DRAFT',
+          is_locked: false,
           updated_at: new Date()
         };
 
@@ -631,7 +811,8 @@ async function saveDraftAttendance(schoolId = 'unique_scholars', classId, dateSt
           date: dateStr,
           time: logRecord.attendance_time,
           status: logRecord.status,
-          state: 'DRAFT'
+          state: 'DRAFT',
+          isLocked: false
         });
       }
     });
@@ -647,12 +828,12 @@ async function saveDraftAttendance(schoolId = 'unique_scholars', classId, dateSt
     const normStatus = normalizeAttendanceStatus(r.status);
     const idx = db.attendanceLogs.findIndex(l => l.id === logId);
     if (idx >= 0) {
-      if (db.attendanceLogs[idx].state !== 'SUBMITTED') {
+      if (db.attendanceLogs[idx].state !== 'SUBMITTED' && !db.attendanceLogs[idx].isLocked) {
         db.attendanceLogs[idx] = { ...db.attendanceLogs[idx], status: normStatus, time: timeStr, state: 'DRAFT' };
       }
       saved.push(db.attendanceLogs[idx]);
     } else {
-      const entry = { id: logId, schoolId, classId, studentId: r.studentId, date: dateStr, time: timeStr, status: normStatus, state: 'DRAFT' };
+      const entry = { id: logId, schoolId, classId, studentId: r.studentId, date: dateStr, time: timeStr, status: normStatus, state: 'DRAFT', isLocked: false };
       db.attendanceLogs.push(entry);
       saved.push(entry);
     }
@@ -662,6 +843,16 @@ async function saveDraftAttendance(schoolId = 'unique_scholars', classId, dateSt
 }
 
 async function submitFinalAttendance(schoolId = 'unique_scholars', classId, dateStr, records, timeStr) {
+  // Business rule: Enforce locked state check
+  const lockStatus = await checkAttendanceSessionLock(schoolId, classId, dateStr);
+  if (lockStatus.isLocked) {
+    const err = new Error(`Attendance for ${dateStr} is already finalized and cannot be modified.`);
+    err.code = 'ATTENDANCE_LOCKED';
+    err.isLocked = true;
+    err.lockedAt = lockStatus.lockedAt;
+    throw err;
+  }
+
   if (isPostgresConfigured()) {
     const db = getDb();
     const absentToAlert = [];
@@ -692,6 +883,9 @@ async function submitFinalAttendance(schoolId = 'unique_scholars', classId, date
           attendance_time: timeStr || new Date().toLocaleTimeString('en-US', { hour12: true }),
           status: normalizedStatus,
           state: 'SUBMITTED',
+          is_locked: true,
+          locked_at: new Date(),
+          locked_by: 'teacher',
           submitted_at: new Date(),
           updated_at: new Date()
         };
@@ -709,7 +903,8 @@ async function submitFinalAttendance(schoolId = 'unique_scholars', classId, date
           date: dateStr,
           time: logRecord.attendance_time,
           status: logRecord.status,
-          state: 'SUBMITTED'
+          state: 'SUBMITTED',
+          isLocked: true
         });
 
         if (normalizedStatus === 'Absent') {
@@ -733,6 +928,28 @@ async function submitFinalAttendance(schoolId = 'unique_scholars', classId, date
           }
         }
       }
+
+      // Upsert attendance_sessions record to enforce daily single-finalization rule
+      await trx('attendance_sessions')
+        .insert({
+          id: `SESS-${schoolId}-${resolvedClassId}-${dateStr}`,
+          school_id: schoolId,
+          class_id: resolvedClassId,
+          attendance_date: dateStr,
+          status: 'finalized',
+          is_locked: true,
+          locked_at: new Date(),
+          locked_by: 'teacher',
+          updated_at: new Date()
+        })
+        .onConflict(['school_id', 'class_id', 'attendance_date'])
+        .merge({
+          status: 'finalized',
+          is_locked: true,
+          locked_at: new Date(),
+          locked_by: 'teacher',
+          updated_at: new Date()
+        });
     });
 
     return { absentStudentsToAlert: absentToAlert, attendanceLogs };
@@ -740,6 +957,7 @@ async function submitFinalAttendance(schoolId = 'unique_scholars', classId, date
 
   const db = readJsonDb();
   if (!db.attendanceLogs) db.attendanceLogs = [];
+  if (!db.attendanceSessions) db.attendanceSessions = [];
   const absentToAlert = [];
   records.forEach(r => {
     const logId = `${dateStr}_${r.studentId}`;
@@ -747,7 +965,7 @@ async function submitFinalAttendance(schoolId = 'unique_scholars', classId, date
     const idx = db.attendanceLogs.findIndex(l => l.id === logId);
     const entry = {
       id: logId, schoolId, classId, studentId: r.studentId,
-      date: dateStr, time: timeStr, status: normalizedStatus, state: 'SUBMITTED', submittedAt: new Date().toISOString()
+      date: dateStr, time: timeStr, status: normalizedStatus, state: 'SUBMITTED', isLocked: true, submittedAt: new Date().toISOString()
     };
     if (idx >= 0) db.attendanceLogs[idx] = entry;
     else db.attendanceLogs.push(entry);
@@ -773,6 +991,12 @@ async function submitFinalAttendance(schoolId = 'unique_scholars', classId, date
       }
     }
   });
+
+  const sessIdx = db.attendanceSessions.findIndex(s => s.schoolId === schoolId && s.classId === classId && s.date === dateStr);
+  const sessionEntry = { schoolId, classId, date: dateStr, isLocked: true, lockedAt: new Date().toISOString(), lockedBy: 'teacher' };
+  if (sessIdx >= 0) db.attendanceSessions[sessIdx] = sessionEntry;
+  else db.attendanceSessions.push(sessionEntry);
+
   writeJsonDb(db);
   return { absentStudentsToAlert: absentToAlert, attendanceLogs: db.attendanceLogs };
 }
@@ -808,7 +1032,10 @@ async function getAttendanceLogs(schoolId = 'unique_scholars', filters = {}) {
       date: r.attendance_date instanceof Date ? r.attendance_date.toISOString().split('T')[0] : r.attendance_date,
       time: r.attendance_time,
       status: r.status,
-      state: r.state
+      state: r.state,
+      isLocked: !!r.is_locked || r.state === 'SUBMITTED',
+      lockedAt: r.locked_at || (r.state === 'SUBMITTED' ? r.submitted_at : null),
+      lockedBy: r.locked_by
     }));
   }
 
@@ -2030,7 +2257,7 @@ async function getAdminRecords(schoolId = 'unique_scholars', filters = {}) {
 // -------------------------------------------------------------
 // 9. WHATSAPP DISPATCH QUEUE (Relational dispatch_batches)
 // -------------------------------------------------------------
-async function addPendingDispatches(schoolId = 'unique_scholars', batch = [], source = 'results', media = null) {
+async function addPendingDispatches(schoolId = 'unique_scholars', batch = [], source = 'results', media = null, initialStatus = 'queued') {
   if (!Array.isArray(batch) || batch.length === 0) return null;
   const batchId = `BATCH-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
   let validSource = 'results';
@@ -2045,7 +2272,7 @@ async function addPendingDispatches(schoolId = 'unique_scholars', batch = [], so
         id: batchId,
         school_id: schoolId,
         source: validSource,
-        status: 'pending'
+        status: initialStatus
       };
       if (media) {
         batchPayload.media_json = typeof media === 'string' ? media : JSON.stringify(media);
@@ -2054,18 +2281,29 @@ async function addPendingDispatches(schoolId = 'unique_scholars', batch = [], so
       await trx('dispatch_batches').insert(batchPayload);
 
       for (const m of batch) {
-        await trx('dispatch_messages').insert({
-          batch_id: batchId,
-          student_id: m.studentId || null,
-          student_name: m.studentName || null,
-          phone: m.phone,
-          message: m.message,
-          status: 'pending'
-        });
+        const cleanPhone = String(m.phone || '').replace(/\D/g, '');
+        const dateKey = m.date || new Date().toISOString().slice(0, 10);
+        const idempotencyKey = m.idempotencyKey || crypto.createHash('md5')
+          .update(`${schoolId}_${m.studentId || ''}_${cleanPhone}_${dateKey}_${validSource}`)
+          .digest('hex');
+
+        await trx('dispatch_messages')
+          .insert({
+            batch_id: batchId,
+            student_id: m.studentId || null,
+            student_name: m.studentName || null,
+            phone: m.phone,
+            message: m.message,
+            status: initialStatus,
+            idempotency_key: idempotencyKey,
+            queued_at: new Date()
+          })
+          .onConflict('idempotency_key')
+          .ignore();
       }
     });
 
-    return { id: batchId, schoolId, source: validSource, status: 'pending', messages: batch, media };
+    return { id: batchId, schoolId, source: validSource, status: initialStatus, messages: batch, media };
   }
 
   const db = readJsonDb();
@@ -2075,7 +2313,7 @@ async function addPendingDispatches(schoolId = 'unique_scholars', batch = [], so
     schoolId,
     source: validSource,
     createdAt: new Date().toISOString(),
-    status: 'pending',
+    status: initialStatus,
     messages: batch,
     media: media || null
   };
@@ -2088,7 +2326,7 @@ async function getPendingDispatches(schoolId = 'unique_scholars') {
   if (isPostgresConfigured()) {
     const db = getDb();
     const batches = await db('dispatch_batches')
-      .where({ status: 'pending' })
+      .whereIn('status', ['pending', 'queued'])
       .andWhere(builder => {
         if (schoolId) builder.where({ school_id: schoolId });
       })
@@ -2099,7 +2337,7 @@ async function getPendingDispatches(schoolId = 'unique_scholars') {
     const batchIds = batches.map(b => b.id);
     const messages = await db('dispatch_messages')
       .whereIn('batch_id', batchIds)
-      .andWhere({ status: 'pending' });
+      .whereIn('status', ['pending', 'queued']);
 
     return batches.map(b => {
       let parsedMedia = null;
@@ -2125,7 +2363,7 @@ async function getPendingDispatches(schoolId = 'unique_scholars') {
   }
 
   const db = readJsonDb();
-  return (db.pendingDispatches || []).filter(d => (!schoolId || d.schoolId === schoolId) && d.status === 'pending');
+  return (db.pendingDispatches || []).filter(d => (!schoolId || d.schoolId === schoolId) && (d.status === 'pending' || d.status === 'queued'));
 }
 
 async function markPendingDispatchComplete(schoolId = 'unique_scholars', batchId, deliveryResults = []) {
@@ -2142,8 +2380,10 @@ async function markPendingDispatchComplete(schoolId = 'unique_scholars', batchId
           await trx('dispatch_messages')
             .where({ batch_id: batchId, phone: res.phone })
             .update({
-              status: res.success ? 'sent' : 'failed',
+              status: res.success ? 'delivered' : 'failed',
               error: res.error || null,
+              delivered_at: res.success ? new Date() : null,
+              failed_at: res.success ? null : new Date(),
               sent_at: new Date()
             });
         }
@@ -2164,6 +2404,196 @@ async function markPendingDispatchComplete(schoolId = 'unique_scholars', batchId
     return true;
   }
   return false;
+}
+
+async function getQueuedMessagesCount(schoolId = 'unique_scholars') {
+  if (isPostgresConfigured()) {
+    const db = getDb();
+    try {
+      const res = await db('dispatch_messages')
+        .join('dispatch_batches', 'dispatch_messages.batch_id', 'dispatch_batches.id')
+        .where('dispatch_batches.school_id', schoolId)
+        .andWhere('dispatch_messages.status', 'queued')
+        .count({ count: '*' });
+      return parseInt(res[0]?.count || 0, 10);
+    } catch (e) {
+      console.warn('Error fetching queued messages count:', e.message);
+      return 0;
+    }
+  }
+
+  const db = readJsonDb();
+  let count = 0;
+  (db.pendingDispatches || []).forEach(b => {
+    if (b.schoolId === schoolId && b.status === 'queued') {
+      count += (b.messages || []).length;
+    }
+  });
+  return count;
+}
+
+async function sendQueuedMessages(schoolId = 'unique_scholars', sendFn) {
+  if (inFlightSendingLocks.has(schoolId)) {
+    return { inProgress: true, message: 'Message sending batch is already actively running.' };
+  }
+
+  inFlightSendingLocks.add(schoolId);
+  try {
+    if (isPostgresConfigured()) {
+      const db = getDb();
+
+      // 1. Strictly fetch messages with status = 'queued'
+      const queuedList = await db('dispatch_messages')
+        .join('dispatch_batches', 'dispatch_messages.batch_id', 'dispatch_batches.id')
+        .where('dispatch_batches.school_id', schoolId)
+        .andWhere('dispatch_messages.status', 'queued')
+        .select(
+          'dispatch_messages.id as msg_id',
+          'dispatch_messages.batch_id',
+          'dispatch_messages.student_id',
+          'dispatch_messages.student_name',
+          'dispatch_messages.phone',
+          'dispatch_messages.message',
+          'dispatch_messages.idempotency_key',
+          'dispatch_batches.source',
+          'dispatch_batches.media_json'
+        )
+        .orderBy('dispatch_messages.id', 'asc');
+
+      if (!queuedList || queuedList.length === 0) {
+        return { success: true, sentCount: 0, failedCount: 0, total: 0, remaining: 0, message: 'No messages currently queued.' };
+      }
+
+      // 2. Atomically transition them to 'sending' before processing to prevent race conditions & double-sends
+      const msgIds = queuedList.map(m => m.msg_id);
+      await db('dispatch_messages').whereIn('id', msgIds).update({ status: 'sending' });
+
+      let sentCount = 0;
+      let failedCount = 0;
+      let indexInBatch = 0;
+
+      for (const item of queuedList) {
+        indexInBatch++;
+        // Phone number normalization: E.164 without leading '+' (e.g. 03001234567 -> 923001234567)
+        let phoneClean = String(item.phone || '').replace(/\D/g, '');
+        if (phoneClean.startsWith('0') && phoneClean.length === 11) {
+          phoneClean = '92' + phoneClean.substring(1);
+        } else if (phoneClean.startsWith('00')) {
+          phoneClean = phoneClean.substring(2);
+        }
+
+        let media = null;
+        if (item.media_json) {
+          try {
+            media = typeof item.media_json === 'string' ? JSON.parse(item.media_json) : item.media_json;
+          } catch (e) {}
+        }
+
+        let res = { success: false, error: 'Send handler missing' };
+        try {
+          if (typeof sendFn === 'function') {
+            res = await sendFn(phoneClean, item.message, schoolId, media);
+          }
+        } catch (sendErr) {
+          res = { success: false, error: sendErr.message };
+        }
+
+        if (res && res.success) {
+          sentCount++;
+          await db('dispatch_messages')
+            .where({ id: item.msg_id })
+            .update({
+              status: 'delivered',
+              delivered_at: new Date(),
+              sent_at: new Date(),
+              error: null
+            });
+        } else {
+          failedCount++;
+          await db('dispatch_messages')
+            .where({ id: item.msg_id })
+            .update({
+              status: 'failed',
+              failed_at: new Date(),
+              error: res?.error || 'Failed to dispatch'
+            });
+        }
+
+        // Pacing & Anti-Spam Human Texting Simulation between consecutive parents
+        if (indexInBatch < queuedList.length) {
+          if (indexInBatch % 22 === 0) {
+            const breathPauseMs = Math.floor(15000 + Math.random() * 9000);
+            console.log(`☕ [Human Pacer] Natural breathing pause: waiting ${(breathPauseMs / 1000).toFixed(1)}s after 22 messages...`);
+            await new Promise(r => setTimeout(r, breathPauseMs));
+          } else if (indexInBatch % 100 === 0) {
+            const coolDownMs = Math.floor(45000 + Math.random() * 20000);
+            console.log(`🛡️ [Human Pacer] Anti-spam cooling pause: waiting ${(coolDownMs / 1000).toFixed(1)}s...`);
+            await new Promise(r => setTimeout(r, coolDownMs));
+          } else {
+            const naturalDelayMs = Math.floor(2800 + Math.random() * 2800);
+            await new Promise(r => setTimeout(r, naturalDelayMs));
+          }
+        }
+      }
+
+      // Check if all messages in affected batches are done, and complete the batches
+      const batchIds = Array.from(new Set(queuedList.map(m => m.batch_id)));
+      for (const bId of batchIds) {
+        const remainingInBatch = await db('dispatch_messages')
+          .where({ batch_id: bId })
+          .whereIn('status', ['queued', 'sending', 'pending'])
+          .count({ count: '*' });
+        if (parseInt(remainingInBatch[0]?.count || 0, 10) === 0) {
+          await db('dispatch_batches').where({ id: bId }).update({
+            status: 'completed',
+            completed_at: new Date()
+          });
+        }
+      }
+
+      const remainingRes = await db('dispatch_messages')
+        .join('dispatch_batches', 'dispatch_messages.batch_id', 'dispatch_batches.id')
+        .where('dispatch_batches.school_id', schoolId)
+        .andWhere('dispatch_messages.status', 'queued')
+        .count({ count: '*' });
+      const remainingCount = parseInt(remainingRes[0]?.count || 0, 10);
+
+      return {
+        success: true,
+        sentCount,
+        failedCount,
+        total: queuedList.length,
+        remaining: remainingCount
+      };
+    }
+
+    // JSON fallback
+    const db = readJsonDb();
+    let sentCount = 0;
+    let failedCount = 0;
+    const queuedBatches = (db.pendingDispatches || []).filter(b => b.schoolId === schoolId && b.status === 'queued');
+    for (const b of queuedBatches) {
+      b.status = 'sending';
+      for (const m of (b.messages || [])) {
+        let phoneClean = String(m.phone || '').replace(/\D/g, '');
+        if (phoneClean.startsWith('0') && phoneClean.length === 11) phoneClean = '92' + phoneClean.substring(1);
+        try {
+          const res = await sendFn(phoneClean, m.message, schoolId, b.media);
+          if (res && res.success) sentCount++;
+          else failedCount++;
+        } catch (e) {
+          failedCount++;
+        }
+        await new Promise(r => setTimeout(r, 2000));
+      }
+      b.status = 'completed';
+      b.completedAt = new Date().toISOString();
+    }
+    writeJsonDb(db);
+    return { success: true, sentCount, failedCount, total: sentCount + failedCount, remaining: 0 };
+  } finally {
+    inFlightSendingLocks.delete(schoolId);
+  }
 }
 
 // -------------------------------------------------------------
@@ -2877,6 +3307,8 @@ module.exports = {
   deleteStudent,
   saveDraftAttendance,
   submitFinalAttendance,
+  checkAttendanceSessionLock,
+  unlockAttendanceSession,
   getAttendanceLogs,
   getResultTerms,
   addResultTerm,
@@ -2901,6 +3333,8 @@ module.exports = {
   addPendingDispatches,
   getPendingDispatches,
   markPendingDispatchComplete,
+  getQueuedMessagesCount,
+  sendQueuedMessages,
   getClassFeeStructures,
   saveClassFeeStructure,
   getStudentFeeLedger,

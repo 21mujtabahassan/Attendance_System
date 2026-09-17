@@ -116,12 +116,34 @@ CREATE TABLE IF NOT EXISTS attendance_logs (
   status            VARCHAR(10) NOT NULL CHECK (status IN ('Present','Absent','Late')),
   state             VARCHAR(10) NOT NULL DEFAULT 'DRAFT' CHECK (state IN ('DRAFT','SUBMITTED')),
   whatsapp_alert_sent BOOLEAN NOT NULL DEFAULT false,
+  is_locked         BOOLEAN NOT NULL DEFAULT false,
+  locked_at         TIMESTAMPTZ,
+  locked_by         VARCHAR(100),
   updated_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
   submitted_at      TIMESTAMPTZ,
   UNIQUE (student_id, attendance_date)
 );
 CREATE INDEX IF NOT EXISTS idx_attendance_school_class_date ON attendance_logs(school_id, class_id, attendance_date);
 CREATE INDEX IF NOT EXISTS idx_attendance_school_date_status ON attendance_logs(school_id, attendance_date, status);
+
+CREATE TABLE IF NOT EXISTS attendance_sessions (
+  id                VARCHAR(120) PRIMARY KEY, -- '<school_id>_<class_id>_<attendance_date>'
+  school_id         VARCHAR(50) NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
+  class_id          VARCHAR(50) NOT NULL,
+  section_name      VARCHAR(50),
+  attendance_date   DATE NOT NULL,
+  status            VARCHAR(20) NOT NULL DEFAULT 'finalized', -- 'draft', 'finalized'
+  is_locked         BOOLEAN NOT NULL DEFAULT true,
+  locked_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
+  locked_by         VARCHAR(100),
+  unlocked_at       TIMESTAMPTZ,
+  unlocked_by       VARCHAR(100),
+  unlock_reason     TEXT,
+  created_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (school_id, class_id, attendance_date)
+);
+CREATE INDEX IF NOT EXISTS idx_att_sessions_lookup ON attendance_sessions(school_id, class_id, attendance_date);
 
 -- =====================================================================
 -- 6. ACADEMIC RESULTS
@@ -202,7 +224,7 @@ CREATE TABLE IF NOT EXISTS dispatch_batches (
   school_id     VARCHAR(50) NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
   source        VARCHAR(30) NOT NULL DEFAULT 'results'
                 CHECK (source IN ('attendance','results','broadcast')),
-  status        VARCHAR(20) NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','completed')),
+  status        VARCHAR(20) NOT NULL DEFAULT 'queued' CHECK (status IN ('queued','pending','sending','completed','failed')),
   media_json    JSONB,
   created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
   completed_at  TIMESTAMPTZ
@@ -216,12 +238,17 @@ CREATE TABLE IF NOT EXISTS dispatch_messages (
   student_name VARCHAR(150),
   phone       VARCHAR(20) NOT NULL,
   message     TEXT NOT NULL,
-  status      VARCHAR(20) NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','sent','failed')),
+  status      VARCHAR(20) NOT NULL DEFAULT 'queued' CHECK (status IN ('queued','pending','sending','sent','delivered','failed')),
+  idempotency_key VARCHAR(160) UNIQUE,
   error       TEXT,
   routed_via  VARCHAR(20),
-  sent_at     TIMESTAMPTZ
+  queued_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+  sent_at     TIMESTAMPTZ,
+  delivered_at TIMESTAMPTZ,
+  failed_at   TIMESTAMPTZ
 );
 CREATE INDEX IF NOT EXISTS idx_dispatch_messages_batch ON dispatch_messages(batch_id);
+CREATE INDEX IF NOT EXISTS idx_dispatch_messages_status ON dispatch_messages(status);
 
 -- =====================================================================
 -- 9. WHATSAPP SESSION STATUS (operational audit; Baileys creds stay on disk)

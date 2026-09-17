@@ -37,6 +37,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   initGatewayBadge();
   initSocketIO();
   setupTabNavigation();
+  fetchQueuedCount();
+  setInterval(() => fetchQueuedCount(), 10000);
   const authed = await initAuth();
   if (authed) {
     loadInitialData();
@@ -400,7 +402,10 @@ function switchTab(targetTab) {
   if (targetTab === 'students') renderStudentsTable();
   if (targetTab === 'records' && !isTeacher) loadRecordsData();
   if (targetTab === 'teachers' && !isTeacher) loadTeachersTabData();
-  if (targetTab === 'whatsapp' && !isTeacher) fetchWaStatus();
+  if (targetTab === 'whatsapp' && !isTeacher) {
+    fetchWaStatus();
+    fetchQueuedCount();
+  }
 }
 
 function setupTabNavigation() {
@@ -2369,21 +2374,92 @@ async function loadRecordsData() {
       return;
     }
 
-    tbody.innerHTML = records.map(r => `
-      <tr>
-        <td><strong>${r.date}</strong> <br><small class="text-muted">${r.time || ''}</small></td>
-        <td>${r.studentId}</td>
-        <td>${r.name}</td>
-        <td><span class="badge" style="background: rgba(59, 130, 246, 0.15); color: #60a5fa; font-weight: 600;">${escapeHtml(r.className || getClassName(r.classId))}</span></td>
-        <td><span class="badge ${r.status === 'Present' ? 'badge-success' : r.status === 'Absent' ? 'badge-danger' : 'badge-warning'}">${r.status}</span></td>
-        <td><span class="badge">${r.state || 'SUBMITTED'}</span></td>
-        <td>${r.status === 'Absent' ? '<span style="color: #34d399; font-weight: 600;">📩 Sent via WhatsApp</span>' : '-'}</td>
-      </tr>
-    `).join('');
+    tbody.innerHTML = records.map(r => {
+      const isLocked = r.isLocked || r.state === 'SUBMITTED';
+      const lockBadge = isLocked
+        ? `<span class="badge" style="background: rgba(239, 68, 68, 0.15); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.35); font-weight: 700;"><i class="fa-solid fa-lock"></i> Finalized & Locked</span>`
+        : `<span class="badge" style="background: rgba(245, 158, 11, 0.15); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.3); font-weight: 600;"><i class="fa-solid fa-pencil"></i> Draft</span>`;
+
+      return `
+        <tr>
+          <td><strong>${r.date}</strong> <br><small class="text-muted">${r.time || ''}</small></td>
+          <td>${r.studentId}</td>
+          <td>${r.name}</td>
+          <td><span class="badge" style="background: rgba(59, 130, 246, 0.15); color: #60a5fa; font-weight: 600;">${escapeHtml(r.className || getClassName(r.classId))}</span></td>
+          <td><span class="badge ${r.status === 'Present' ? 'badge-success' : r.status === 'Absent' ? 'badge-danger' : 'badge-warning'}">${r.status}</span></td>
+          <td>${lockBadge}</td>
+          <td>${r.status === 'Absent' ? '<span style="color: #34d399; font-weight: 600;">📩 Queued / Sent</span>' : '-'}</td>
+        </tr>
+      `;
+    }).join('');
   } catch (e) {
     console.error('Error loading records:', e);
   }
 }
+
+function openUnlockAttendanceModal() {
+  const select = document.getElementById('unlockClassSelect');
+  if (select) {
+    select.innerHTML = '<option value="">Select class to unlock...</option>' +
+      (globalClasses || []).map(c => `<option value="${c.id}">${c.name}</option>`).join('');
+  }
+  const dateInput = document.getElementById('unlockDateInput');
+  if (dateInput && !dateInput.value) {
+    dateInput.value = new Date().toISOString().split('T')[0];
+  }
+  openModal('unlockAttendanceModal');
+}
+
+async function handleUnlockAttendanceSubmit(event) {
+  event.preventDefault();
+  const classId = document.getElementById('unlockClassSelect')?.value;
+  const date = document.getElementById('unlockDateInput')?.value;
+  const reason = document.getElementById('unlockReasonInput')?.value;
+  const btn = document.getElementById('btnConfirmUnlock');
+
+  if (!classId || !date) {
+    showToast('⚠️ Please select both class and date to unlock.');
+    return;
+  }
+
+  try {
+    if (btn) {
+      btn.disabled = true;
+      btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Unlocking...';
+    }
+
+    const res = await fetch(`${API_BASE}/admin/attendance/unlock`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        schoolId: CURRENT_SCHOOL_ID,
+        classId,
+        date,
+        reason,
+        adminUser: currentUser?.name || currentUser?.username || 'Admin'
+      })
+    });
+
+    const data = await res.json();
+    if (data.success) {
+      showToast(`🔓 Attendance session unlocked for ${getClassName(classId)} on ${date}!`);
+      closeModal('unlockAttendanceModal');
+      document.getElementById('unlockAttendanceForm')?.reset();
+      loadRecordsData();
+    } else {
+      showToast(`❌ ${data.error || 'Failed to unlock attendance session.'}`);
+    }
+  } catch (err) {
+    console.error('Error unlocking attendance:', err);
+    showToast('❌ Connection error while unlocking attendance session.');
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = '<i class="fa-solid fa-lock-open"></i> Unlock Session';
+    }
+  }
+}
+
 
 // -------------------------------------------------------------
 // TAB 7: WHATSAPP GATEWAY CONTROL & ROUTING
@@ -2787,6 +2863,123 @@ async function triggerWhatsAppDisconnect() {
   }
 }
 
+// -------------------------------------------------------------
+// WHATSAPP QUEUE & OUTBOX CONTROLLER
+// -------------------------------------------------------------
+let currentQueuedCount = 0;
+let isSendingPendingMessages = false;
+
+async function fetchQueuedCount(showToastFeedback = false) {
+  try {
+    const res = await fetch(`${API_BASE}/whatsapp/pending-count?schoolId=${CURRENT_SCHOOL_ID}`);
+    if (res.ok) {
+      const data = await res.json();
+      currentQueuedCount = data.queuedCount || 0;
+
+      // Update WhatsApp tab outbox badge
+      const badge = document.getElementById('waQueueBadge');
+      if (badge) badge.textContent = `${currentQueuedCount} Queued`;
+
+      const btnBadge = document.getElementById('btnPendingCountBadge');
+      if (btnBadge) btnBadge.textContent = currentQueuedCount;
+
+      // Update topbar badge
+      const topBtn = document.getElementById('topNavPendingBtn');
+      const topText = document.getElementById('topNavPendingText');
+      if (topBtn && topText) {
+        if (currentQueuedCount > 0) {
+          topBtn.style.display = 'inline-flex';
+          topText.textContent = `${currentQueuedCount} Pending`;
+        } else {
+          topBtn.style.display = 'none';
+        }
+      }
+
+      if (showToastFeedback) {
+        showToast(`⚡ WhatsApp Queue: ${currentQueuedCount} message(s) ready to send.`);
+      }
+    }
+  } catch (e) {
+    console.warn('Could not fetch queued WhatsApp count:', e.message);
+  }
+}
+
+async function triggerSendPendingMessages() {
+  if (isSendingPendingMessages) {
+    showToast('⏳ Message sender is already actively running! Please wait.');
+    return;
+  }
+
+  const btn = document.getElementById('btnSendPendingMessages');
+  const topBtn = document.getElementById('topNavPendingBtn');
+  const progressBox = document.getElementById('waQueueProgressBox');
+  const progressText = document.getElementById('waQueueProgressText');
+
+  isSendingPendingMessages = true;
+  if (btn) {
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> <span>Sending Batch...</span>';
+  }
+  if (topBtn) {
+    topBtn.disabled = true;
+    topBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> <span>Sending...</span>';
+  }
+  if (progressBox && progressText) {
+    progressBox.style.display = 'block';
+    progressBox.style.background = 'rgba(59, 130, 246, 0.12)';
+    progressBox.style.borderColor = 'rgba(59, 130, 246, 0.3)';
+    progressText.innerHTML = '<i class="fa-solid fa-spinner fa-spin" style="color: #60a5fa;"></i> Sending queued messages with human-like latency pauses & anti-ban breathing intervals...';
+  }
+
+  showToast('⚡ Initiated WhatsApp message dispatch queue...');
+
+  try {
+    const res = await fetch(`${API_BASE}/whatsapp/send-pending`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ schoolId: CURRENT_SCHOOL_ID })
+    });
+
+    const data = await res.json();
+    if (data.success) {
+      const { sentCount = 0, failedCount = 0, total = 0, remaining = 0 } = data;
+      if (total === 0) {
+        showToast('ℹ️ No pending messages waiting in queue.');
+        if (progressBox && progressText) {
+          progressText.innerHTML = '<i class="fa-solid fa-circle-check" style="color: #10b981;"></i> Queue is empty. No messages waiting.';
+        }
+      } else {
+        showToast(`✅ Sent ${sentCount} WhatsApp messages (${failedCount} failed). Remaining: ${remaining}`);
+        if (progressBox && progressText) {
+          progressBox.style.background = 'rgba(16, 185, 129, 0.12)';
+          progressBox.style.borderColor = 'rgba(16, 185, 129, 0.3)';
+          progressText.innerHTML = `<i class="fa-solid fa-circle-check" style="color: #10b981;"></i> Batch Complete: <strong>${sentCount}</strong> delivered, <strong>${failedCount}</strong> failed. Remaining in queue: <strong>${remaining}</strong>.`;
+        }
+      }
+    } else {
+      showToast(`❌ ${data.message || data.error || 'Failed to dispatch queued messages.'}`);
+      if (progressBox && progressText) {
+        progressBox.style.background = 'rgba(239, 68, 68, 0.12)';
+        progressBox.style.borderColor = 'rgba(239, 68, 68, 0.3)';
+        progressText.innerHTML = `<i class="fa-solid fa-circle-xmark" style="color: #ef4444;"></i> ${data.message || data.error || 'Failed to dispatch queued messages.'}`;
+      }
+    }
+  } catch (err) {
+    console.error('Error triggering queued messages:', err);
+    showToast('❌ Connection error while sending queued messages.');
+  } finally {
+    isSendingPendingMessages = false;
+    await fetchQueuedCount();
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = `<i class="fa-solid fa-bolt"></i> <span>Send Pending Messages</span> <span id="btnPendingCountBadge" style="background: rgba(255, 255, 255, 0.25); padding: 1px 8px; border-radius: 10px; font-size: 12px;">${currentQueuedCount}</span>`;
+    }
+    if (topBtn) {
+      topBtn.disabled = false;
+      topBtn.innerHTML = `<i class="fa-solid fa-bolt"></i> <span id="topNavPendingText">${currentQueuedCount} Pending</span>`;
+    }
+  }
+}
 
 // -------------------------------------------------------------
 // FEE MANAGEMENT MODULE

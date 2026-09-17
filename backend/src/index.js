@@ -29,6 +29,8 @@ const {
   deleteStudent,
   saveDraftAttendance,
   submitFinalAttendance,
+  checkAttendanceSessionLock,
+  unlockAttendanceSession,
   getAttendanceLogs,
   getResultTerms,
   addResultTerm,
@@ -53,6 +55,8 @@ const {
   addPendingDispatches,
   getPendingDispatches,
   markPendingDispatchComplete,
+  getQueuedMessagesCount,
+  sendQueuedMessages,
   getClassFeeStructures,
   saveClassFeeStructure,
   getStudentFeeLedger,
@@ -710,6 +714,9 @@ app.post('/api/attendance/draft', async (req, res) => {
       time: timeStr
     });
   } catch (err) {
+    if (err.code === 'ATTENDANCE_LOCKED') {
+      return res.status(409).json({ success: false, error: err.message, isLocked: true });
+    }
     console.error('Error saving draft attendance:', err);
     res.status(500).json({ success: false, error: err.message || 'Failed to save draft attendance.' });
   }
@@ -758,53 +765,92 @@ ${school.name}`;
     }
 
     let queuedRecord = null;
-    // If running on Vercel OR if more than 2 absent alerts to send:
-    // Queue immediately to addPendingDispatches so the teacher's UI locks instantly (<200ms)
-    // while the background human pacer delivers each message with natural typing delays and anti-spam intervals!
-    if (process.env.VERCEL || pendingBatch.length > 2) {
-      if (pendingBatch.length > 0) {
-        queuedRecord = await addPendingDispatches(schoolId, pendingBatch, 'attendance');
-        console.log(`Queued ${pendingBatch.length} attendance alerts for human-paced WhatsApp telecast (Batch: ${queuedRecord?.id})`);
-      }
-    } else {
-      // 1 or 2 absent students on local server: send directly with natural typing latency
-      for (const item of pendingBatch) {
-        const result = await sendWhatsAppMessage(item.phone, item.message, schoolId, gatewayUrl);
-        whatsappResults.push({
-          studentId: item.studentId,
-          name: item.studentName,
-          parentPhone: item.phone,
-          success: result.success,
-          error: result.error || null,
-          routedVia: result.routedVia || 'unknown'
-        });
-        if (pendingBatch.length > 1) {
-          await new Promise(r => setTimeout(r, Math.floor(2500 + Math.random() * 2000)));
-        }
-      }
+    // Always queue to pending queue so messages are sent safely with natural human latency
+    // and can be monitored or dispatched via the "Send Pending Messages" control!
+    if (pendingBatch.length > 0) {
+      queuedRecord = await addPendingDispatches(schoolId, pendingBatch, 'attendance', null, 'queued');
+      console.log(`Queued ${pendingBatch.length} attendance alerts for WhatsApp queue (Batch: ${queuedRecord?.id})`);
     }
-
-    const dispatchedCount = whatsappResults.filter(r => r.success).length;
-    const failedCount = whatsappResults.filter(r => !r.success).length;
 
     res.json({
       success: true,
       message: `Final attendance finalized and locked for ${classId}!`,
       state: 'SUBMITTED',
+      isLocked: true,
       summary: {
         total: attendance.length,
         present: attendance.filter(a => String(a.status || '').toLowerCase() !== 'absent').length,
         absent: absentStudentsToAlert.length,
-        whatsappAlertsSent: dispatchedCount,
-        whatsappAlertsFailed: failedCount,
+        whatsappAlertsSent: 0,
+        whatsappAlertsFailed: 0,
         whatsappQueued: queuedRecord ? pendingBatch.length : 0
       },
       whatsappDetails: whatsappResults,
       pendingBatch
     });
   } catch (error) {
+    if (error.code === 'ATTENDANCE_LOCKED') {
+      return res.status(409).json({ success: false, error: error.message, isLocked: true });
+    }
     console.error('Error in submit attendance:', error);
     res.status(500).json({ success: false, error: error.message || 'Internal server error during attendance submission.' });
+  }
+});
+
+app.get('/api/attendance/lock-status', async (req, res) => {
+  try {
+    const { schoolId = 'unique_scholars', classId, date } = req.query;
+    if (!classId) {
+      return res.status(400).json({ success: false, error: 'classId is required.' });
+    }
+    const dateStr = date || new Date().toISOString().split('T')[0];
+    const status = await checkAttendanceSessionLock(schoolId, classId, dateStr);
+    res.json({ success: true, ...status, date: dateStr, classId });
+  } catch (err) {
+    console.error('Error checking attendance lock status:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post(['/api/admin/attendance/unlock', '/api/attendance/unlock'], async (req, res) => {
+  try {
+    const { schoolId = 'unique_scholars', classId, date, reason } = req.body;
+    if (!classId || !date) {
+      return res.status(400).json({ success: false, error: 'classId and date are required to unlock attendance.' });
+    }
+    const adminUser = req.body.adminUser || req.user?.username || 'Admin';
+    const result = await unlockAttendanceSession(schoolId, classId, date, adminUser, reason);
+    res.json({ success: true, ...result });
+  } catch (err) {
+    console.error('Error unlocking attendance session:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.get(['/api/whatsapp/pending-count', '/api/whatsapp/queue-count'], async (req, res) => {
+  try {
+    const { schoolId = 'unique_scholars' } = req.query;
+    const queuedCount = await getQueuedMessagesCount(schoolId);
+    res.json({ success: true, queuedCount });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message, queuedCount: 0 });
+  }
+});
+
+app.post(['/api/whatsapp/send-pending', '/api/whatsapp/trigger-queue'], async (req, res) => {
+  try {
+    const { schoolId = 'unique_scholars' } = req.body;
+    const gatewayUrl = req.headers['x-whatsapp-gateway-url'] || req.body.gatewayUrl || process.env.WHATSAPP_GATEWAY_URL || process.env.PERSISTENT_BACKEND_URL;
+
+    console.log(`⚡ [Queue Sender] Manual trigger requested for ${schoolId}...`);
+    const result = await sendQueuedMessages(schoolId, async (phone, msg, sId, media) => {
+      return await sendWhatsAppMessage(phone, msg, sId, gatewayUrl, media);
+    });
+
+    res.json({ success: true, ...result });
+  } catch (err) {
+    console.error('Error sending queued WhatsApp messages:', err);
+    res.status(500).json({ success: false, error: err.message });
   }
 });
 
@@ -813,6 +859,7 @@ app.get('/api/attendance/logs', async (req, res) => {
   const logs = await getAttendanceLogs(schoolId, { classId, date });
   res.json({ success: true, logs });
 });
+
 
 // -------------------------------------------------------------
 // ACADEMIC RESULTS MODULE ENDPOINTS

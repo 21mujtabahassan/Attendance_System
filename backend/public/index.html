@@ -89,6 +89,9 @@
             <span class="status-dot" id="waGatewayDot" style="width: 8px; height: 8px; border-radius: 50%; background: #f59e0b; display: inline-block;"></span>
             <span id="waGatewayBadgeText">WA Gateway: Auto</span>
           </div>
+          <button class="btn btn-sm btn-accent" id="topNavPendingBtn" onclick="triggerSendPendingMessages()" style="display: none; align-items: center; gap: 6px; padding: 6px 12px; font-size: 12px; border-radius: var(--radius-md); font-weight: 700; background: linear-gradient(135deg, #f59e0b, #d97706); border: none; color: #fff; cursor: pointer; box-shadow: 0 2px 10px rgba(245, 158, 11, 0.35);" title="Send pending queued WhatsApp messages">
+            <i class="fa-solid fa-bolt"></i> <span id="topNavPendingText">0 Pending</span>
+          </button>
 
           <!-- USER PROFILE BADGE & LOGOUT -->
           <div class="user-profile-badge" id="userProfileBadge" style="display: flex; align-items: center; gap: 8px; padding: 5px 12px; background: var(--bg-card); border: 1px solid var(--border-color); border-radius: var(--radius-md); font-size: 12px;">
@@ -728,6 +731,9 @@
               <button class="btn btn-secondary" onclick="loadRecordsData()">
                 <i class="fa-solid fa-rotate"></i> Refresh
               </button>
+              <button class="btn btn-warning admin-only-btn" onclick="openUnlockAttendanceModal()" title="Unlock attendance session for a class" style="background: rgba(239, 68, 68, 0.2); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.4);">
+                <i class="fa-solid fa-lock-open"></i> Unlock Session
+              </button>
             </div>
           </div>
 
@@ -763,6 +769,40 @@
               <h2>WhatsApp Gateway Engine (Multi-Tenant)</h2>
               <p>Scan QR code with the official school WhatsApp phone to enable parent dispatches and keep session
                 connected 24/7.</p>
+            </div>
+          </div>
+
+          <!-- WHATSAPP OUTBOX & QUEUED MESSAGE SENDER -->
+          <div style="margin: 0 0 25px 0; padding: 20px; background: linear-gradient(135deg, rgba(30, 41, 59, 0.9), rgba(15, 23, 42, 0.95)); border-radius: 12px; border: 1px solid rgba(245, 158, 11, 0.35); box-shadow: 0 4px 20px rgba(0, 0, 0, 0.25);">
+            <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 16px;">
+              <div>
+                <div style="display: flex; align-items: center; gap: 10px;">
+                  <strong style="color: #fff; font-size: 16px; display: flex; align-items: center; gap: 8px;">
+                    <i class="fa-solid fa-paper-plane" style="color: #f59e0b;"></i> Message Outbox & Anti-Ban Queue
+                  </strong>
+                  <span id="waQueueBadge" style="background: rgba(245, 158, 11, 0.2); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.4); padding: 3px 12px; border-radius: 12px; font-size: 12px; font-weight: 700;">
+                    0 Queued
+                  </span>
+                </div>
+                <p style="color: #94a3b8; font-size: 13px; margin: 6px 0 0 0; max-width: 620px; line-height: 1.4;">
+                  Attendance alerts, report cards, and announcements wait here safely in queue. Clicking <strong>Send Pending Messages</strong> delivers each message with natural typing jitter, human breathing pauses, and zero duplicate sends.
+                </p>
+              </div>
+              <div style="display: flex; gap: 12px; align-items: center; flex-wrap: wrap;">
+                <button class="btn btn-secondary btn-sm" onclick="fetchQueuedCount(true)" title="Refresh queued count">
+                  <i class="fa-solid fa-rotate"></i> Check Queue
+                </button>
+                <button class="btn btn-primary" id="btnSendPendingMessages" onclick="triggerSendPendingMessages()" style="background: linear-gradient(135deg, #22c55e, #16a34a); border: none; font-weight: 700; padding: 10px 22px; font-size: 14px; display: flex; align-items: center; gap: 8px; box-shadow: 0 4px 14px rgba(34, 197, 94, 0.35);">
+                  <i class="fa-solid fa-bolt"></i>
+                  <span>Send Pending Messages</span>
+                  <span id="btnPendingCountBadge" style="background: rgba(255, 255, 255, 0.25); padding: 1px 8px; border-radius: 10px; font-size: 12px;">0</span>
+                </button>
+              </div>
+            </div>
+            <div id="waQueueProgressBox" style="margin-top: 14px; padding: 12px 16px; background: rgba(15, 23, 42, 0.6); border-radius: 8px; border: 1px solid rgba(255, 255, 255, 0.05); font-size: 13px; color: #cbd5e1; display: none;">
+              <div id="waQueueProgressText" style="display: flex; align-items: center; gap: 8px;">
+                <i class="fa-solid fa-circle-info" style="color: #38bdf8;"></i> Queue ready.
+              </div>
             </div>
           </div>
 
@@ -998,6 +1038,39 @@
       <div class="modal-actions" style="padding: 16px 24px;">
         <button type="button" class="btn btn-secondary" onclick="closeModal('classDetailsModal')">Close</button>
       </div>
+    </div>
+  </div>
+
+  <!-- MODAL: UNLOCK ATTENDANCE SESSION -->
+  <div class="modal" id="unlockAttendanceModal">
+    <div class="modal-dialog">
+      <div class="modal-header">
+        <h3><i class="fa-solid fa-lock-open" style="color: #ef4444;"></i> Unlock Attendance Session (Admin Override)</h3>
+        <button class="modal-close" onclick="closeModal('unlockAttendanceModal')">&times;</button>
+      </div>
+      <form id="unlockAttendanceForm" onsubmit="handleUnlockAttendanceSubmit(event)">
+        <div style="background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.3); border-radius: 8px; padding: 12px; margin-bottom: 16px; font-size: 13px; color: #fca5a5;">
+          <i class="fa-solid fa-triangle-exclamation"></i> <strong>Admin Override:</strong> Unlocking an attendance session permits teachers or admins to edit and re-mark attendance records for that day. This override will be recorded with your justification.
+        </div>
+        <div class="form-group">
+          <label>Target Class *</label>
+          <select id="unlockClassSelect" required style="width: 100%; padding: 10px; border-radius: 8px; background: #1e293b; border: 1px solid #334155; color: #fff;">
+            <option value="">Select class to unlock...</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Attendance Date *</label>
+          <input type="date" id="unlockDateInput" required style="width: 100%; padding: 10px; border-radius: 8px; background: #1e293b; border: 1px solid #334155; color: #fff;">
+        </div>
+        <div class="form-group">
+          <label>Reason / Justification *</label>
+          <input type="text" id="unlockReasonInput" placeholder="e.g. Correction needed for student status" required style="width: 100%; padding: 10px; border-radius: 8px; background: #1e293b; border: 1px solid #334155; color: #fff;">
+        </div>
+        <div class="modal-actions" style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px;">
+          <button type="button" class="btn btn-secondary" onclick="closeModal('unlockAttendanceModal')">Cancel</button>
+          <button type="submit" class="btn btn-danger" id="btnConfirmUnlock"><i class="fa-solid fa-lock-open"></i> Unlock Session</button>
+        </div>
+      </form>
     </div>
   </div>
 
