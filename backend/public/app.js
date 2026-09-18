@@ -2383,9 +2383,9 @@ async function loadRecordsData() {
       return `
         <tr>
           <td><strong>${r.date}</strong> <br><small class="text-muted">${r.time || ''}</small></td>
-          <td>${r.studentId}</td>
-          <td>${r.name}</td>
-          <td><span class="badge" style="background: rgba(59, 130, 246, 0.15); color: #60a5fa; font-weight: 600;">${escapeHtml(r.className || getClassName(r.classId))}</span></td>
+          <td>${escapeHtml(r.studentId || '')}</td>
+          <td><strong>${escapeHtml(r.studentName || r.name || 'Unknown')}</strong></td>
+          <td><span class="badge" style="background: rgba(59, 130, 246, 0.15); color: #60a5fa; font-weight: 600;">${escapeHtml(r.className || getClassName(r.classId) || r.classId || '')}</span></td>
           <td><span class="badge ${r.status === 'Present' ? 'badge-success' : r.status === 'Absent' ? 'badge-danger' : 'badge-warning'}">${r.status}</span></td>
           <td>${lockBadge}</td>
           <td>${r.status === 'Absent' ? '<span style="color: #34d399; font-weight: 600;">📩 Queued / Sent</span>' : '-'}</td>
@@ -2405,7 +2405,11 @@ function openUnlockAttendanceModal() {
   }
   const dateInput = document.getElementById('unlockDateInput');
   if (dateInput && !dateInput.value) {
-    dateInput.value = new Date().toISOString().split('T')[0];
+    try {
+      dateInput.value = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Karachi', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+    } catch (e) {
+      dateInput.value = new Date().toLocaleDateString('en-CA');
+    }
   }
   openModal('unlockAttendanceModal');
 }

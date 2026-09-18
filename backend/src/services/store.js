@@ -3,6 +3,7 @@ const path = require('path');
 const crypto = require('crypto');
 const bcrypt = require('bcryptjs');
 const { getDb, isPostgresConfigured } = require('../db');
+const { getPKTDate, getPKTTime, isTestEntity } = require('../utils/timezone');
 
 // In-flight mutex to strictly prevent concurrent WhatsApp batch executions per school
 const inFlightSendingLocks = new Set();
@@ -567,27 +568,7 @@ async function deleteStudent(schoolId = 'unique_scholars', studentId) {
 
 // Local YYYY-MM-DD Date Normalizer (prevents UTC offset date-shift in Pakistan UTC+5)
 function formatLocalDate(d) {
-  if (!d) {
-    const now = new Date();
-    const y = now.getFullYear();
-    const m = String(now.getMonth() + 1).padStart(2, '0');
-    const day = String(now.getDate()).padStart(2, '0');
-    return `${y}-${m}-${day}`;
-  }
-  if (typeof d === 'string') {
-    const trimmed = d.trim();
-    if (/^\d{4}-\d{2}-\d{2}/.test(trimmed)) {
-      return trimmed.slice(0, 10);
-    }
-  }
-  if (d instanceof Date) {
-    const y = d.getFullYear();
-    const m = String(d.getMonth() + 1).padStart(2, '0');
-    const day = String(d.getDate()).padStart(2, '0');
-    return `${y}-${m}-${day}`;
-  }
-  const s = String(d).trim();
-  return s.length >= 10 ? s.slice(0, 10) : s;
+  return getPKTDate(d);
 }
 
 // Bulletproof Class Resolution & Whitespace / Custom Naming Normalizer
@@ -949,9 +930,11 @@ async function saveDraftAttendance(schoolId = 'unique_scholars', classId, dateSt
 
 async function submitFinalAttendance(schoolId = 'unique_scholars', classId, dateStr, records, timeStr) {
   const cleanDateStr = formatLocalDate(dateStr);
+  console.log(`🔒 [submitFinalAttendance] Checking lock status for class "${classId}" on ${cleanDateStr}...`);
   // Business rule: Enforce locked state check
   const lockStatus = await checkAttendanceSessionLock(schoolId, classId, cleanDateStr);
   if (lockStatus.isLocked) {
+    console.warn(`⛔ [submitFinalAttendance] Rejection: Session for class "${classId}" on ${cleanDateStr} is already finalized.`);
     const err = new Error(`Attendance for ${cleanDateStr} is already finalized and cannot be modified.`);
     err.code = 'ATTENDANCE_LOCKED';
     err.isLocked = true;
@@ -965,7 +948,9 @@ async function submitFinalAttendance(schoolId = 'unique_scholars', classId, date
     const attendanceLogs = [];
     const classObj = await resolveClass(schoolId, classId, db);
     const resolvedClassId = classObj ? classObj.id : classId;
+    const finalTimeStr = timeStr || getPKTTime();
 
+    console.log(`📝 [submitFinalAttendance] Starting DB transaction for ${records.length} records in class "${resolvedClassId}"...`);
     await db.transaction(async trx => {
       for (const r of records) {
         const logKey = `${cleanDateStr}_${r.studentId}`;
@@ -976,7 +961,7 @@ async function submitFinalAttendance(schoolId = 'unique_scholars', classId, date
           class_id: resolvedClassId,
           student_id: r.studentId,
           attendance_date: cleanDateStr,
-          attendance_time: timeStr || new Date().toLocaleTimeString('en-US', { hour12: true }),
+          attendance_time: finalTimeStr,
           status: normalizedStatus,
           state: 'SUBMITTED',
           is_locked: true,
@@ -1059,7 +1044,8 @@ async function submitFinalAttendance(schoolId = 'unique_scholars', classId, date
         });
     });
 
-    return { absentStudentsToAlert: absentToAlert, attendanceLogs };
+    console.log(`✅ [submitFinalAttendance] DB Transaction successfully committed for class "${resolvedClassId}" (${attendanceLogs.length} logs saved, ${absentToAlert.length} absent alerts queued).`);
+    return { absentStudentsToAlert: absentToAlert, attendanceLogs, classObj, date: cleanDateStr, time: finalTimeStr, resolvedClassId };
   }
 
   const db = readJsonDb();
@@ -1140,7 +1126,10 @@ async function getAttendanceLogs(schoolId = 'unique_scholars', filters = {}) {
     }
     if (filters.status) query.andWhere({ status: filters.status });
 
-    const rows = await query.orderBy('attendance_date', 'desc');
+    const rows = await query
+      .orderBy('attendance_date', 'desc')
+      .orderBy('updated_at', 'desc')
+      .orderBy('attendance_time', 'desc');
     return rows.map(r => ({
       id: r.log_key,
       schoolId: r.school_id,
@@ -2355,13 +2344,23 @@ async function getAdminInsights(schoolId = 'unique_scholars') {
 }
 
 async function getAdminRecords(schoolId = 'unique_scholars', filters = {}) {
-  const students = await getStudents(schoolId);
-  const logs = await getAttendanceLogs(schoolId, filters);
+  const [students, classes, logs] = await Promise.all([
+    getStudents(schoolId),
+    getClasses(schoolId),
+    getAttendanceLogs(schoolId, filters)
+  ]);
   const studentMap = {};
   students.forEach(s => { studentMap[s.id] = s; });
+  const classMap = {};
+  classes.forEach(c => {
+    classMap[c.id] = c.name;
+    if (c.name) classMap[c.name] = c.name;
+  });
 
   return logs.map(l => {
     const s = studentMap[l.studentId] || {};
+    const studentName = s.name || l.studentName || 'Unknown';
+    const className = classMap[l.classId] || l.classId;
     return {
       id: l.id,
       date: l.date,
@@ -2369,10 +2368,13 @@ async function getAdminRecords(schoolId = 'unique_scholars', filters = {}) {
       status: l.status,
       state: l.state,
       studentId: l.studentId,
-      studentName: s.name || 'Unknown',
+      name: studentName,
+      studentName: studentName,
       classId: l.classId,
+      className: className,
       section: s.section || 'A',
-      parentPhone: s.parentPhone || ''
+      parentPhone: s.parentPhone || '',
+      isLocked: l.isLocked
     };
   });
 }
@@ -3468,5 +3470,8 @@ module.exports = {
   updateStudentConcession,
   computeGradeAndStatus,
   resolveClass,
-  formatLocalDate
+  formatLocalDate,
+  getPKTDate,
+  getPKTTime,
+  isTestEntity
 };

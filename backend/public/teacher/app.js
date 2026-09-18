@@ -116,8 +116,24 @@ function initOnlineWatcher() {
   window.addEventListener('offline', () => updateBackendUI());
 }
 
+function getClientPKTDate(d = new Date()) {
+  try {
+    return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Karachi', year: 'numeric', month: '2-digit', day: '2-digit' }).format(d);
+  } catch (e) {
+    return new Date().toLocaleDateString('en-CA');
+  }
+}
+
+function getClientPKTTime(d = new Date()) {
+  try {
+    return new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Karachi', hour: '2-digit', minute: '2-digit', hour12: true }).format(d);
+  } catch (e) {
+    return new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
+  }
+}
+
 function initDateInputs() {
-  const today = new Date().toISOString().split('T')[0];
+  const today = getClientPKTDate();
   const attDate = document.getElementById('attendanceDateInput');
   const logsDate = document.getElementById('logsDateInput');
   if (attDate) attDate.value = today;
@@ -804,7 +820,7 @@ async function saveAttendanceDraft() {
     return;
   }
 
-  const timeStr = new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
+  const timeStr = getClientPKTTime();
   const payload = {
     schoolId: CURRENT_SCHOOL_ID,
     classId,
@@ -833,9 +849,11 @@ async function saveAttendanceDraft() {
     });
 
     const data = await res.json();
-    if (res.status === 409 || data.isLocked) {
-      currentAttendanceSessionLocked = true;
-      renderAttendanceRoster();
+    if (!res.ok || res.status === 409) {
+      if (res.status === 409 || data.isLocked) {
+        currentAttendanceSessionLocked = true;
+        renderAttendanceRoster();
+      }
       showToast(`🔒 ${data.error || 'Attendance for this date is already finalized and cannot be modified.'}`, 'error');
       return;
     }
@@ -902,7 +920,7 @@ async function executeFinalAttendanceSubmit() {
   const date = document.getElementById('attendanceDateInput').value;
   const btn = document.getElementById('btnSubmitAttendance');
 
-  const timeStr = new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
+  const timeStr = getClientPKTTime();
   const payload = {
     schoolId: CURRENT_SCHOOL_ID,
     classId,
@@ -935,9 +953,11 @@ async function executeFinalAttendanceSubmit() {
     });
 
     const data = await res.json();
-    if (res.status === 409 || data.isLocked) {
-      currentAttendanceSessionLocked = true;
-      renderAttendanceRoster();
+    if (!res.ok || res.status === 409) {
+      if (res.status === 409 || data.isLocked) {
+        currentAttendanceSessionLocked = true;
+        renderAttendanceRoster();
+      }
       showToast(`🔒 ${data.error || 'Attendance for this date is already finalized and cannot be modified.'}`, 'error');
       return;
     }

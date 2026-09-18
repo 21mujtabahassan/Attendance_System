@@ -692,6 +692,8 @@ app.delete('/api/admin/students/:studentId', async (req, res) => {
   }
 });
 
+const { getPKTDate, getPKTTime, isTestEntity } = require('./utils/timezone');
+
 // -------------------------------------------------------------
 // ATTENDANCE ENDPOINTS
 // -------------------------------------------------------------
@@ -703,8 +705,8 @@ app.post('/api/attendance/draft', async (req, res) => {
       return res.status(400).json({ success: false, error: 'Invalid attendance draft payload.' });
     }
 
-    const dateStr = attendanceDate || new Date().toISOString().split('T')[0];
-    const timeStr = attendanceTime || new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true });
+    const dateStr = attendanceDate ? getPKTDate(attendanceDate) : getPKTDate();
+    const timeStr = attendanceTime || getPKTTime();
 
     await saveDraftAttendance(schoolId, classId, dateStr, attendance, timeStr);
     res.json({
@@ -731,21 +733,36 @@ app.post('/api/attendance/submit', async (req, res) => {
 
     const schools = await getSchools();
     const school = schools.find(s => s.id === schoolId) || { name: 'Unique Scholars Academy' };
-    const dateStr = attendanceDate || new Date().toISOString().split('T')[0];
-    const timeStr = attendanceTime || new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true });
+    const dateStr = attendanceDate ? getPKTDate(attendanceDate) : getPKTDate();
+    const timeStr = attendanceTime || getPKTTime();
     const gatewayUrl = req.headers['x-whatsapp-gateway-url'] || req.body.gatewayUrl || process.env.WHATSAPP_GATEWAY_URL || process.env.PERSISTENT_BACKEND_URL;
 
-    const { absentStudentsToAlert } = await submitFinalAttendance(schoolId, classId, dateStr, attendance, timeStr);
-    const whatsappResults = [];
-    const pendingBatch = [];
+    console.log(`📡 [POST /api/attendance/submit] Class: "${classId}", Date: ${dateStr}, Time: ${timeStr}, Students: ${attendance.length}`);
 
-    for (const item of absentStudentsToAlert) {
-      const message =
-        `Assalam-o-Alaikum! 📢
+    // STEP 1: Strict Order of Operations - Database Transaction Commits FIRST
+    const { absentStudentsToAlert, classObj, resolvedClassId } = await submitFinalAttendance(schoolId, classId, dateStr, attendance, timeStr);
+
+    // STEP 2: Safety Check for Dummy / Test Classes
+    const isTestClass = isTestEntity(classId, resolvedClassId, classObj?.name);
+    if (isTestClass) {
+      console.log(`🛡️ [Test Class Safety] Class "${classId}" detected as dummy/test. Suppressing live WhatsApp dispatch to protect parents.`);
+    }
+
+    const pendingBatch = [];
+    if (!isTestClass) {
+      for (const item of absentStudentsToAlert) {
+        // Double check individual student is not a test entity
+        if (isTestEntity(item.studentId, item.name)) {
+          console.log(`🛡️ [Test Student Safety] Skipping WhatsApp alert for test student ${item.name} (${item.studentId})`);
+          continue;
+        }
+
+        const message =
+          `Assalam-o-Alaikum! 📢
 ${school.name} Attendance Alert
 
 Student Name: ${item.name}
-Class: ${classId}
+Class: ${classObj?.name || classId}
 Date: ${dateStr}
 Time: ${timeStr}
 
@@ -756,19 +773,18 @@ Yeh inform kiya jata hai ke aapka bacha aaj ${school.name} mein absent raha. Cle
 Thank you,
 ${school.name}`;
 
-      pendingBatch.push({
-        studentId: item.studentId,
-        studentName: item.name,
-        phone: item.parentPhone,
-        message,
-        idempotencyKey: item.idempotencyKey || `ATT_ALERT_${schoolId}_${item.studentId}_${dateStr}`,
-        date: dateStr
-      });
+        pendingBatch.push({
+          studentId: item.studentId,
+          studentName: item.name,
+          phone: item.parentPhone,
+          message,
+          idempotencyKey: item.idempotencyKey || `ATT_ALERT_${schoolId}_${item.studentId}_${dateStr}`,
+          date: dateStr
+        });
+      }
     }
 
     let queuedRecord = null;
-    // Always queue to pending queue so messages are sent safely with natural human latency
-    // and can be monitored or dispatched via the "Send Pending Messages" control!
     if (pendingBatch.length > 0) {
       queuedRecord = await addPendingDispatches(schoolId, pendingBatch, 'attendance', null, 'queued');
       console.log(`Queued ${pendingBatch.length} attendance alerts for WhatsApp queue (Batch: ${queuedRecord?.id})`);
@@ -776,7 +792,7 @@ ${school.name}`;
 
     res.json({
       success: true,
-      message: `Final attendance finalized and locked for ${classId}!`,
+      message: `Final attendance finalized and locked for ${classObj?.name || classId}!`,
       state: 'SUBMITTED',
       isLocked: true,
       summary: {
@@ -785,10 +801,11 @@ ${school.name}`;
         absent: absentStudentsToAlert.length,
         whatsappAlertsSent: 0,
         whatsappAlertsFailed: 0,
-        whatsappQueued: queuedRecord ? pendingBatch.length : 0
+        whatsappQueued: queuedRecord ? pendingBatch.length : 0,
+        testSuppressed: isTestClass
       },
-      whatsappDetails: whatsappResults,
-      pendingBatch
+      whatsappDetails: [],
+      pendingBatch: isTestClass ? [] : pendingBatch
     });
   } catch (error) {
     if (error.code === 'ATTENDANCE_LOCKED') {
@@ -805,7 +822,7 @@ app.get('/api/attendance/lock-status', async (req, res) => {
     if (!classId) {
       return res.status(400).json({ success: false, error: 'classId is required.' });
     }
-    const dateStr = date || new Date().toISOString().split('T')[0];
+    const dateStr = date ? getPKTDate(date) : getPKTDate();
     const status = await checkAttendanceSessionLock(schoolId, classId, dateStr);
     res.json({ success: true, ...status, date: dateStr, classId });
   } catch (err) {
