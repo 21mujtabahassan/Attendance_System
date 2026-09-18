@@ -565,6 +565,95 @@ async function deleteStudent(schoolId = 'unique_scholars', studentId) {
 // 4. ATTENDANCE (Draft -> Submit with transactional lock)
 // -------------------------------------------------------------
 
+// Local YYYY-MM-DD Date Normalizer (prevents UTC offset date-shift in Pakistan UTC+5)
+function formatLocalDate(d) {
+  if (!d) {
+    const now = new Date();
+    const y = now.getFullYear();
+    const m = String(now.getMonth() + 1).padStart(2, '0');
+    const day = String(now.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  }
+  if (typeof d === 'string') {
+    const trimmed = d.trim();
+    if (/^\d{4}-\d{2}-\d{2}/.test(trimmed)) {
+      return trimmed.slice(0, 10);
+    }
+  }
+  if (d instanceof Date) {
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  }
+  const s = String(d).trim();
+  return s.length >= 10 ? s.slice(0, 10) : s;
+}
+
+// Bulletproof Class Resolution & Whitespace / Custom Naming Normalizer
+// Matches arbitrary names like "rose 5", "Rose-5", "purple3", "One", with extra spaces,
+// and intentionally removes .where({ is_active: true }) so archived/inactive classes resolve properly.
+async function resolveClass(schoolId = 'unique_scholars', rawClassId, dbOrTrx = null) {
+  if (!rawClassId) return null;
+  const cleaned = String(rawClassId).trim();
+  if (!cleaned) return null;
+
+  if (isPostgresConfigured()) {
+    const db = dbOrTrx || getDb();
+    try {
+      // 1. Exact ID match (case-insensitive & trimmed, ignoring is_active)
+      let matched = await db('classes')
+        .where({ school_id: schoolId })
+        .whereRaw('LOWER(TRIM(id)) = LOWER(TRIM(?))', [cleaned])
+        .first();
+      if (matched) return matched;
+
+      // 2. Exact Name match (case-insensitive & trimmed)
+      matched = await db('classes')
+        .where({ school_id: schoolId })
+        .whereRaw('LOWER(TRIM(name)) = LOWER(TRIM(?))', [cleaned])
+        .first();
+      if (matched) return matched;
+
+      // 3. Normalized alphanumeric slug match (e.g. "rose 5" vs "rose-5" vs "Rose  5" vs "purple3")
+      const alphaNum = cleaned.toLowerCase().replace(/[^a-z0-9]/g, '');
+      if (alphaNum.length > 0) {
+        const allClasses = await db('classes').where({ school_id: schoolId });
+        const found = allClasses.find(c => {
+          const idNorm = String(c.id || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+          const nameNorm = String(c.name || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+          return idNorm === alphaNum || nameNorm === alphaNum;
+        });
+        if (found) return found;
+      }
+    } catch (e) {
+      console.warn('resolveClass query warning:', e.message);
+    }
+
+    return { id: cleaned, name: cleaned };
+  }
+
+  // JSON fallback
+  const db = readJsonDb();
+  const classes = db.classes || [];
+  const exact = classes.find(c =>
+    c.schoolId === schoolId && (
+      String(c.id || '').trim().toLowerCase() === cleaned.toLowerCase() ||
+      String(c.name || '').trim().toLowerCase() === cleaned.toLowerCase()
+    )
+  );
+  if (exact) return exact;
+
+  const alphaNum = cleaned.toLowerCase().replace(/[^a-z0-9]/g, '');
+  const found = classes.find(c => {
+    if (c.schoolId !== schoolId) return false;
+    const idNorm = String(c.id || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+    const nameNorm = String(c.name || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+    return idNorm === alphaNum || nameNorm === alphaNum;
+  });
+  return found || { id: cleaned, name: cleaned };
+}
+
 function normalizeAttendanceStatus(rawStatus) {
   if (!rawStatus) return 'Present';
   const s = String(rawStatus).trim().toLowerCase();
@@ -577,25 +666,23 @@ function normalizeAttendanceStatus(rawStatus) {
 
 async function checkAttendanceSessionLock(schoolId = 'unique_scholars', classId, dateStr) {
   if (!classId || !dateStr) return { isLocked: false, status: 'OPEN' };
+  const cleanDateStr = formatLocalDate(dateStr);
 
   if (isPostgresConfigured()) {
     const db = getDb();
-    let resolvedClassId = classId;
-    try {
-      const matched = await db('classes')
-        .where({ school_id: schoolId, is_active: true })
-        .andWhere(function() {
-          this.whereRaw('LOWER(id) = LOWER(?)', [classId])
-            .orWhereRaw('LOWER(name) = LOWER(?)', [classId]);
-        })
-        .first();
-      if (matched) resolvedClassId = matched.id;
-    } catch (e) {}
+    const classObj = await resolveClass(schoolId, classId, db);
+    const resolvedClassId = classObj ? classObj.id : classId;
+    const possibleIds = Array.from(new Set([classId, resolvedClassId, classObj?.name].filter(Boolean)));
 
-    // Check attendance_sessions table
+    // 1. Check attendance_sessions table
     try {
       const session = await db('attendance_sessions')
-        .where({ school_id: schoolId, class_id: resolvedClassId, attendance_date: dateStr })
+        .where({ school_id: schoolId })
+        .whereIn('class_id', possibleIds)
+        .andWhere(function() {
+          this.where('attendance_date', cleanDateStr)
+            .orWhereRaw('attendance_date::text = ?', [cleanDateStr]);
+        })
         .first();
       if (session) {
         return {
@@ -609,10 +696,15 @@ async function checkAttendanceSessionLock(schoolId = 'unique_scholars', classId,
       console.warn('attendance_sessions check warning:', sessionErr.message);
     }
 
-    // Fallback: check attendance_logs for finalized records
+    // 2. Fallback: check attendance_logs for finalized records
     try {
       const log = await db('attendance_logs')
-        .where({ school_id: schoolId, class_id: resolvedClassId, attendance_date: dateStr })
+        .where({ school_id: schoolId })
+        .whereIn('class_id', possibleIds)
+        .andWhere(function() {
+          this.where('attendance_date', cleanDateStr)
+            .orWhereRaw('attendance_date::text = ?', [cleanDateStr]);
+        })
         .where(function() {
           this.where({ is_locked: true }).orWhere({ state: 'SUBMITTED' });
         })
@@ -632,10 +724,17 @@ async function checkAttendanceSessionLock(schoolId = 'unique_scholars', classId,
 
   // JSON fallback
   const db = readJsonDb();
+  const classObj = await resolveClass(schoolId, classId);
+  const possibleIds = new Set([
+    String(classId).trim().toLowerCase(),
+    String(classObj?.id || '').trim().toLowerCase(),
+    String(classObj?.name || '').trim().toLowerCase()
+  ].filter(Boolean));
+
   const session = (db.attendanceSessions || []).find(s =>
     s.schoolId === schoolId &&
-    (s.classId === classId || String(s.classId).toLowerCase() === String(classId).toLowerCase()) &&
-    s.date === dateStr
+    possibleIds.has(String(s.classId).trim().toLowerCase()) &&
+    formatLocalDate(s.date) === cleanDateStr
   );
   if (session) {
     return {
@@ -648,8 +747,8 @@ async function checkAttendanceSessionLock(schoolId = 'unique_scholars', classId,
 
   const logs = (db.attendanceLogs || []).filter(l =>
     l.schoolId === schoolId &&
-    (l.classId === classId || String(l.classId).toLowerCase() === String(classId).toLowerCase()) &&
-    l.date === dateStr
+    possibleIds.has(String(l.classId).trim().toLowerCase()) &&
+    formatLocalDate(l.date) === cleanDateStr
   );
   const isSubmitted = logs.some(l => l.isLocked || l.state === 'SUBMITTED');
   return {
@@ -662,29 +761,22 @@ async function checkAttendanceSessionLock(schoolId = 'unique_scholars', classId,
 
 async function unlockAttendanceSession(schoolId = 'unique_scholars', classId, dateStr, adminUser = 'admin', reason = '') {
   if (!classId || !dateStr) return { success: false, error: 'Missing classId or date' };
+  const cleanDateStr = formatLocalDate(dateStr);
 
   if (isPostgresConfigured()) {
     const db = getDb();
-    let resolvedClassId = classId;
-    try {
-      const matched = await db('classes')
-        .where({ school_id: schoolId, is_active: true })
-        .andWhere(function() {
-          this.whereRaw('LOWER(id) = LOWER(?)', [classId])
-            .orWhereRaw('LOWER(name) = LOWER(?)', [classId]);
-        })
-        .first();
-      if (matched) resolvedClassId = matched.id;
-    } catch (e) {}
+    const classObj = await resolveClass(schoolId, classId, db);
+    const resolvedClassId = classObj ? classObj.id : classId;
+    const possibleIds = Array.from(new Set([classId, resolvedClassId, classObj?.name].filter(Boolean)));
 
     await db.transaction(async trx => {
       // 1. Update or upsert session as unlocked
       await trx('attendance_sessions')
         .insert({
-          id: `SESS-${schoolId}-${resolvedClassId}-${dateStr}`,
+          id: `SESS-${schoolId}-${resolvedClassId}-${cleanDateStr}`,
           school_id: schoolId,
           class_id: resolvedClassId,
-          attendance_date: dateStr,
+          attendance_date: cleanDateStr,
           status: 'open',
           is_locked: false,
           locked_at: null,
@@ -708,7 +800,12 @@ async function unlockAttendanceSession(schoolId = 'unique_scholars', classId, da
 
       // 2. Unlock attendance logs back to DRAFT so modifications can occur
       await trx('attendance_logs')
-        .where({ school_id: schoolId, class_id: resolvedClassId, attendance_date: dateStr })
+        .where({ school_id: schoolId })
+        .whereIn('class_id', possibleIds)
+        .andWhere(function() {
+          this.where('attendance_date', cleanDateStr)
+            .orWhereRaw('attendance_date::text = ?', [cleanDateStr]);
+        })
         .update({
           is_locked: false,
           state: 'DRAFT',
@@ -716,34 +813,46 @@ async function unlockAttendanceSession(schoolId = 'unique_scholars', classId, da
         });
     });
 
-    console.log(`🔓 [Attendance Lock Override] Class ${resolvedClassId} on ${dateStr} UNLOCKED by ${adminUser}. Reason: ${reason || 'Admin override'}`);
-    return { success: true, message: `Attendance for ${resolvedClassId} on ${dateStr} has been unlocked.` };
+    console.log(`🔓 [Attendance Lock Override] Class ${resolvedClassId} on ${cleanDateStr} UNLOCKED by ${adminUser}. Reason: ${reason || 'Admin override'}`);
+    return { success: true, message: `Attendance for ${resolvedClassId} on ${cleanDateStr} has been unlocked.` };
   }
 
   // JSON fallback
   const db = readJsonDb();
   if (!db.attendanceSessions) db.attendanceSessions = [];
-  const sIdx = db.attendanceSessions.findIndex(s => s.schoolId === schoolId && s.classId === classId && s.date === dateStr);
+  const classObj = await resolveClass(schoolId, classId);
+  const possibleIds = new Set([
+    String(classId).trim().toLowerCase(),
+    String(classObj?.id || '').trim().toLowerCase(),
+    String(classObj?.name || '').trim().toLowerCase()
+  ].filter(Boolean));
+
+  const sIdx = db.attendanceSessions.findIndex(s =>
+    s.schoolId === schoolId &&
+    possibleIds.has(String(s.classId).trim().toLowerCase()) &&
+    formatLocalDate(s.date) === cleanDateStr
+  );
   if (sIdx >= 0) {
     db.attendanceSessions[sIdx].isLocked = false;
     db.attendanceSessions[sIdx].unlockedBy = adminUser;
     db.attendanceSessions[sIdx].unlockReason = reason;
   }
   (db.attendanceLogs || []).forEach(l => {
-    if (l.schoolId === schoolId && l.classId === classId && l.date === dateStr) {
+    if (l.schoolId === schoolId && possibleIds.has(String(l.classId).trim().toLowerCase()) && formatLocalDate(l.date) === cleanDateStr) {
       l.isLocked = false;
       l.state = 'DRAFT';
     }
   });
   writeJsonDb(db);
-  return { success: true, message: `Attendance for ${classId} on ${dateStr} unlocked.` };
+  return { success: true, message: `Attendance for ${classId} on ${cleanDateStr} unlocked.` };
 }
 
 async function saveDraftAttendance(schoolId = 'unique_scholars', classId, dateStr, records, timeStr) {
+  const cleanDateStr = formatLocalDate(dateStr);
   // Business rule: Enforce locked state check
-  const lockStatus = await checkAttendanceSessionLock(schoolId, classId, dateStr);
+  const lockStatus = await checkAttendanceSessionLock(schoolId, classId, cleanDateStr);
   if (lockStatus.isLocked) {
-    const err = new Error(`Attendance for ${dateStr} is already finalized and cannot be modified.`);
+    const err = new Error(`Attendance for ${cleanDateStr} is already finalized and cannot be modified.`);
     err.code = 'ATTENDANCE_LOCKED';
     err.isLocked = true;
     err.lockedAt = lockStatus.lockedAt;
@@ -753,19 +862,12 @@ async function saveDraftAttendance(schoolId = 'unique_scholars', classId, dateSt
   if (isPostgresConfigured()) {
     const db = getDb();
     const saved = [];
-
-    let resolvedClassId = classId;
-    try {
-      const matched = await db('classes')
-        .where({ school_id: schoolId, is_active: true })
-        .whereRaw('LOWER(id) = LOWER(?)', [classId])
-        .first();
-      if (matched) resolvedClassId = matched.id;
-    } catch (e) {}
+    const classObj = await resolveClass(schoolId, classId, db);
+    const resolvedClassId = classObj ? classObj.id : classId;
 
     await db.transaction(async trx => {
       for (const r of records) {
-        const logKey = `${dateStr}_${r.studentId}`;
+        const logKey = `${cleanDateStr}_${r.studentId}`;
         const existing = await trx('attendance_logs').where({ log_key: logKey }).first();
 
         // Business rule: Once SUBMITTED or locked, do not overwrite silently with draft
@@ -775,7 +877,7 @@ async function saveDraftAttendance(schoolId = 'unique_scholars', classId, dateSt
             schoolId: existing.school_id,
             classId: existing.class_id,
             studentId: existing.student_id,
-            date: existing.attendance_date,
+            date: formatLocalDate(existing.attendance_date),
             time: existing.attendance_time,
             status: existing.status,
             state: existing.state,
@@ -790,7 +892,7 @@ async function saveDraftAttendance(schoolId = 'unique_scholars', classId, dateSt
           school_id: schoolId,
           class_id: resolvedClassId,
           student_id: r.studentId,
-          attendance_date: dateStr,
+          attendance_date: cleanDateStr,
           attendance_time: timeStr || new Date().toLocaleTimeString('en-US', { hour12: true }),
           status: normalizedStatus,
           state: 'DRAFT',
@@ -806,9 +908,9 @@ async function saveDraftAttendance(schoolId = 'unique_scholars', classId, dateSt
         saved.push({
           id: logKey,
           schoolId,
-          classId,
+          classId: resolvedClassId,
           studentId: r.studentId,
-          date: dateStr,
+          date: cleanDateStr,
           time: logRecord.attendance_time,
           status: logRecord.status,
           state: 'DRAFT',
@@ -823,8 +925,11 @@ async function saveDraftAttendance(schoolId = 'unique_scholars', classId, dateSt
   const db = readJsonDb();
   if (!db.attendanceLogs) db.attendanceLogs = [];
   const saved = [];
+  const classObj = await resolveClass(schoolId, classId);
+  const resolvedClassId = classObj ? classObj.id : classId;
+
   records.forEach(r => {
-    const logId = `${dateStr}_${r.studentId}`;
+    const logId = `${cleanDateStr}_${r.studentId}`;
     const normStatus = normalizeAttendanceStatus(r.status);
     const idx = db.attendanceLogs.findIndex(l => l.id === logId);
     if (idx >= 0) {
@@ -833,7 +938,7 @@ async function saveDraftAttendance(schoolId = 'unique_scholars', classId, dateSt
       }
       saved.push(db.attendanceLogs[idx]);
     } else {
-      const entry = { id: logId, schoolId, classId, studentId: r.studentId, date: dateStr, time: timeStr, status: normStatus, state: 'DRAFT', isLocked: false };
+      const entry = { id: logId, schoolId, classId: resolvedClassId, studentId: r.studentId, date: cleanDateStr, time: timeStr, status: normStatus, state: 'DRAFT', isLocked: false };
       db.attendanceLogs.push(entry);
       saved.push(entry);
     }
@@ -843,10 +948,11 @@ async function saveDraftAttendance(schoolId = 'unique_scholars', classId, dateSt
 }
 
 async function submitFinalAttendance(schoolId = 'unique_scholars', classId, dateStr, records, timeStr) {
+  const cleanDateStr = formatLocalDate(dateStr);
   // Business rule: Enforce locked state check
-  const lockStatus = await checkAttendanceSessionLock(schoolId, classId, dateStr);
+  const lockStatus = await checkAttendanceSessionLock(schoolId, classId, cleanDateStr);
   if (lockStatus.isLocked) {
-    const err = new Error(`Attendance for ${dateStr} is already finalized and cannot be modified.`);
+    const err = new Error(`Attendance for ${cleanDateStr} is already finalized and cannot be modified.`);
     err.code = 'ATTENDANCE_LOCKED';
     err.isLocked = true;
     err.lockedAt = lockStatus.lockedAt;
@@ -857,29 +963,19 @@ async function submitFinalAttendance(schoolId = 'unique_scholars', classId, date
     const db = getDb();
     const absentToAlert = [];
     const attendanceLogs = [];
-
-    let resolvedClassId = classId;
-    try {
-      const matched = await db('classes')
-        .where({ school_id: schoolId, is_active: true })
-        .andWhere(function() {
-          this.whereRaw('LOWER(id) = LOWER(?)', [classId])
-            .orWhereRaw('LOWER(name) = LOWER(?)', [classId]);
-        })
-        .first();
-      if (matched) resolvedClassId = matched.id;
-    } catch (e) {}
+    const classObj = await resolveClass(schoolId, classId, db);
+    const resolvedClassId = classObj ? classObj.id : classId;
 
     await db.transaction(async trx => {
       for (const r of records) {
-        const logKey = `${dateStr}_${r.studentId}`;
+        const logKey = `${cleanDateStr}_${r.studentId}`;
         const normalizedStatus = normalizeAttendanceStatus(r.status);
         const logRecord = {
           log_key: logKey,
           school_id: schoolId,
           class_id: resolvedClassId,
           student_id: r.studentId,
-          attendance_date: dateStr,
+          attendance_date: cleanDateStr,
           attendance_time: timeStr || new Date().toLocaleTimeString('en-US', { hour12: true }),
           status: normalizedStatus,
           state: 'SUBMITTED',
@@ -898,9 +994,9 @@ async function submitFinalAttendance(schoolId = 'unique_scholars', classId, date
         attendanceLogs.push({
           id: logKey,
           schoolId,
-          classId,
+          classId: resolvedClassId,
           studentId: r.studentId,
-          date: dateStr,
+          date: cleanDateStr,
           time: logRecord.attendance_time,
           status: logRecord.status,
           state: 'SUBMITTED',
@@ -918,13 +1014,24 @@ async function submitFinalAttendance(schoolId = 'unique_scholars', classId, date
             }
           }
           if (parentPhone) {
-            absentToAlert.push({
-              studentId: r.studentId,
-              name: name || r.studentId,
-              parentPhone: parentPhone,
-              parentEmail: r.parentEmail,
-              time: logRecord.attendance_time
-            });
+            // Deterministic Idempotency Key: guarantees no duplicate alerts per student per calendar date
+            const idempotencyKey = `ATT_ALERT_${schoolId}_${r.studentId}_${cleanDateStr}`;
+            const existingAlert = await trx('dispatch_messages')
+              .where({ idempotency_key: idempotencyKey })
+              .first();
+
+            if (!existingAlert) {
+              absentToAlert.push({
+                studentId: r.studentId,
+                name: name || r.studentId,
+                parentPhone: parentPhone,
+                parentEmail: r.parentEmail,
+                time: logRecord.attendance_time,
+                idempotencyKey
+              });
+            } else {
+              console.log(`🛡️ [Deduplication] Absent alert already generated for ${r.studentId} on ${cleanDateStr}. Skipping duplicate.`);
+            }
           }
         }
       }
@@ -932,10 +1039,10 @@ async function submitFinalAttendance(schoolId = 'unique_scholars', classId, date
       // Upsert attendance_sessions record to enforce daily single-finalization rule
       await trx('attendance_sessions')
         .insert({
-          id: `SESS-${schoolId}-${resolvedClassId}-${dateStr}`,
+          id: `SESS-${schoolId}-${resolvedClassId}-${cleanDateStr}`,
           school_id: schoolId,
           class_id: resolvedClassId,
-          attendance_date: dateStr,
+          attendance_date: cleanDateStr,
           status: 'finalized',
           is_locked: true,
           locked_at: new Date(),
@@ -959,13 +1066,16 @@ async function submitFinalAttendance(schoolId = 'unique_scholars', classId, date
   if (!db.attendanceLogs) db.attendanceLogs = [];
   if (!db.attendanceSessions) db.attendanceSessions = [];
   const absentToAlert = [];
+  const classObj = await resolveClass(schoolId, classId);
+  const resolvedClassId = classObj ? classObj.id : classId;
+
   records.forEach(r => {
-    const logId = `${dateStr}_${r.studentId}`;
+    const logId = `${cleanDateStr}_${r.studentId}`;
     const normalizedStatus = normalizeAttendanceStatus(r.status);
     const idx = db.attendanceLogs.findIndex(l => l.id === logId);
     const entry = {
-      id: logId, schoolId, classId, studentId: r.studentId,
-      date: dateStr, time: timeStr, status: normalizedStatus, state: 'SUBMITTED', isLocked: true, submittedAt: new Date().toISOString()
+      id: logId, schoolId, classId: resolvedClassId, studentId: r.studentId,
+      date: cleanDateStr, time: timeStr, status: normalizedStatus, state: 'SUBMITTED', isLocked: true, submittedAt: new Date().toISOString()
     };
     if (idx >= 0) db.attendanceLogs[idx] = entry;
     else db.attendanceLogs.push(entry);
@@ -981,19 +1091,26 @@ async function submitFinalAttendance(schoolId = 'unique_scholars', classId, date
         }
       }
       if (parentPhone) {
-        absentToAlert.push({
-          studentId: r.studentId,
-          name: name || r.studentId,
-          parentPhone: parentPhone,
-          parentEmail: r.parentEmail,
-          time: timeStr
-        });
+        const idempotencyKey = `ATT_ALERT_${schoolId}_${r.studentId}_${cleanDateStr}`;
+        const alreadyAlerted = (db.pendingDispatches || []).some(b =>
+          (b.messages || []).some(m => m.idempotencyKey === idempotencyKey)
+        );
+        if (!alreadyAlerted) {
+          absentToAlert.push({
+            studentId: r.studentId,
+            name: name || r.studentId,
+            parentPhone: parentPhone,
+            parentEmail: r.parentEmail,
+            time: timeStr,
+            idempotencyKey
+          });
+        }
       }
     }
   });
 
-  const sessIdx = db.attendanceSessions.findIndex(s => s.schoolId === schoolId && s.classId === classId && s.date === dateStr);
-  const sessionEntry = { schoolId, classId, date: dateStr, isLocked: true, lockedAt: new Date().toISOString(), lockedBy: 'teacher' };
+  const sessIdx = db.attendanceSessions.findIndex(s => s.schoolId === schoolId && s.classId === resolvedClassId && formatLocalDate(s.date) === cleanDateStr);
+  const sessionEntry = { schoolId, classId: resolvedClassId, date: cleanDateStr, isLocked: true, lockedAt: new Date().toISOString(), lockedBy: 'teacher' };
   if (sessIdx >= 0) db.attendanceSessions[sessIdx] = sessionEntry;
   else db.attendanceSessions.push(sessionEntry);
 
@@ -1006,21 +1123,21 @@ async function getAttendanceLogs(schoolId = 'unique_scholars', filters = {}) {
     const db = getDb();
     const query = db('attendance_logs').where({ school_id: schoolId });
     if (filters.classId) {
-      const matchedCls = await db('classes')
-        .where({ school_id: schoolId })
-        .andWhere(function() {
-          this.whereRaw('LOWER(id) = LOWER(?)', [filters.classId])
-            .orWhereRaw('LOWER(name) = LOWER(?)', [filters.classId]);
-        })
-        .first();
+      const clsObj = await resolveClass(schoolId, filters.classId, db);
       const possibleIds = [filters.classId];
-      if (matchedCls) {
-        possibleIds.push(matchedCls.id);
-        possibleIds.push(matchedCls.name);
+      if (clsObj) {
+        if (clsObj.id) possibleIds.push(clsObj.id);
+        if (clsObj.name) possibleIds.push(clsObj.name);
       }
       query.whereIn('class_id', Array.from(new Set(possibleIds)));
     }
-    if (filters.date) query.andWhere({ attendance_date: filters.date });
+    if (filters.date) {
+      const cleanDate = formatLocalDate(filters.date);
+      query.andWhere(function() {
+        this.where('attendance_date', cleanDate)
+          .orWhereRaw('attendance_date::text = ?', [cleanDate]);
+      });
+    }
     if (filters.status) query.andWhere({ status: filters.status });
 
     const rows = await query.orderBy('attendance_date', 'desc');
@@ -1029,7 +1146,7 @@ async function getAttendanceLogs(schoolId = 'unique_scholars', filters = {}) {
       schoolId: r.school_id,
       classId: r.class_id,
       studentId: r.student_id,
-      date: r.attendance_date instanceof Date ? r.attendance_date.toISOString().split('T')[0] : r.attendance_date,
+      date: formatLocalDate(r.attendance_date),
       time: r.attendance_time,
       status: r.status,
       state: r.state,
@@ -1041,14 +1158,20 @@ async function getAttendanceLogs(schoolId = 'unique_scholars', filters = {}) {
 
   const db = readJsonDb();
   const classes = db.classes || [];
+  const cleanDateFilter = filters.date ? formatLocalDate(filters.date) : null;
+  const clsObj = filters.classId ? await resolveClass(schoolId, filters.classId) : null;
+  const possibleIds = clsObj ? new Set([
+    String(filters.classId).trim().toLowerCase(),
+    String(clsObj.id || '').trim().toLowerCase(),
+    String(clsObj.name || '').trim().toLowerCase()
+  ].filter(Boolean)) : null;
+
   return (db.attendanceLogs || []).filter(l => {
     if (l.schoolId !== schoolId) return false;
-    if (filters.classId) {
-      const cl = classes.find(c => c.id === filters.classId || c.name === filters.classId);
-      const allowed = new Set([filters.classId, cl?.id, cl?.name].filter(Boolean));
-      if (!allowed.has(l.classId)) return false;
+    if (possibleIds) {
+      if (!possibleIds.has(String(l.classId).trim().toLowerCase())) return false;
     }
-    if (filters.date && l.date !== filters.date) return false;
+    if (cleanDateFilter && formatLocalDate(l.date) !== cleanDateFilter) return false;
     if (filters.status && l.status !== filters.status) return false;
     return true;
   });
@@ -3343,5 +3466,7 @@ module.exports = {
   updateStudentFeeStatus,
   modifyStudentFee,
   updateStudentConcession,
-  computeGradeAndStatus
+  computeGradeAndStatus,
+  resolveClass,
+  formatLocalDate
 };

@@ -7,6 +7,7 @@ import {
 import { 
   getClasses, getStudents, saveAttendanceDraft, 
   submitFinalAttendance, getWhatsAppStatus, getAttendanceLogs,
+  getAttendanceLockStatus,
   loginAdmin, getAdminInsights, getAdminRecords,
   connectWhatsApp, reconnectWhatsApp, disconnectWhatsApp, resetWhatsApp,
   subscribeBackendStatus
@@ -19,6 +20,7 @@ export default function App() {
   const [selectedClass, setSelectedClass] = useState('');
   const [students, setStudents] = useState([]);
   const [attendance, setAttendance] = useState({});
+  const [isAttendanceLocked, setIsAttendanceLocked] = useState(false);
   const [loading, setLoading] = useState(false);
   const [waStatus, setWaStatus] = useState({ status: 'disconnected', qr: '' });
   const [logs, setLogs] = useState([]);
@@ -27,6 +29,14 @@ export default function App() {
   const [refreshing, setRefreshing] = useState(false);
   const [backendStatus, setBackendStatus] = useState({ mode: 'detecting', url: '' });
   const [waConnecting, setWaConnecting] = useState(false);
+
+  const getTodayDateStr = () => {
+    const d = new Date();
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  };
 
   // Active polling while QR code is waiting for user to scan on their phone
   const startActiveMobileWaPolling = () => {
@@ -133,16 +143,45 @@ export default function App() {
 
   const loadStudents = async (classId) => {
     setLoading(true);
-    const list = await getStudents('unique_scholars', classId);
-    setStudents(list);
-    
-    // Initialize default status to Present
-    const defaultStatus = {};
-    list.forEach(s => {
-      defaultStatus[s.id] = 'Present';
-    });
-    setAttendance(defaultStatus);
-    setLoading(false);
+    try {
+      const list = await getStudents('unique_scholars', classId);
+      setStudents(list);
+      
+      const todayStr = getTodayDateStr();
+
+      // 1. Fetch today's existing logs to pre-populate attendance state
+      let existingLogs = [];
+      try {
+        existingLogs = await getAttendanceLogs('unique_scholars', classId, todayStr);
+      } catch (e) {}
+
+      const populatedStatus = {};
+      list.forEach(s => {
+        const match = existingLogs.find(l => l.studentId === s.id);
+        populatedStatus[s.id] = match ? match.status : 'Present';
+      });
+      setAttendance(populatedStatus);
+
+      // 2. Check session lock status
+      let locked = false;
+      try {
+        const lockRes = await getAttendanceLockStatus('unique_scholars', classId, todayStr);
+        if (lockRes && lockRes.isLocked) {
+          locked = true;
+        }
+      } catch (e) {}
+
+      // Fallback: check if existing logs are SUBMITTED or isLocked
+      if (existingLogs.some(l => l.isLocked || l.state === 'SUBMITTED')) {
+        locked = true;
+      }
+
+      setIsAttendanceLocked(locked);
+    } catch (err) {
+      console.error('Error loading students:', err);
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleRefresh = async () => {
@@ -226,6 +265,10 @@ export default function App() {
   };
 
   const toggleStatus = (studentId) => {
+    if (isAttendanceLocked) {
+      Alert.alert('Session Locked 🔒', 'Attendance for today has already been finalized and locked. Modifications are disabled.');
+      return;
+    }
     setAttendance(prev => {
       const current = prev[studentId] || 'Present';
       const next = current === 'Present' ? 'Absent' : current === 'Absent' ? 'Late' : 'Present';
@@ -234,12 +277,14 @@ export default function App() {
   };
 
   const markAllPresent = () => {
+    if (isAttendanceLocked) return;
     const updated = {};
     students.forEach(s => updated[s.id] = 'Present');
     setAttendance(updated);
   };
 
   const markAllAbsent = () => {
+    if (isAttendanceLocked) return;
     const updated = {};
     students.forEach(s => updated[s.id] = 'Absent');
     setAttendance(updated);
@@ -248,13 +293,18 @@ export default function App() {
   const formattedTime = currentTime.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true });
 
   const handleSaveDraft = async () => {
+    if (isAttendanceLocked) {
+      Alert.alert('Session Locked 🔒', 'Attendance for today is already finalized and cannot be modified.');
+      return;
+    }
     if (!selectedClass || students.length === 0) return;
     setSubmitting(true);
+    const todayStr = getTodayDateStr();
     
     const payload = {
       schoolId: 'unique_scholars',
       classId: selectedClass,
-      date: new Date().toISOString().split('T')[0],
+      date: todayStr,
       time: formattedTime,
       attendance: students.map(s => ({
         studentId: s.id,
@@ -273,14 +323,22 @@ export default function App() {
       await loadLogs();
       Alert.alert('Draft Saved 📝', `Attendance draft saved at ${formattedTime}! Late students can be updated until final submission.`);
     } else {
+      if (res.isLocked) {
+        setIsAttendanceLocked(true);
+      }
       Alert.alert('Error', res.error || 'Failed to save draft.');
     }
   };
 
   const handleSubmitFinal = async () => {
+    if (isAttendanceLocked) {
+      Alert.alert('Session Locked 🔒', 'Attendance for today is already finalized and cannot be modified.');
+      return;
+    }
     if (!selectedClass || students.length === 0) return;
 
     const absentCount = students.filter(s => (attendance[s.id] || 'Present') === 'Absent').length;
+    const todayStr = getTodayDateStr();
 
     Alert.alert(
       'Final Submission Lock 🔒',
@@ -295,7 +353,7 @@ export default function App() {
             const payload = {
               schoolId: 'unique_scholars',
               classId: selectedClass,
-              date: new Date().toISOString().split('T')[0],
+              date: todayStr,
               time: formattedTime,
               attendance: students.map(s => ({
                 studentId: s.id,
@@ -311,12 +369,16 @@ export default function App() {
             setSubmitting(false);
 
             if (res.success) {
+              setIsAttendanceLocked(true);
               await loadLogs();
               Alert.alert(
                 'Attendance Finalized 🎉',
                 `Attendance Locked at ${formattedTime}!\nTotal: ${res.summary.total}\nPresent: ${res.summary.present}\nAbsent: ${res.summary.absent}\nWhatsApp Alerts Sent: ${res.summary.whatsappAlertsSent}`
               );
             } else {
+              if (res.isLocked) {
+                setIsAttendanceLocked(true);
+              }
               Alert.alert('Submission Error', res.error || 'Failed to submit attendance.');
             }
 
@@ -491,13 +553,46 @@ export default function App() {
 
           {/* QUICK ACTIONS */}
           <View style={styles.quickActionsBar}>
-            <TouchableOpacity style={styles.quickBtnPresent} onPress={markAllPresent}>
+            <TouchableOpacity 
+              style={[styles.quickBtnPresent, isAttendanceLocked && { opacity: 0.4 }]} 
+              onPress={markAllPresent}
+              disabled={isAttendanceLocked}
+            >
               <Text style={styles.quickBtnText}>✅ All Present</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={styles.quickBtnAbsent} onPress={markAllAbsent}>
+            <TouchableOpacity 
+              style={[styles.quickBtnAbsent, isAttendanceLocked && { opacity: 0.4 }]} 
+              onPress={markAllAbsent}
+              disabled={isAttendanceLocked}
+            >
               <Text style={styles.quickBtnText}>❌ All Absent</Text>
             </TouchableOpacity>
           </View>
+
+          {/* SESSION LOCK BANNER */}
+          {isAttendanceLocked && (
+            <View style={{
+              backgroundColor: 'rgba(239, 68, 68, 0.15)',
+              borderColor: 'rgba(239, 68, 68, 0.4)',
+              borderWidth: 1,
+              borderRadius: 12,
+              padding: 12,
+              marginHorizontal: 16,
+              marginBottom: 12,
+              flexDirection: 'row',
+              alignItems: 'center'
+            }}>
+              <Text style={{ fontSize: 22, marginRight: 10 }}>🔒</Text>
+              <View style={{ flex: 1 }}>
+                <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 13, marginBottom: 2 }}>
+                  Attendance Finalized & Locked
+                </Text>
+                <Text style={{ color: '#fca5a5', fontSize: 12 }}>
+                  Today's attendance for this class has been finalized. Edits and re-dispatches are disabled.
+                </Text>
+              </View>
+            </View>
+          )}
 
           {/* STUDENT LIST */}
           {loading ? (
@@ -531,8 +626,9 @@ export default function App() {
                 return (
                   <TouchableOpacity 
                     key={item.id} 
-                    style={styles.studentCard} 
+                    style={[styles.studentCard, isAttendanceLocked && { opacity: 0.75 }]} 
                     onPress={() => toggleStatus(item.id)}
+                    disabled={isAttendanceLocked}
                   >
                     <View style={{ flex: 1 }}>
                       <Text style={styles.studentName}>{item.name}</Text>
@@ -549,20 +645,28 @@ export default function App() {
 
           {/* FOOTER ACTIONS */}
           <View style={styles.bottomBar}>
-            <TouchableOpacity 
-              style={[styles.btnDraft, submitting && { opacity: 0.5 }]} 
-              onPress={handleSaveDraft}
-              disabled={submitting}
-            >
-              <Text style={styles.btnDraftText}>💾 Save Draft</Text>
-            </TouchableOpacity>
-            <TouchableOpacity 
-              style={[styles.btnFinal, submitting && { opacity: 0.5 }]} 
-              onPress={handleSubmitFinal}
-              disabled={submitting}
-            >
-              <Text style={styles.btnFinalText}>🚀 Final Submit & Alert</Text>
-            </TouchableOpacity>
+            {isAttendanceLocked ? (
+              <View style={[styles.btnFinal, { flex: 1, backgroundColor: '#334155', opacity: 0.85, alignItems: 'center' }]}>
+                <Text style={[styles.btnFinalText, { color: '#94a3b8' }]}>🔒 Finalized & Locked for Today</Text>
+              </View>
+            ) : (
+              <>
+                <TouchableOpacity 
+                  style={[styles.btnDraft, submitting && { opacity: 0.5 }]} 
+                  onPress={handleSaveDraft}
+                  disabled={submitting}
+                >
+                  <Text style={styles.btnDraftText}>💾 Save Draft</Text>
+                </TouchableOpacity>
+                <TouchableOpacity 
+                  style={[styles.btnFinal, submitting && { opacity: 0.5 }]} 
+                  onPress={handleSubmitFinal}
+                  disabled={submitting}
+                >
+                  <Text style={styles.btnFinalText}>🚀 Final Submit & Alert</Text>
+                </TouchableOpacity>
+              </>
+            )}
           </View>
         </View>
       )}

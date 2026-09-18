@@ -206,6 +206,15 @@ export const getAttendanceLogs = async (schoolId = 'unique_scholars', classId = 
   }
 };
 
+export const getAttendanceLockStatus = async (schoolId = 'unique_scholars', classId = '', date = '') => {
+  try {
+    const res = await safeFetch(`/attendance/lock-status?schoolId=${schoolId}&classId=${classId}&date=${date}`);
+    return await res.json();
+  } catch (error) {
+    return { success: false, isLocked: false, error: error.message };
+  }
+};
+
 export const loginAdmin = async (pin) => {
   try {
     const res = await safeFetch('/admin/login', {

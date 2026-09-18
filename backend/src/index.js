@@ -760,7 +760,9 @@ ${school.name}`;
         studentId: item.studentId,
         studentName: item.name,
         phone: item.parentPhone,
-        message
+        message,
+        idempotencyKey: item.idempotencyKey || `ATT_ALERT_${schoolId}_${item.studentId}_${dateStr}`,
+        date: dateStr
       });
     }
 
