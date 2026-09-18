@@ -495,29 +495,47 @@ app.get(['/api/classes', '/api/schools/:schoolId/classes'], async (req, res) => 
 });
 
 app.post('/api/admin/classes', async (req, res) => {
-  const { schoolId = 'unique_scholars', name, sections } = req.body;
-  if (!name) {
-    return res.status(400).json({ success: false, error: 'Class name is required.' });
+  try {
+    const { schoolId = 'unique_scholars', name, sections } = req.body;
+    if (!name || !name.trim()) {
+      return res.status(400).json({ success: false, error: 'Class name is required.' });
+    }
+    const newClass = await addClass(schoolId, { name: name.trim(), sections });
+    res.json({ success: true, class: newClass });
+  } catch (err) {
+    if (err.code === '23505' || err.code === 'CLASS_EXISTS') {
+      return res.status(409).json({ success: false, error: err.message || 'A class with this name already exists.' });
+    }
+    console.error('Error adding class:', err);
+    res.status(500).json({ success: false, error: err.message || 'Failed to add class.' });
   }
-  const newClass = await addClass(schoolId, { name, sections });
-  res.json({ success: true, class: newClass });
 });
 
 app.post('/api/admin/classes/:classId/sections', async (req, res) => {
-  const { schoolId = 'unique_scholars', sectionName } = req.body;
-  const { classId } = req.params;
-  if (!sectionName) {
-    return res.status(400).json({ success: false, error: 'Section name is required.' });
+  try {
+    const { schoolId = 'unique_scholars', sectionName } = req.body;
+    const { classId } = req.params;
+    if (!sectionName) {
+      return res.status(400).json({ success: false, error: 'Section name is required.' });
+    }
+    const updatedClass = await addSectionToClass(schoolId, classId, sectionName);
+    res.status(updatedClass ? 200 : 400).json({ success: !!updatedClass, class: updatedClass });
+  } catch (err) {
+    console.error('Error adding section to class:', err);
+    res.status(500).json({ success: false, error: err.message || 'Failed to add section.' });
   }
-  const updatedClass = await addSectionToClass(schoolId, classId, sectionName);
-  res.status(updatedClass ? 200 : 400).json({ success: !!updatedClass, class: updatedClass });
 });
 
 app.delete('/api/admin/classes/:classId', async (req, res) => {
-  const { schoolId = 'unique_scholars' } = req.query;
-  const { classId } = req.params;
-  await deleteClass(schoolId, classId);
-  res.json({ success: true, message: 'Class deleted successfully.' });
+  try {
+    const { schoolId = 'unique_scholars' } = req.query;
+    const { classId } = req.params;
+    await deleteClass(schoolId, classId);
+    res.json({ success: true, message: 'Class deleted successfully.' });
+  } catch (err) {
+    console.error('Error deleting class:', err);
+    res.status(500).json({ success: false, error: err.message || 'Failed to delete class.' });
+  }
 });
 
 app.get('/api/system/status', async (req, res) => {

@@ -123,8 +123,26 @@ async function addClass(schoolId = 'unique_scholars', classData) {
   if (isPostgresConfigured()) {
     const db = getDb();
     const classId = `class-${Date.now()}`;
-    const name = classData.name || 'New Class';
+    const name = (classData.name || 'New Class').trim();
     const sections = Array.isArray(classData.sections) && classData.sections.length > 0 ? classData.sections : ['Section A'];
+
+    // Check if class with this name already exists
+    const existing = await db('classes')
+      .where({ school_id: schoolId })
+      .whereRaw('LOWER(TRIM(name)) = LOWER(TRIM(?))', [name])
+      .first();
+
+    if (existing) {
+      if (existing.is_active) {
+        const err = new Error(`A class named "${name}" already exists.`);
+        err.code = 'CLASS_EXISTS';
+        throw err;
+      } else {
+        // Reactivate inactive / archived class
+        await db('classes').where({ id: existing.id }).update({ is_active: true, updated_at: new Date() });
+        return { id: existing.id, schoolId, name: existing.name, sections };
+      }
+    }
 
     return await db.transaction(async trx => {
       await trx('classes').insert({
