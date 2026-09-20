@@ -217,6 +217,41 @@ async function runAllIntegrityLocks() {
       } else {
         console.log('   ✅ PASS: proto.Message.fromObject reconstruction verified.');
       }
+
+      // 7. Check Socket Cleanup Before Re-Init (no zombie sockets or listener leaks)
+      if (!waContent.includes('removeAllListeners()') || !waContent.includes('sess.sock.end(undefined)')) {
+        failures.push('Lock 3 FAIL: Socket cleanup before makeWASocket missing.');
+      } else {
+        console.log('   ✅ PASS: Pre-initialization socket cleanup and listener teardown verified.');
+      }
+
+      // 8. Check Process Crash Protection Shield
+      if (!waContent.includes('setupProcessCrashGuards') || !waContent.includes('uncaughtException')) {
+        failures.push('Lock 3 FAIL: WhatsApp process crash guards missing.');
+      } else {
+        console.log('   ✅ PASS: Process crash protection shields (uncaughtException/unhandledRejection) verified.');
+      }
+
+      // 9. Check Proactive Heartbeat / Liveness Ping
+      if (!waContent.includes('startHeartbeat') || !waContent.includes('stopHeartbeat')) {
+        failures.push('Lock 3 FAIL: Proactive heartbeat / liveness monitor missing.');
+      } else {
+        console.log('   ✅ PASS: Proactive heartbeat & zombie socket detection verified.');
+      }
+
+      // 10. Check Transient Socket Recovery in sendWhatsAppMessage
+      if (!waContent.includes('Transient socket issue') && !waContent.includes('isRecoverable')) {
+        failures.push('Lock 3 FAIL: Transient send recovery retry missing in sendWhatsAppMessage.');
+      } else {
+        console.log('   ✅ PASS: Transient socket error recovery and auto-retry verified.');
+      }
+
+      // 11. Check Disk Store Flush on Process Shutdown
+      if (!waContent.includes('flushSentStoreToDisk')) {
+        failures.push('Lock 3 FAIL: flushSentStoreToDisk missing from whatsapp.js.');
+      } else {
+        console.log('   ✅ PASS: Synchronous message store flush on shutdown verified.');
+      }
     }
   } catch (waErr) {
     failures.push(`Lock 3 FAIL: WhatsApp audit error: ${waErr.message}`);
