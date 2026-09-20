@@ -6,7 +6,8 @@
   "type": "commonjs",
   "scripts": {
     "start": "node src/index.js",
-    "dev": "node src/index.js"
+    "dev": "node src/index.js",
+    "test": "node scripts/verify_attendance_records_lock.js"
   },
   "dependencies": {
     "@whiskeysockets/baileys": "^6.7.12",
