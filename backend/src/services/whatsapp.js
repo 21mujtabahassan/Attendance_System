@@ -1,5 +1,5 @@
 
-let makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion, Browsers, makeCacheableSignalKeyStore;
+let makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion, Browsers, makeCacheableSignalKeyStore, proto;
 if (!process.env.VERCEL) {
   try {
     const baileys = require('@whiskeysockets/baileys');
@@ -9,6 +9,7 @@ if (!process.env.VERCEL) {
     fetchLatestBaileysVersion = baileys.fetchLatestBaileysVersion;
     Browsers = baileys.Browsers;
     makeCacheableSignalKeyStore = baileys.makeCacheableSignalKeyStore;
+    proto = baileys.proto;
   } catch (err) {
     console.log('Baileys module skipped on serverless node.');
   }
@@ -25,6 +26,24 @@ let ioInstance = null;
 
 // Map of schoolId -> Session object
 const sessions = new Map();
+
+// -------------------------------------------------------------
+// RECURSIVE BUFFER REHYDRATION (Fixes corrupted binary buffers on disk load)
+// -------------------------------------------------------------
+function rehydrateBuffers(obj) {
+  if (!obj || typeof obj !== 'object') return obj;
+  if (obj.type === 'Buffer' && Array.isArray(obj.data)) {
+    return Buffer.from(obj.data);
+  }
+  if (Array.isArray(obj)) {
+    return obj.map(rehydrateBuffers);
+  }
+  const res = {};
+  for (const key of Object.keys(obj)) {
+    res[key] = rehydrateBuffers(obj[key]);
+  }
+  return res;
+}
 
 // -------------------------------------------------------------
 // MESSAGE STORE & RETRY CACHE (Fixes "Waiting for this message. This may take a while.")
@@ -50,7 +69,8 @@ function getSentStore(schoolId = 'unique_scholars') {
         if (Array.isArray(list)) {
           for (const item of list) {
             if (item && item.id && item.msg) {
-              store.set(item.id, item.msg);
+              const rehydrated = rehydrateBuffers(item.msg);
+              store.set(item.id, rehydrated);
             }
           }
         }
@@ -61,11 +81,28 @@ function getSentStore(schoolId = 'unique_scholars') {
   return sentMessagesStore.get(schoolId);
 }
 
-function saveSentMessage(schoolId = 'unique_scholars', id, msgContent) {
+function saveSentMessage(schoolId = 'unique_scholars', id, msgContent, remoteJid = null, participant = null) {
   if (!id || !msgContent) return;
   const store = getSentStore(schoolId);
-  store.set(id, msgContent);
-  if (store.size > 2000) {
+  const pureMsg = msgContent.message || msgContent;
+
+  // 1. Primary index by message ID
+  store.set(id, pureMsg);
+
+  // 2. Secondary index by remoteJid:id
+  if (remoteJid) {
+    store.set(`${remoteJid}:${id}`, pureMsg);
+    const cleanJid = String(remoteJid).replace(/@.*$/, '');
+    store.set(`${cleanJid}:${id}`, pureMsg);
+  }
+
+  // 3. Tertiary index by participant:id
+  if (participant) {
+    store.set(`${participant}:${id}`, pureMsg);
+  }
+
+  // Cap in-memory store to prevent memory leaks
+  if (store.size > 5000) {
     const oldestKey = store.keys().next().value;
     store.delete(oldestKey);
   }
@@ -78,22 +115,53 @@ function saveSentMessage(schoolId = 'unique_scholars', id, msgContent) {
         const storeFile = path.join(getSchoolSessionDir(schoolId), 'message_store.json');
         const list = [];
         for (const [mid, mcontent] of store.entries()) {
-          list.push({ id: mid, msg: mcontent });
+          // Only save bare message IDs to file to keep disk storage efficient
+          if (!mid.includes(':')) {
+            list.push({ id: mid, msg: mcontent });
+          }
         }
-        fs.writeFileSync(storeFile, JSON.stringify(list.slice(-1000)), 'utf8');
+        fs.writeFileSync(storeFile, JSON.stringify(list.slice(-2000)), 'utf8');
       } catch (e) { }
     }, 3000));
   }
 }
 
-async function getStoredMessage(schoolId = 'unique_scholars', id) {
+async function getStoredMessage(schoolId = 'unique_scholars', key) {
+  if (!key) return undefined;
+  const id = typeof key === 'string' ? key : key.id;
   if (!id) return undefined;
+
+  const remoteJid = key.remoteJid;
+  const participant = key.participant;
   const store = getSentStore(schoolId);
-  if (store.has(id)) {
-    const found = store.get(id);
-    return found.message || found;
+
+  let raw = null;
+  if (remoteJid && store.has(`${remoteJid}:${id}`)) {
+    raw = store.get(`${remoteJid}:${id}`);
+  } else if (participant && store.has(`${participant}:${id}`)) {
+    raw = store.get(`${participant}:${id}`);
+  } else if (store.has(id)) {
+    raw = store.get(id);
+  } else {
+    // Check if ID has any prefixes or colons
+    const cleanId = String(id).replace(/^.*:/, '');
+    if (store.has(cleanId)) {
+      raw = store.get(cleanId);
+    }
   }
-  return undefined;
+
+  if (!raw) return undefined;
+
+  let msgContent = raw.message || raw;
+  msgContent = rehydrateBuffers(msgContent);
+
+  try {
+    if (proto && proto.Message && typeof proto.Message.fromObject === 'function') {
+      return proto.Message.fromObject(msgContent);
+    }
+  } catch (_) { }
+
+  return msgContent;
 }
 
 function getSessionState(schoolId = 'unique_scholars') {
@@ -237,12 +305,13 @@ async function initWhatsApp(schoolId = 'unique_scholars', io = null, forceClean 
         keepAliveIntervalMs: 30000,
         syncFullHistory: false,
         markOnlineOnConnect: true,
+        emitOwnEvents: true,
         msgRetryCounterCache: getRetryCounterCache(schoolId),
         getMessage: async (key) => {
-          if (!key || !key.id) return undefined;
-          const msg = await getStoredMessage(schoolId, key.id);
+          if (!key) return undefined;
+          const msg = await getStoredMessage(schoolId, key);
           if (msg) {
-            console.log(`🔄 [${schoolId}] Answering WhatsApp retry request for message ${key.id} (resolving 'Waiting for this message')`);
+            console.log(`🔄 [${schoolId}] Answering WhatsApp retry / sync request for message ${key.id || key} (resolving 'Waiting for this message')`);
             return msg;
           }
           return undefined;
@@ -255,7 +324,17 @@ async function initWhatsApp(schoolId = 'unique_scholars', io = null, forceClean 
         if (Array.isArray(messages)) {
           for (const m of messages) {
             if (m && m.key && m.key.id && m.message) {
-              saveSentMessage(schoolId, m.key.id, m.message);
+              saveSentMessage(schoolId, m.key.id, m.message, m.key.remoteJid, m.key.participant);
+            }
+          }
+        }
+      });
+
+      sess.sock.ev.on('messages.update', async (updates) => {
+        if (Array.isArray(updates)) {
+          for (const u of updates) {
+            if (u && u.key && u.key.id && u.update && u.update.message) {
+              saveSentMessage(schoolId, u.key.id, u.update.message, u.key.remoteJid, u.key.participant);
             }
           }
         }
@@ -572,7 +651,7 @@ async function sendWhatsAppMessage(phone, message, schoolId = 'unique_scholars',
 
       const result = await sess.sock.sendMessage(targetJid, msgPayload);
       if (result && result.key && result.key.id && result.message) {
-        saveSentMessage(schoolId, result.key.id, result.message);
+        saveSentMessage(schoolId, result.key.id, result.message, targetJid);
       }
 
       // 4. Clear typing presence ("paused")
