@@ -1,5 +1,5 @@
 
-let makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion, Browsers;
+let makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion, Browsers, makeCacheableSignalKeyStore;
 if (!process.env.VERCEL) {
   try {
     const baileys = require('@whiskeysockets/baileys');
@@ -8,6 +8,7 @@ if (!process.env.VERCEL) {
     DisconnectReason = baileys.DisconnectReason;
     fetchLatestBaileysVersion = baileys.fetchLatestBaileysVersion;
     Browsers = baileys.Browsers;
+    makeCacheableSignalKeyStore = baileys.makeCacheableSignalKeyStore;
   } catch (err) {
     console.log('Baileys module skipped on serverless node.');
   }
@@ -24,6 +25,76 @@ let ioInstance = null;
 
 // Map of schoolId -> Session object
 const sessions = new Map();
+
+// -------------------------------------------------------------
+// MESSAGE STORE & RETRY CACHE (Fixes "Waiting for this message. This may take a while.")
+// -------------------------------------------------------------
+const sentMessagesStore = new Map(); // schoolId -> Map(msgId -> WAMessageContent)
+const retryCounterCaches = new Map(); // schoolId -> Map(key -> retryCount)
+const storePersistTimers = new Map();
+
+function getRetryCounterCache(schoolId = 'unique_scholars') {
+  if (!retryCounterCaches.has(schoolId)) {
+    retryCounterCaches.set(schoolId, new Map());
+  }
+  return retryCounterCaches.get(schoolId);
+}
+
+function getSentStore(schoolId = 'unique_scholars') {
+  if (!sentMessagesStore.has(schoolId)) {
+    const store = new Map();
+    try {
+      const storeFile = path.join(getSchoolSessionDir(schoolId), 'message_store.json');
+      if (fs.existsSync(storeFile)) {
+        const list = JSON.parse(fs.readFileSync(storeFile, 'utf8'));
+        if (Array.isArray(list)) {
+          for (const item of list) {
+            if (item && item.id && item.msg) {
+              store.set(item.id, item.msg);
+            }
+          }
+        }
+      }
+    } catch (e) { }
+    sentMessagesStore.set(schoolId, store);
+  }
+  return sentMessagesStore.get(schoolId);
+}
+
+function saveSentMessage(schoolId = 'unique_scholars', id, msgContent) {
+  if (!id || !msgContent) return;
+  const store = getSentStore(schoolId);
+  store.set(id, msgContent);
+  if (store.size > 2000) {
+    const oldestKey = store.keys().next().value;
+    store.delete(oldestKey);
+  }
+
+  // Debounced persistence to disk
+  if (!storePersistTimers.has(schoolId)) {
+    storePersistTimers.set(schoolId, setTimeout(() => {
+      storePersistTimers.delete(schoolId);
+      try {
+        const storeFile = path.join(getSchoolSessionDir(schoolId), 'message_store.json');
+        const list = [];
+        for (const [mid, mcontent] of store.entries()) {
+          list.push({ id: mid, msg: mcontent });
+        }
+        fs.writeFileSync(storeFile, JSON.stringify(list.slice(-1000)), 'utf8');
+      } catch (e) { }
+    }, 3000));
+  }
+}
+
+async function getStoredMessage(schoolId = 'unique_scholars', id) {
+  if (!id) return undefined;
+  const store = getSentStore(schoolId);
+  if (store.has(id)) {
+    const found = store.get(id);
+    return found.message || found;
+  }
+  return undefined;
+}
 
 function getSessionState(schoolId = 'unique_scholars') {
   if (!sessions.has(schoolId)) {
@@ -152,18 +223,43 @@ async function initWhatsApp(schoolId = 'unique_scholars', io = null, forceClean 
         // Fallback gracefully if network check is throttled
       }
 
+      const socketLogger = pino({ level: 'silent' });
+
       sess.sock = makeWASocket({
         ...(version ? { version } : {}),
-        auth: state,
+        auth: {
+          creds: state.creds,
+          keys: makeCacheableSignalKeyStore ? makeCacheableSignalKeyStore(state.keys, socketLogger) : state.keys
+        },
         printQRInTerminal: false,
-        logger: pino({ level: 'silent' }),
+        logger: socketLogger,
         browser: Browsers.ubuntu('Chrome'),
         keepAliveIntervalMs: 30000,
         syncFullHistory: false,
-        markOnlineOnConnect: false
+        markOnlineOnConnect: true,
+        msgRetryCounterCache: getRetryCounterCache(schoolId),
+        getMessage: async (key) => {
+          if (!key || !key.id) return undefined;
+          const msg = await getStoredMessage(schoolId, key.id);
+          if (msg) {
+            console.log(`🔄 [${schoolId}] Answering WhatsApp retry request for message ${key.id} (resolving 'Waiting for this message')`);
+            return msg;
+          }
+          return undefined;
+        }
       });
 
       sess.sock.ev.on('creds.update', saveCreds);
+
+      sess.sock.ev.on('messages.upsert', async ({ messages }) => {
+        if (Array.isArray(messages)) {
+          for (const m of messages) {
+            if (m && m.key && m.key.id && m.message) {
+              saveSentMessage(schoolId, m.key.id, m.message);
+            }
+          }
+        }
+      });
 
       sess.sock.ev.on('connection.update', async (update) => {
         const { connection, lastDisconnect, qr } = update;
@@ -430,12 +526,23 @@ async function sendWhatsAppMessage(phone, message, schoolId = 'unique_scholars',
     }
 
     try {
-      // 1. Natural Human Texting Simulation: Send "composing" (typing...) presence to recipient
+      // 1. Resolve canonical JID on WhatsApp if possible to prime session
+      let targetJid = jid;
       try {
-        await sess.sock.sendPresenceUpdate('composing', jid);
+        if (typeof sess.sock.onWhatsApp === 'function') {
+          const [waContact] = await sess.sock.onWhatsApp(jid);
+          if (waContact && waContact.exists && waContact.jid) {
+            targetJid = waContact.jid;
+          }
+        }
+      } catch (onWaErr) { }
+
+      // 2. Natural Human Texting Simulation: Send "composing" (typing...) presence to recipient
+      try {
+        await sess.sock.sendPresenceUpdate('composing', targetJid);
       } catch (presErr) { }
 
-      // 2. Realistic Human Typing Duration with Non-linear Jitter
+      // 3. Realistic Human Typing Duration with Non-linear Jitter
       // Calculates reading/composing time based on message length:
       // ~50 chars -> 1.3s - 2.0s
       // ~150 chars -> 2.0s - 2.9s
@@ -463,19 +570,22 @@ async function sendWhatsAppMessage(phone, message, schoolId = 'unique_scholars',
         msgPayload = { text: message };
       }
 
-      const result = await sess.sock.sendMessage(jid, msgPayload);
+      const result = await sess.sock.sendMessage(targetJid, msgPayload);
+      if (result && result.key && result.key.id && result.message) {
+        saveSentMessage(schoolId, result.key.id, result.message);
+      }
 
-      // 3. Clear typing presence ("paused")
+      // 4. Clear typing presence ("paused")
       try {
-        await sess.sock.sendPresenceUpdate('paused', jid);
+        await sess.sock.sendPresenceUpdate('paused', targetJid);
       } catch (presErr) { }
 
       const mediaTypeDesc = docBuffer ? (media && media.mimetype && media.mimetype.startsWith('image/') ? 'Image Photo' : 'Document Attachment') : 'Message';
-      console.log(`📩 [${schoolId}] WhatsApp ${mediaTypeDesc} sent to parent at ${phone} (JID: ${jid}) [typed ${(baseTypingMs / 1000).toFixed(1)}s]`);
+      console.log(`📩 [${schoolId}] WhatsApp ${mediaTypeDesc} sent to parent at ${phone} (JID: ${targetJid}) [typed ${(baseTypingMs / 1000).toFixed(1)}s]`);
       return {
         success: true,
         messageId: result?.key?.id || `MSG-${Date.now()}`,
-        recipient: jid,
+        recipient: targetJid,
         hasAttachment: !!docBuffer,
         attachmentType: docBuffer ? (media && media.mimetype && media.mimetype.startsWith('image/') ? 'image' : 'document') : null,
         routedVia: 'local_socket'

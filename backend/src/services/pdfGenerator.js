@@ -106,7 +106,7 @@ class PdfDoc {
  * Generates an official branded academic result card PDF Buffer.
  */
 function generateAcademicResultPdf({
-  schoolName = 'UNIQUE SCHOLARS ACADEMY',
+  schoolName = 'UNIQUE SCHOLARS',
   schoolAddress = 'Main Campus, Phalia Road | Tel: 0315-5889902',
   termName = 'Mid Term 2026',
   studentId = 'STU-000005',
@@ -294,7 +294,7 @@ function generateAcademicResultPdf({
 
   // 8. Footer Note
   doc.line(35, 780, 560.28, 780, cBorder, 0.75);
-  doc.text('This is a computer-generated official examination marksheet issued by Unique Scholars Academy. No manual signature required.', 35, 792, { font: 'F1', size: 7.5, color: cMuted, align: 'center', width: 525 });
+  doc.text('This is a computer-generated official examination marksheet issued by UNIQUE SCHOLARS. No manual signature required.', 35, 792, { font: 'F1', size: 7.5, color: cMuted, align: 'center', width: 525 });
 
   return doc.toBuffer();
 }

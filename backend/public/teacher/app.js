@@ -551,6 +551,7 @@ function renderClassChips() {
 }
 
 function handleClassChange(classId) {
+  currentAttendanceSessionLocked = false;
   const select = document.getElementById('attendanceClassSelect');
   if (select) select.value = classId;
   renderClassChips();
@@ -627,8 +628,9 @@ async function loadAttendanceRoster() {
       }
     } catch (e) {}
 
-    // Fallback: if logs say SUBMITTED or isLocked, also mark as locked
-    if (existingLogs.some(l => l.isLocked || l.state === 'SUBMITTED')) {
+    // Fallback: strictly check if logs for THIS roster or class are SUBMITTED or isLocked
+    const rosterStudentIds = new Set(currentAttendanceRoster.map(s => s.id));
+    if (existingLogs.some(l => (l.classId === classId || rosterStudentIds.has(l.studentId)) && (l.isLocked || l.state === 'SUBMITTED'))) {
       currentAttendanceSessionLocked = true;
     }
 

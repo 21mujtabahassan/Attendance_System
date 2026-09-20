@@ -180,8 +180,9 @@ export default function App() {
         }
       } catch (e) {}
 
-      // Fallback: check if existing logs are SUBMITTED or isLocked
-      if (existingLogs.some(l => l.isLocked || l.state === 'SUBMITTED')) {
+      // Fallback: strictly check if existing logs for this class/students are SUBMITTED or isLocked
+      const rosterIds = new Set(list.map(s => s.id));
+      if (existingLogs.some(l => (l.classId === classId || rosterIds.has(l.studentId)) && (l.isLocked || l.state === 'SUBMITTED'))) {
         locked = true;
       }
 
@@ -382,7 +383,7 @@ export default function App() {
               await loadLogs();
               Alert.alert(
                 'Attendance Finalized 🎉',
-                `Attendance Locked at ${formattedTime}!\nTotal: ${res.summary.total}\nPresent: ${res.summary.present}\nAbsent: ${res.summary.absent}\nWhatsApp Alerts Sent: ${res.summary.whatsappAlertsSent}`
+                `Attendance Locked at ${formattedTime}!\nTotal: ${res.summary.total}\nPresent: ${res.summary.present}\nAbsent: ${res.summary.absent}\nWhatsApp Alerts Queued: ${res.summary.whatsappQueued ?? res.summary.whatsappAlertsSent ?? 0}`
               );
             } else {
               if (res.isLocked) {

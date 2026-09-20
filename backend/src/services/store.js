@@ -16,7 +16,7 @@ const DATA_DIR = isVercel ? '/tmp/attendance_data' : path.join(__dirname, '..', 
 const DB_FILE = path.join(DATA_DIR, 'unique_scholars_db.json');
 
 const INITIAL_DB = {
-  schools: [{ id: 'unique_scholars', name: 'Unique Scholars Academy', code: 'USA-01', phone: '03334751998', address: 'Main Campus, Lahore' }],
+  schools: [{ id: 'unique_scholars', name: 'UNIQUE SCHOLARS', code: 'USA-01', phone: '03334751998', address: 'Main Campus, Lahore' }],
   classes: [
     { id: 'class-play', schoolId: 'unique_scholars', name: 'Class Play', sections: ['Section A', 'Section B'] },
     { id: 'class-nursery', schoolId: 'unique_scholars', name: 'Class Nursery', sections: ['Section A'] },
@@ -203,18 +203,61 @@ async function addSectionToClass(schoolId = 'unique_scholars', classId, sectionN
 async function deleteClass(schoolId = 'unique_scholars', classId) {
   if (isPostgresConfigured()) {
     const db = getDb();
-    // Soft delete preserves historical records
-    const updated = await db('classes').where({ school_id: schoolId, id: classId }).update({ is_active: false });
-    return updated > 0;
+    // 1. Identify target class by id or name
+    const targetClass = await db('classes')
+      .where({ school_id: schoolId })
+      .andWhere(function() {
+        this.where({ id: classId }).orWhere({ name: classId });
+      })
+      .first();
+
+    const targetId = targetClass ? targetClass.id : classId;
+    const targetName = targetClass ? targetClass.name : classId;
+
+    // 2. Soft-delete the class
+    const updated = await db('classes')
+      .where({ school_id: schoolId })
+      .andWhere(function() {
+        this.where({ id: targetId }).orWhere({ name: targetName });
+      })
+      .update({ is_active: false });
+
+    // 3. Cascade soft-delete all students belonging to this class
+    const studentUpdateCount = await db('students')
+      .where({ school_id: schoolId, is_active: true })
+      .andWhere(function() {
+        this.where('class_id', targetId)
+          .orWhere('class_id', targetName)
+          .orWhereRaw('LOWER(class_id) = ?', [String(targetName).toLowerCase()]);
+      })
+      .update({ is_active: false });
+
+    console.log(`🗑️ [deleteClass] Deactivated class "${targetName}" (${targetId}) and ${studentUpdateCount} enrolled student(s).`);
+    return { success: updated > 0 || studentUpdateCount > 0, studentsDeleted: studentUpdateCount };
   }
+
   const db = readJsonDb();
-  const idx = (db.classes || []).findIndex(c => c.schoolId === schoolId && c.id === classId);
+  const targetClass = (db.classes || []).find(c => c.schoolId === schoolId && (c.id === classId || c.name === classId));
+  const targetId = targetClass ? targetClass.id : classId;
+  const targetName = targetClass ? targetClass.name : classId;
+
+  let studentsDeleted = 0;
+  const idx = (db.classes || []).findIndex(c => c.schoolId === schoolId && (c.id === targetId || c.name === targetName));
   if (idx >= 0) {
     db.classes.splice(idx, 1);
-    writeJsonDb(db);
-    return true;
   }
-  return false;
+  if (Array.isArray(db.students)) {
+    db.students.forEach(s => {
+      if (s.schoolId === schoolId && s.isActive !== false) {
+        if (s.classId === targetId || s.classId === targetName || String(s.classId).toLowerCase() === String(targetName).toLowerCase()) {
+          s.isActive = false;
+          studentsDeleted++;
+        }
+      }
+    });
+  }
+  writeJsonDb(db);
+  return { success: true, studentsDeleted };
 }
 
 // -------------------------------------------------------------
@@ -225,14 +268,20 @@ async function getStudents(schoolId = 'unique_scholars', classId = null) {
     const db = getDb();
     const query = db('students')
       .leftJoin('classes', function() {
-        this.on('students.class_id', '=', 'classes.id')
-          .orOn('students.class_id', '=', 'classes.name');
+        this.on(function() {
+          this.on('students.class_id', '=', 'classes.id')
+            .orOn('students.class_id', '=', 'classes.name');
+        }).andOn('classes.school_id', '=', 'students.school_id');
       })
       .select(
         'students.*',
         'classes.name as class_name'
       )
-      .where({ 'students.school_id': schoolId, 'students.is_active': true });
+      .where({ 'students.school_id': schoolId, 'students.is_active': true })
+      .where(function() {
+        this.where('classes.is_active', true)
+          .orWhereNull('classes.id');
+      });
 
     if (classId) {
       query.andWhere(function() {
@@ -268,9 +317,10 @@ async function getStudents(schoolId = 'unique_scholars', classId = null) {
   const classes = db.classes || [];
   let list = (db.students || []).filter(s => {
     if (s.schoolId !== schoolId || s.isActive === false) return false;
+    const cl = classes.find(c => c.id === s.classId || c.name === s.classId);
+    if (cl && cl.isActive === false) return false;
     if (!classId) return true;
     if (s.classId === classId) return true;
-    const cl = classes.find(c => c.id === s.classId || c.name === s.classId);
     if (cl && (cl.id === classId || cl.name === classId || cl.name.toLowerCase() === String(classId).toLowerCase())) return true;
     return false;
   });
@@ -550,30 +600,30 @@ async function updateStudent(schoolId = 'unique_scholars', studentId, updates) {
 async function deleteStudent(schoolId = 'unique_scholars', studentId) {
   if (isPostgresConfigured()) {
     const db = getDb();
-    // Cleanly unlink/delete child records first to satisfy foreign keys
-    await db('attendance_logs').where({ school_id: schoolId, student_id: studentId }).del();
-    await db('student_results').where({ school_id: schoolId, student_id: studentId }).del();
-    await db('student_fee_dues').where({ school_id: schoolId, student_id: studentId }).del();
-    await db('dispatch_messages').where({ student_id: studentId }).update({ student_id: null });
-    const deleted = await db('students').where({ school_id: schoolId, id: studentId }).del();
+    // Soft delete preserves historical records (attendance, exam results, and fee logs)
+    const updated = await db('students')
+      .where({ school_id: schoolId, id: studentId })
+      .update({ is_active: false, updated_at: new Date() });
 
-    // Mirror delete to JSON
+    // Mirror soft delete to JSON
     try {
       const jDb = readJsonDb();
-      const idx = (jDb.students || []).findIndex(s => s.id === studentId);
-      if (idx >= 0) {
-        jDb.students.splice(idx, 1);
+      const s = (jDb.students || []).find(st => st.id === studentId);
+      if (s) {
+        s.isActive = false;
+        s.is_active = false;
         writeJsonDb(jDb);
       }
     } catch (e) {}
 
-    return deleted > 0;
+    return updated > 0;
   }
 
   const db = readJsonDb();
-  const idx = (db.students || []).findIndex(s => s.schoolId === schoolId && s.id === studentId);
-  if (idx >= 0) {
-    db.students.splice(idx, 1);
+  const s = (db.students || []).find(st => st.schoolId === schoolId && st.id === studentId);
+  if (s) {
+    s.isActive = false;
+    s.is_active = false;
     writeJsonDb(db);
     return true;
   }
@@ -810,6 +860,27 @@ async function unlockAttendanceSession(schoolId = 'unique_scholars', classId, da
           state: 'DRAFT',
           updated_at: new Date()
         });
+
+      // 3. Retract any pending queued WhatsApp alerts for this class and date
+      try {
+        const studentIds = await trx('students')
+          .where({ school_id: schoolId })
+          .whereIn('class_id', possibleIds)
+          .pluck('id');
+
+        if (studentIds && studentIds.length > 0) {
+          const alertKeys = studentIds.map(sId => `ATT_ALERT_${schoolId}_${sId}_${cleanDateStr}`);
+          const retracted = await trx('dispatch_messages')
+            .whereIn('idempotency_key', alertKeys)
+            .andWhere('status', 'queued')
+            .del();
+          if (retracted > 0) {
+            console.log(`🗑️ [Unlock Retraction] Retracted ${retracted} queued WhatsApp alert(s) for class ${resolvedClassId} on ${cleanDateStr}.`);
+          }
+        }
+      } catch (retractErr) {
+        console.warn('Alert retraction warning on unlock:', retractErr.message);
+      }
     });
 
     console.log(`🔓 [Attendance Lock Override] Class ${resolvedClassId} on ${cleanDateStr} UNLOCKED by ${adminUser}. Reason: ${reason || 'Admin override'}`);
@@ -1126,9 +1197,10 @@ async function getAttendanceLogs(schoolId = 'unique_scholars', filters = {}) {
   if (isPostgresConfigured()) {
     const db = getDb();
     const query = db('attendance_logs').where({ school_id: schoolId });
-    if (filters.classId) {
-      const clsObj = await resolveClass(schoolId, filters.classId, db);
-      const possibleIds = [filters.classId];
+    if (filters.classId && String(filters.classId).trim() !== '') {
+      const rawClassId = String(filters.classId).trim();
+      const clsObj = await resolveClass(schoolId, rawClassId, db);
+      const possibleIds = [rawClassId];
       if (clsObj) {
         if (clsObj.id) possibleIds.push(clsObj.id);
         if (clsObj.name) possibleIds.push(clsObj.name);
@@ -1166,11 +1238,12 @@ async function getAttendanceLogs(schoolId = 'unique_scholars', filters = {}) {
   const db = readJsonDb();
   const classes = db.classes || [];
   const cleanDateFilter = filters.date ? formatLocalDate(filters.date) : null;
-  const clsObj = filters.classId ? await resolveClass(schoolId, filters.classId) : null;
-  const possibleIds = clsObj ? new Set([
-    String(filters.classId).trim().toLowerCase(),
-    String(clsObj.id || '').trim().toLowerCase(),
-    String(clsObj.name || '').trim().toLowerCase()
+  const cleanClassId = filters.classId && String(filters.classId).trim() !== '' ? String(filters.classId).trim() : null;
+  const clsObj = cleanClassId ? await resolveClass(schoolId, cleanClassId) : null;
+  const possibleIds = cleanClassId ? new Set([
+    cleanClassId.toLowerCase(),
+    String(clsObj?.id || '').trim().toLowerCase(),
+    String(clsObj?.name || '').trim().toLowerCase()
   ].filter(Boolean)) : null;
 
   return (db.attendanceLogs || []).filter(l => {
@@ -2344,7 +2417,7 @@ async function getAdminInsights(schoolId = 'unique_scholars') {
   const classes = (db.classes || []).filter(c => c.schoolId === schoolId);
   const terms = (db.resultTerms || []).filter(t => t.schoolId === schoolId && t.status === 'Active');
 
-  const todayStr = new Date().toISOString().split('T')[0];
+  const todayStr = getPKTDate();
   const todayLogs = (db.attendanceLogs || []).filter(l => l.schoolId === schoolId && l.date === todayStr);
 
   const present = todayLogs.filter(l => l.status === 'Present' || l.status === 'Late').length;
@@ -2362,22 +2435,44 @@ async function getAdminInsights(schoolId = 'unique_scholars') {
 }
 
 async function getAdminRecords(schoolId = 'unique_scholars', filters = {}) {
-  const [students, classes, logs] = await Promise.all([
-    getStudents(schoolId),
+  let allStudents = [];
+  if (isPostgresConfigured()) {
+    try {
+      const db = getDb();
+      // Fetch all students (both active and inactive) so historical attendance logs always resolve names
+      const dbStudents = await db('students').where({ school_id: schoolId });
+      allStudents = dbStudents.map(s => ({
+        id: s.id,
+        name: s.name,
+        section: s.section_name || 'Section A',
+        parentPhone: s.parent_phone || ''
+      }));
+    } catch (e) {
+      allStudents = await getStudents(schoolId);
+    }
+  } else {
+    allStudents = await getStudents(schoolId);
+  }
+
+  const [classes, logs] = await Promise.all([
     getClasses(schoolId),
     getAttendanceLogs(schoolId, filters)
   ]);
+
   const studentMap = {};
-  students.forEach(s => { studentMap[s.id] = s; });
+  allStudents.forEach(s => { studentMap[s.id] = s; });
   const classMap = {};
   classes.forEach(c => {
     classMap[c.id] = c.name;
     if (c.name) classMap[c.name] = c.name;
   });
 
-  return logs.map(l => {
+  let mapped = logs.map(l => {
     const s = studentMap[l.studentId] || {};
-    const studentName = s.name || l.studentName || 'Unknown';
+    let studentName = s.name || l.studentName || '';
+    if (!studentName || studentName === 'undefined' || studentName === 'Unknown') {
+      studentName = s.name || (l.studentId && l.studentId.startsWith('DUMMY-') ? `Dummy Student ${l.studentId.replace(/\D/g, '')}` : 'Unknown');
+    }
     const className = classMap[l.classId] || l.classId;
     return {
       id: l.id,
@@ -2395,6 +2490,17 @@ async function getAdminRecords(schoolId = 'unique_scholars', filters = {}) {
       isLocked: l.isLocked
     };
   });
+
+  if (filters.search && String(filters.search).trim()) {
+    const q = String(filters.search).toLowerCase().trim();
+    mapped = mapped.filter(r =>
+      (r.studentName && r.studentName.toLowerCase().includes(q)) ||
+      (r.studentId && r.studentId.toLowerCase().includes(q)) ||
+      (r.className && r.className.toLowerCase().includes(q))
+    );
+  }
+
+  return mapped;
 }
 
 // -------------------------------------------------------------

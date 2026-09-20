@@ -50,8 +50,8 @@ const safeFetch = async (path, options = {}) => {
     ...(options.headers || {})
   };
 
-  // WhatsApp pairing requires time to compute Baileys cryptographic keys & generate QR
-  const timeoutMs = options.timeout || (path.includes('/whatsapp/') ? 15000 : 3500);
+  // Generous timeout to avoid premature connection aborts during DB queries & WhatsApp pairing
+  const timeoutMs = options.timeout || 30000;
 
   try {
     const controller = new AbortController();

@@ -2,7 +2,7 @@
   "schools": [
     {
       "id": "unique_scholars",
-      "name": "Unique Scholars Academy",
+      "name": "UNIQUE SCHOLARS",
       "code": "USA",
       "phone": "03001234567",
       "address": "Main Campus"
@@ -162,6 +162,66 @@
       "sectionId": "3b7d3d8e-3ee2-4c2e-84c3-74111aa22770",
       "section": "Section A",
       "parentPhone": "03005554433",
+      "parentEmail": ""
+    },
+    {
+      "id": "STU-000048",
+      "rollNumber": 1,
+      "schoolId": "unique_scholars",
+      "name": "hihi",
+      "fatherName": "a",
+      "classId": "class-1789766432722",
+      "sectionId": "de82d10c-3f6e-4d92-b874-db9810f65648",
+      "section": "Section A",
+      "parentPhone": "03414001176",
+      "parentEmail": ""
+    },
+    {
+      "id": "STU-000049",
+      "rollNumber": 2,
+      "schoolId": "unique_scholars",
+      "name": "bnbn",
+      "fatherName": "mmmmm",
+      "classId": "class-1789766432722",
+      "sectionId": "de82d10c-3f6e-4d92-b874-db9810f65648",
+      "section": "Section A",
+      "parentPhone": "03414001176",
+      "parentEmail": ""
+    },
+    {
+      "id": "STU-000050",
+      "rollNumber": 1,
+      "schoolId": "unique_scholars",
+      "name": "Student Test1",
+      "fatherName": "Father Test",
+      "classId": "class-1789769691236",
+      "sectionId": "791013d6-507b-404c-97b4-71ec9af548cd",
+      "section": "Section A",
+      "parentPhone": "03001234567",
+      "parentEmail": ""
+    },
+    {
+      "id": "STU-000051",
+      "rollNumber": 1,
+      "schoolId": "unique_scholars",
+      "name": "Cascade Student Alpha",
+      "fatherName": "",
+      "classId": "class-1789772528686",
+      "sectionId": "123a043c-4f7b-4f7e-8d2f-9e925f726603",
+      "section": "A",
+      "parentPhone": "",
+      "parentEmail": ""
+    },
+    {
+      "id": "STU-000052",
+      "rollNumber": 2,
+      "schoolId": "unique_scholars",
+      "name": "Cascade Student Beta",
+      "fatherName": "",
+      "classId": "class-1789772528686",
+      "sectionId": "123a043c-4f7b-4f7e-8d2f-9e925f726603",
+      "section": "A",
+      "parentPhone": "",
       "parentEmail": ""
     }
   ],
@@ -443,18 +503,6 @@
       ]
     },
     {
-      "id": "SUB-Class-Play-TERM-MID-2026",
-      "schoolId": "unique_scholars",
-      "classId": "Class-Play",
-      "termId": "TERM-MID-2026",
-      "subjects": [
-        "English Rhymes",
-        "Urdu Basics",
-        "Math Concepts",
-        "Art & Craft"
-      ]
-    },
-    {
       "id": "SUB-Class-9-TERM-MID-2026-Mathematics",
       "schoolId": "unique_scholars",
       "classId": "Class-9",
@@ -496,6 +544,51 @@
       "classId": "Class-9",
       "termId": "TERM-MID-2026",
       "name": "Computer Science",
+      "totalMarks": 100,
+      "displayOrder": 5
+    },
+    {
+      "id": "SUB-Class-Play-TERM-MID-2026-English%20Rhymes",
+      "schoolId": "unique_scholars",
+      "classId": "Class-Play",
+      "termId": "TERM-MID-2026",
+      "name": "English Rhymes",
+      "totalMarks": 100,
+      "displayOrder": 1
+    },
+    {
+      "id": "SUB-Class-Play-TERM-MID-2026-Urdu%20Basics",
+      "schoolId": "unique_scholars",
+      "classId": "Class-Play",
+      "termId": "TERM-MID-2026",
+      "name": "Urdu Basics",
+      "totalMarks": 100,
+      "displayOrder": 2
+    },
+    {
+      "id": "SUB-Class-Play-TERM-MID-2026-Math%20Concepts",
+      "schoolId": "unique_scholars",
+      "classId": "Class-Play",
+      "termId": "TERM-MID-2026",
+      "name": "Math Concepts",
+      "totalMarks": 100,
+      "displayOrder": 3
+    },
+    {
+      "id": "SUB-Class-Play-TERM-MID-2026-Nazra%20Quran",
+      "schoolId": "unique_scholars",
+      "classId": "Class-Play",
+      "termId": "TERM-MID-2026",
+      "name": "Nazra Quran",
+      "totalMarks": 100,
+      "displayOrder": 4
+    },
+    {
+      "id": "SUB-Class-Play-TERM-MID-2026-Art%20%26%20Craft",
+      "schoolId": "unique_scholars",
+      "classId": "Class-Play",
+      "termId": "TERM-MID-2026",
+      "name": "Art & Craft",
       "totalMarks": 100,
       "displayOrder": 5
     }

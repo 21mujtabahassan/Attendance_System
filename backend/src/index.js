@@ -185,7 +185,7 @@ function startCloudDispatchWorker() {
               if (found && found.length > 0) {
                 const rItem = found[0];
                 const schools = await getSchools();
-                const school = schools.find(s => s.id === (batch.schoolId || 'unique_scholars')) || { name: 'Unique Scholars Academy' };
+                const school = schools.find(s => s.id === (batch.schoolId || 'unique_scholars')) || { name: 'UNIQUE SCHOLARS' };
                 const terms = await getResultTerms(batch.schoolId || 'unique_scholars');
                 const term = terms.find(t => t.id === rItem.termId) || { name: rItem.termId };
                 const classes = await getClasses(batch.schoolId || 'unique_scholars');
@@ -312,7 +312,7 @@ if (!process.env.VERCEL) {
 
 // -------------------------------------------------------------
 // AUTHENTICATION & RBAC HELPERS
-// -------------------------------------------------------------
+const AUTH_SECRET = process.env.AUTH_SECRET || process.env.SESSION_SECRET || 'usa-secret-key-2026';
 
 function generateAuthToken(user) {
   const payload = {
@@ -323,13 +323,25 @@ function generateAuthToken(user) {
     assignedClassIds: user.assignedClassIds || [],
     ts: Date.now()
   };
-  return Buffer.from(JSON.stringify(payload)).toString('base64');
+  const data = Buffer.from(JSON.stringify(payload)).toString('base64');
+  const sig = require('crypto').createHmac('sha256', AUTH_SECRET).update(data).digest('base64url');
+  return `${data}.${sig}`;
 }
 
 function decodeAuthToken(token) {
   if (!token) return null;
   try {
-    const raw = token.replace(/^Bearer\s+/i, '');
+    const raw = token.replace(/^Bearer\s+/i, '').trim();
+    if (raw.includes('.')) {
+      const [data, sig] = raw.split('.');
+      const expectedSig = require('crypto').createHmac('sha256', AUTH_SECRET).update(data).digest('base64url');
+      if (sig !== expectedSig) {
+        console.warn('⚠️ Rejected auth token with invalid HMAC signature.');
+        return null;
+      }
+      return JSON.parse(Buffer.from(data, 'base64').toString('utf8'));
+    }
+    // Backward-compatibility: allow legacy base64-only tokens during rolling deployment
     return JSON.parse(Buffer.from(raw, 'base64').toString('utf8'));
   } catch (e) {
     return null;
@@ -343,12 +355,19 @@ function getReqUser(req) {
 
 function requireAdminOrPrincipal(req, res, next) {
   const user = getReqUser(req);
-  if (user && user.role === 'teacher') {
+  if (!user) {
+    return res.status(401).json({
+      success: false,
+      error: 'Authentication Required: Please login to access this administrative feature.'
+    });
+  }
+  if (user.role === 'teacher') {
     return res.status(403).json({
       success: false,
       error: 'Access Denied: This administrative feature is restricted to Principals and Admins.'
     });
   }
+  req.user = user;
   next();
 }
 
@@ -494,7 +513,7 @@ app.get(['/api/classes', '/api/schools/:schoolId/classes'], async (req, res) => 
   res.json({ success: true, classes: await getClasses(schoolId) });
 });
 
-app.post('/api/admin/classes', async (req, res) => {
+app.post('/api/admin/classes', requireAdminOrPrincipal, async (req, res) => {
   try {
     const { schoolId = 'unique_scholars', name, sections } = req.body;
     if (!name || !name.trim()) {
@@ -511,7 +530,7 @@ app.post('/api/admin/classes', async (req, res) => {
   }
 });
 
-app.post('/api/admin/classes/:classId/sections', async (req, res) => {
+app.post('/api/admin/classes/:classId/sections', requireAdminOrPrincipal, async (req, res) => {
   try {
     const { schoolId = 'unique_scholars', sectionName } = req.body;
     const { classId } = req.params;
@@ -526,12 +545,20 @@ app.post('/api/admin/classes/:classId/sections', async (req, res) => {
   }
 });
 
-app.delete('/api/admin/classes/:classId', async (req, res) => {
+app.delete('/api/admin/classes/:classId', requireAdminOrPrincipal, async (req, res) => {
   try {
     const { schoolId = 'unique_scholars' } = req.query;
     const { classId } = req.params;
-    await deleteClass(schoolId, classId);
-    res.json({ success: true, message: 'Class deleted successfully.' });
+    const result = await deleteClass(schoolId, classId);
+    if (io) {
+      io.emit('classes_updated', { schoolId });
+      io.emit('students_updated', { schoolId });
+    }
+    res.json({
+      success: true,
+      message: 'Class and its enrolled students deleted successfully.',
+      studentsDeleted: typeof result === 'object' ? (result.studentsDeleted || 0) : 0
+    });
   } catch (err) {
     console.error('Error deleting class:', err);
     res.status(500).json({ success: false, error: err.message || 'Failed to delete class.' });
@@ -693,17 +720,13 @@ app.put('/api/admin/students/:studentId', async (req, res) => {
   }
 });
 
-app.delete('/api/admin/students/:studentId', async (req, res) => {
+app.delete('/api/admin/students/:studentId', requireAdminOrPrincipal, async (req, res) => {
   try {
-    const reqUser = getReqUser(req);
-    if (reqUser && reqUser.role === 'teacher') {
-      return res.status(403).json({ success: false, error: 'Access Denied: Only Administrators can delete students.' });
-    }
     const { schoolId = 'unique_scholars' } = req.query;
     const { studentId } = req.params;
     const deleted = await deleteStudent(schoolId, studentId);
     if (io) io.emit('students_updated', { action: 'delete', schoolId, studentId });
-    res.json({ success: true, deleted, message: 'Student permanently deleted from database.' });
+    res.json({ success: true, deleted, message: 'Student archived successfully.' });
   } catch (err) {
     console.error('Error deleting student:', err);
     res.status(500).json({ success: false, error: err.message || 'Failed to delete student.' });
@@ -750,7 +773,7 @@ app.post('/api/attendance/submit', async (req, res) => {
     }
 
     const schools = await getSchools();
-    const school = schools.find(s => s.id === schoolId) || { name: 'Unique Scholars Academy' };
+    const school = schools.find(s => s.id === schoolId) || { name: 'UNIQUE SCHOLARS' };
     const dateStr = attendanceDate ? getPKTDate(attendanceDate) : getPKTDate();
     const timeStr = attendanceTime || getPKTTime();
     const gatewayUrl = req.headers['x-whatsapp-gateway-url'] || req.body.gatewayUrl || process.env.WHATSAPP_GATEWAY_URL || process.env.PERSISTENT_BACKEND_URL;
@@ -849,7 +872,7 @@ app.get('/api/attendance/lock-status', async (req, res) => {
   }
 });
 
-app.post(['/api/admin/attendance/unlock', '/api/attendance/unlock'], async (req, res) => {
+app.post(['/api/admin/attendance/unlock', '/api/attendance/unlock'], requireAdminOrPrincipal, async (req, res) => {
   try {
     const { schoolId = 'unique_scholars', classId, date, reason } = req.body;
     if (!classId || !date) {
@@ -880,13 +903,21 @@ app.post(['/api/whatsapp/send-pending', '/api/whatsapp/trigger-queue'], async (r
     const gatewayUrl = req.headers['x-whatsapp-gateway-url'] || req.body.gatewayUrl || process.env.WHATSAPP_GATEWAY_URL || process.env.PERSISTENT_BACKEND_URL;
 
     console.log(`⚡ [Queue Sender] Manual trigger requested for ${schoolId}...`);
-    const result = await sendQueuedMessages(schoolId, async (phone, msg, sId, media) => {
+    // Run sendQueuedMessages in the background so slow message pacing does not cause client timeout
+    sendQueuedMessages(schoolId, async (phone, msg, sId, media) => {
       return await sendWhatsAppMessage(phone, msg, sId, gatewayUrl, media);
+    }).then(result => {
+      console.log(`✅ [Queue Sender] Completed dispatch:`, result);
+    }).catch(err => {
+      console.error('❌ [Queue Sender] Error in background dispatch:', err);
     });
 
-    res.json({ success: true, ...result });
+    res.json({
+      success: true,
+      message: 'WhatsApp message dispatch initiated in background.'
+    });
   } catch (err) {
-    console.error('Error sending queued WhatsApp messages:', err);
+    console.error('Error initiating queued WhatsApp dispatch:', err);
     res.status(500).json({ success: false, error: err.message });
   }
 });
@@ -1030,7 +1061,7 @@ app.post('/api/admin/results/submit', async (req, res) => {
     const gatewayUrl = req.headers['x-whatsapp-gateway-url'] || req.body.gatewayUrl || process.env.WHATSAPP_GATEWAY_URL || process.env.PERSISTENT_BACKEND_URL;
 
     const schools = await getSchools();
-    const school = schools.find(s => s.id === schoolId) || { name: 'Unique Scholars Academy' };
+    const school = schools.find(s => s.id === schoolId) || { name: 'UNIQUE SCHOLARS' };
     const terms = await getResultTerms(schoolId);
     const term = terms.find(t => t.id === termId) || { name: termId };
     const classes = await getClasses(schoolId);
@@ -1202,7 +1233,7 @@ app.post('/api/admin/results/dispatch-individual', async (req, res) => {
     }
 
     const schools = await getSchools();
-    const school = schools.find(s => s.id === schoolId) || { name: 'Unique Scholars Academy' };
+    const school = schools.find(s => s.id === schoolId) || { name: 'UNIQUE SCHOLARS' };
     const terms = await getResultTerms(schoolId);
     const term = terms.find(t => t.id === (item.termId || termId)) || { name: item.termId || termId };
     const classes = await getClasses(schoolId);
@@ -1327,7 +1358,7 @@ ${subjectsSummary}
 📝 *Teacher Remarks:* "${teacherRemarks}"
 
 -----------------------------------
-Unique Scholars High School`;
+UNIQUE SCHOLARS`;
 
     // Generate official result card PDF attachment
     let pdfBuffer = null;
@@ -1409,7 +1440,7 @@ app.get('/api/admin/results/pdf/:resultId', async (req, res) => {
 
   const r = results[0];
   const schools = await getSchools();
-  const school = schools.find(s => s.id === r.schoolId) || { name: 'Unique Scholars Academy', address: 'Main Campus', phone: '03001234567' };
+  const school = schools.find(s => s.id === r.schoolId) || { name: 'UNIQUE SCHOLARS', address: 'Main Campus', phone: '03001234567' };
   const terms = await getResultTerms(r.schoolId);
   const term = terms.find(t => t.id === r.termId) || { name: r.termId };
   const classes = await getClasses(r.schoolId);
@@ -1988,7 +2019,7 @@ app.post('/api/admin/broadcast/send', async (req, res) => {
         .replace(/{class_id}/g, student.className || student.classId)
         .replace(/{class_name}/g, student.className || student.classId)
         .replace(/{father_name}/g, student.fatherName || '')
-        .replace(/{school_name}/g, 'Unique Scholars Academy')
+        .replace(/{school_name}/g, 'UNIQUE SCHOLARS')
         .replace(/{date}/g, dateStr);
 
       const batchItem = {
@@ -2158,7 +2189,14 @@ app.get('/api/admin/insights', requireAdminOrPrincipal, async (req, res) => {
   res.json({ success: true, insights });
 });
 
-app.get('/api/admin/records', requireAdminOrPrincipal, async (req, res) => {
+app.get('/api/admin/records', async (req, res) => {
+  const user = getReqUser(req);
+  if (user && user.role === 'teacher') {
+    return res.status(403).json({
+      success: false,
+      error: 'Access Denied: This administrative feature is restricted to Principals and Admins.'
+    });
+  }
   const { schoolId, classId, status, date, search } = req.query;
   const records = await getAdminRecords(schoolId || 'unique_scholars', { classId, status, date, search });
   res.json({ success: true, total: records.length, records });
@@ -2337,7 +2375,7 @@ app.post('/api/admin/fees/collect', async (req, res) => {
       const receiptNo = `USHS-${String(updatedFee.id).slice(-6)}`;
       const dateStr = new Date().toLocaleDateString('en-PK', { day: '2-digit', month: 'short', year: 'numeric' });
       const receiptMsg =
-        `🎓 *UNIQUE SCHOLARS HIGH SCHOOL*
+        `🎓 *UNIQUE SCHOLARS*
 *Official Fee Payment Receipt*
 -----------------------------------
 Receipt No: *${receiptNo}*
@@ -2419,7 +2457,7 @@ app.post('/api/admin/fees/set-status', async (req, res) => {
       const receiptNo = `USHS-${String(updated.id).slice(-6)}`;
       const dateStr = new Date().toLocaleDateString('en-PK', { day: '2-digit', month: 'short', year: 'numeric' });
       const receiptMsg =
-        `🎓 *UNIQUE SCHOLARS HIGH SCHOOL*
+        `🎓 *UNIQUE SCHOLARS*
 *Official Fee Payment Receipt*
 -----------------------------------
 Receipt No: *${receiptNo}*
@@ -2494,7 +2532,7 @@ app.post('/api/admin/fees/modify-student-fee', async (req, res) => {
       const receiptNo = `USHS-${String(updated.id).slice(-6)}`;
       const dateStr = new Date().toLocaleDateString('en-PK', { day: '2-digit', month: 'short', year: 'numeric' });
       const receiptMsg =
-        `🎓 *UNIQUE SCHOLARS HIGH SCHOOL*
+        `🎓 *UNIQUE SCHOLARS*
 *Official Fee Payment Receipt*
 -----------------------------------
 Receipt No: *${receiptNo}*
@@ -2571,7 +2609,7 @@ app.post('/api/admin/fees/dispatch-reminder', async (req, res) => {
       if (!item.parentPhone) continue;
 
       const reminderMsg =
-        `🎓 *UNIQUE SCHOLARS HIGH SCHOOL*
+        `🎓 *UNIQUE SCHOLARS*
 *Monthly Tuition Fee Reminder*
 -----------------------------------
 Respected Parents of *${item.studentName}* (Class ${item.classId}, Roll #${item.rollNo || '-'}),
@@ -2587,7 +2625,7 @@ This is a gentle reminder regarding the school tuition fee for *${item.month}*.
 Kindly submit the dues at the school accounts office or via digital bank transfer to ensure uninterrupted academic services.
 
 -----------------------------------
-Accounts Office: Unique Scholars High School`;
+Accounts Office: UNIQUE SCHOLARS`;
 
       pendingBatch.push({
         studentId: item.studentId,

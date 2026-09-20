@@ -552,8 +552,10 @@ function populateClassDropdowns() {
     }
 
     el.innerHTML = html;
-    if (currentVal && Array.from(el.options).some(o => o.value === currentVal)) {
+    if (currentVal !== null && currentVal !== undefined && currentVal !== '' && Array.from(el.options).some(o => o.value === currentVal)) {
       el.value = currentVal;
+    } else if (isFilter && !isTeacher) {
+      el.value = '';
     } else if (allowedClasses.length > 0) {
       el.value = allowedClasses[0].id;
     }
@@ -1420,7 +1422,7 @@ function updateTelecastMessagePreview() {
   }
 
   const preview = 
-`🎓 *UNIQUE SCHOLARS ACADEMY*
+`🎓 *UNIQUE SCHOLARS*
 *Official Academic Result Card*
 -----------------------------------
 Assalam-o-Alaikum!
@@ -1442,7 +1444,7 @@ ${subjectsText}
 📝 *Teacher Remarks:* "${remarks}"
 
 -----------------------------------
-Unique Scholars High School`;
+UNIQUE SCHOLARS`;
 
   const previewEl = document.getElementById('telecastMessagePreview');
   if (previewEl) previewEl.value = preview;
@@ -1724,7 +1726,7 @@ function renderLiveWhatsAppPreview() {
       .replace(/{class_id}/g, sample.className)
       .replace(/{class_name}/g, sample.className)
       .replace(/{father_name}/g, sample.fatherName || 'Hamza Ali')
-      .replace(/{school_name}/g, 'Unique Scholars Academy')
+      .replace(/{school_name}/g, 'UNIQUE SCHOLARS')
       .replace(/{date}/g, dateStr);
 
     // Escape HTML first to prevent injection
@@ -1933,7 +1935,7 @@ async function handleSendBroadcast(e) {
             .replace(/{class_id}/g, s.className || getClassName(s.classId))
             .replace(/{class_name}/g, s.className || getClassName(s.classId))
             .replace(/{father_name}/g, s.fatherName || '')
-            .replace(/{school_name}/g, 'Unique Scholars Academy')
+            .replace(/{school_name}/g, 'UNIQUE SCHOLARS')
             .replace(/{date}/g, dateStr)
         };
         if (currentBroadcastMedia) {
@@ -2082,17 +2084,29 @@ async function handleCreateClass(e) {
 }
 
 async function handleDeleteClass(classId) {
-  if (!confirm('Are you sure you want to delete this class?')) return;
+  if (!confirm('Are you sure you want to delete this class? This will also remove all enrolled students from the roster.')) return;
   try {
-    const res = await fetch(`${API_BASE}/admin/classes/${classId}?schoolId=${CURRENT_SCHOOL_ID}`, { method: 'DELETE' });
+    const res = await fetch(`${API_BASE}/admin/classes/${classId}?schoolId=${CURRENT_SCHOOL_ID}`, {
+      method: 'DELETE',
+      headers: getAuthHeaders()
+    });
     const data = await res.json();
     if (data.success) {
-      showToast('Class deleted.');
+      const msg = data.studentsDeleted > 0 
+        ? `Class and ${data.studentsDeleted} enrolled student(s) deleted.`
+        : 'Class deleted.';
+      showToast(msg);
       await fetchClasses();
       renderClassesGrid();
+      await fetchStudents();
+      filterStudentTable();
+      populateClassFilters();
+      if (typeof loadOverviewData === 'function') loadOverviewData();
+    } else {
+      showToast(data.error || 'Error deleting class.');
     }
   } catch (e) {
-    showToast('Error deleting class.');
+    showToast(`Error deleting class: ${e.message}`);
   }
 }
 
@@ -2308,7 +2322,10 @@ async function handleDeleteStudent(studentId) {
   if (!confirm(`Are you sure you want to permanently delete "${displayName}" from the database?\n\nThis will also remove related exam results, attendance logs, and fee ledgers permanently.`)) return;
 
   try {
-    const res = await fetch(`${API_BASE}/admin/students/${studentId}?schoolId=${CURRENT_SCHOOL_ID}`, { method: 'DELETE' });
+    const res = await fetch(`${API_BASE}/admin/students/${studentId}?schoolId=${CURRENT_SCHOOL_ID}`, {
+      method: 'DELETE',
+      headers: getAuthHeaders()
+    });
     const data = await res.json();
     if (data.success) {
       showToast(`Student "${displayName}" permanently deleted from database. 🗑️`);
@@ -2365,8 +2382,16 @@ async function loadRecordsData() {
 
   try {
     const params = new URLSearchParams({ schoolId: CURRENT_SCHOOL_ID, classId, status, search: query });
-    const res = await fetch(`${API_BASE}/admin/records?${params.toString()}`);
+    const res = await fetch(`${API_BASE}/admin/records?${params.toString()}`, {
+      headers: getAuthHeaders()
+    });
     const data = await res.json();
+
+    if (!data.success && data.error) {
+      tbody.innerHTML = `<tr><td colspan="7" class="text-center text-muted"><i class="fa-solid fa-triangle-exclamation" style="color:#f59e0b;"></i> ${escapeHtml(data.error)}</td></tr>`;
+      return;
+    }
+
     const records = data.records || [];
 
     if (records.length === 0) {
@@ -2380,11 +2405,15 @@ async function loadRecordsData() {
         ? `<span class="badge" style="background: rgba(239, 68, 68, 0.15); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.35); font-weight: 700;"><i class="fa-solid fa-lock"></i> Finalized & Locked</span>`
         : `<span class="badge" style="background: rgba(245, 158, 11, 0.15); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.3); font-weight: 600;"><i class="fa-solid fa-pencil"></i> Draft</span>`;
 
+      const resolvedStudentName = (r.studentName && r.studentName !== 'undefined')
+        ? r.studentName
+        : ((r.name && r.name !== 'undefined') ? r.name : (r.studentId && r.studentId.startsWith('DUMMY-') ? `Dummy Student ${r.studentId.replace(/\D/g, '')}` : 'Unknown'));
+
       return `
         <tr>
           <td><strong>${r.date}</strong> <br><small class="text-muted">${r.time || ''}</small></td>
           <td>${escapeHtml(r.studentId || '')}</td>
-          <td><strong>${escapeHtml(r.studentName || r.name || 'Unknown')}</strong></td>
+          <td><strong>${escapeHtml(resolvedStudentName)}</strong></td>
           <td><span class="badge" style="background: rgba(59, 130, 246, 0.15); color: #60a5fa; font-weight: 600;">${escapeHtml(r.className || getClassName(r.classId) || r.classId || '')}</span></td>
           <td><span class="badge ${r.status === 'Present' ? 'badge-success' : r.status === 'Absent' ? 'badge-danger' : 'badge-warning'}">${r.status}</span></td>
           <td>${lockBadge}</td>
@@ -2394,6 +2423,7 @@ async function loadRecordsData() {
     }).join('');
   } catch (e) {
     console.error('Error loading records:', e);
+    tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted">Error loading attendance logs. Please try again.</td></tr>';
   }
 }
 

@@ -113,7 +113,7 @@ CREATE TABLE IF NOT EXISTS attendance_logs (
   student_id        VARCHAR(50) NOT NULL REFERENCES students(id),
   attendance_date   DATE NOT NULL,
   attendance_time   VARCHAR(20),                  -- store as text to match "10:12:48 AM" formatting
-  status            VARCHAR(10) NOT NULL CHECK (status IN ('Present','Absent','Late')),
+  status            VARCHAR(10) NOT NULL CHECK (status IN ('Present','Absent','Late','Leave')),
   state             VARCHAR(10) NOT NULL DEFAULT 'DRAFT' CHECK (state IN ('DRAFT','SUBMITTED')),
   whatsapp_alert_sent BOOLEAN NOT NULL DEFAULT false,
   is_locked         BOOLEAN NOT NULL DEFAULT false,
@@ -260,6 +260,7 @@ CREATE TABLE IF NOT EXISTS whatsapp_sessions (
   last_connected_at TIMESTAMPTZ,
   last_error        TEXT,
   retry_count       INT NOT NULL DEFAULT 0,
+  gateway_url       VARCHAR(255),
   updated_at        TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
