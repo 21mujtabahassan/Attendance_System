@@ -353,22 +353,38 @@ function getReqUser(req) {
   return decodeAuthToken(header);
 }
 
-function requireAdminOrPrincipal(req, res, next) {
-  const user = getReqUser(req);
-  if (!user) {
-    return res.status(401).json({
-      success: false,
-      error: 'Authentication Required: Please login to access this administrative feature.'
-    });
+async function requireAdminOrPrincipal(req, res, next) {
+  try {
+    const user = getReqUser(req);
+    if (!user) {
+      return res.status(401).json({
+        success: false,
+        error: 'Authentication Required: Please login to access this administrative feature.'
+      });
+    }
+
+    // Dynamic role synchronization: if token payload has 'teacher', check if user was promoted to admin/principal in DB
+    let userRole = user.role;
+    try {
+      const teachers = await getTeachers('unique_scholars');
+      const liveTeacher = teachers.find(t => t.id === user.id || t.username === user.username);
+      if (liveTeacher && liveTeacher.role) {
+        userRole = liveTeacher.role;
+        user.role = liveTeacher.role;
+      }
+    } catch (_) { }
+
+    if (userRole === 'teacher') {
+      return res.status(403).json({
+        success: false,
+        error: 'Access Denied: This administrative feature is restricted to Principals and Admins.'
+      });
+    }
+    req.user = user;
+    next();
+  } catch (err) {
+    next(err);
   }
-  if (user.role === 'teacher') {
-    return res.status(403).json({
-      success: false,
-      error: 'Access Denied: This administrative feature is restricted to Principals and Admins.'
-    });
-  }
-  req.user = user;
-  next();
 }
 
 // -------------------------------------------------------------
@@ -2121,17 +2137,38 @@ app.get('/api/auth/me', async (req, res) => {
       return res.status(401).json({ success: false, error: 'Not authenticated.' });
     }
     const schoolId = req.query.schoolId || 'unique_scholars';
+
+    // Fetch live profile from DB so role changes (e.g. promoted to admin) reflect immediately
+    let liveRole = user.role;
+    let liveName = user.fullName;
+    try {
+      const teachers = await getTeachers(schoolId);
+      const liveTeacher = teachers.find(t => t.id === user.id || t.username === user.username);
+      if (liveTeacher) {
+        if (liveTeacher.role) liveRole = liveTeacher.role;
+        if (liveTeacher.fullName) liveName = liveTeacher.fullName;
+      }
+    } catch (_) { }
+
     const assignedClasses = await getTeacherAssignedClasses(schoolId, user.id);
     const inchargeClasses = assignedClasses.filter(c => c.isIncharge);
 
+    const freshUser = {
+      ...user,
+      fullName: liveName,
+      role: liveRole,
+      assignedClasses,
+      inchargeClasses,
+      assignedClassIds: assignedClasses.map(c => c.id)
+    };
+
+    // Issue refreshed token reflecting live role
+    const freshToken = generateAuthToken(freshUser);
+
     return res.json({
       success: true,
-      user: {
-        ...user,
-        assignedClasses,
-        inchargeClasses,
-        assignedClassIds: assignedClasses.map(c => c.id)
-      }
+      token: freshToken,
+      user: freshUser
     });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });

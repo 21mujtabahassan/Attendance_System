@@ -71,6 +71,10 @@ async function initAuth() {
       }).then(r => r.json()).then(data => {
         if (data.success && data.user) {
           currentUser = data.user;
+          if (data.token) {
+            authToken = data.token;
+            localStorage.setItem('usa_auth_token', authToken);
+          }
           localStorage.setItem('usa_current_user', JSON.stringify(currentUser));
           updateUserProfileUI();
           applyRoleRestrictions();
@@ -636,7 +640,9 @@ function populateSectionDropdown(classSelectId, sectionSelectId) {
 // -------------------------------------------------------------
 async function loadOverviewData() {
   try {
-    const res = await fetch(`${API_BASE}/admin/insights?schoolId=${CURRENT_SCHOOL_ID}`);
+    const res = await fetch(`${API_BASE}/admin/insights?schoolId=${CURRENT_SCHOOL_ID}`, {
+      headers: getAuthHeaders()
+    });
     const data = await res.json();
     const ins = data.insights || {};
     const rate = ins.todayAttendanceRate != null ? ins.todayAttendanceRate : (ins.today ? ins.today.rate : 0);
@@ -3075,7 +3081,9 @@ async function loadFeeStructures() {
   if (!container) return;
 
   try {
-    const res = await fetch(`${API_BASE}/admin/fees/structure?schoolId=${CURRENT_SCHOOL_ID}`);
+    const res = await fetch(`${API_BASE}/admin/fees/structure?schoolId=${CURRENT_SCHOOL_ID}`, {
+      headers: getAuthHeaders()
+    });
     const data = await res.json();
     if (!data.success) throw new Error(data.error || 'Failed to fetch fee structures');
 
@@ -3127,7 +3135,7 @@ async function saveClassFeeRate(classId) {
   try {
     const res = await fetch(`${API_BASE}/admin/fees/structure`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: getAuthHeaders(),
       body: JSON.stringify({ schoolId: CURRENT_SCHOOL_ID, classId, baseFee })
     });
     const data = await res.json();
@@ -3158,7 +3166,9 @@ async function loadFeeLedger() {
     if (month) url += `&month=${encodeURIComponent(month)}`;
     if (classId) url += `&classId=${encodeURIComponent(classId)}`;
 
-    const res = await fetch(url);
+    const res = await fetch(url, {
+      headers: getAuthHeaders()
+    });
     const data = await res.json();
     if (!data.success) throw new Error(data.error || 'Failed to load fee ledger');
 
@@ -3311,7 +3321,7 @@ async function handleQuickFeeStatusChange(feeId, newStatus) {
   try {
     const res = await fetch(`${API_BASE}/admin/fees/set-status`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: getAuthHeaders(),
       body: JSON.stringify({
         schoolId: CURRENT_SCHOOL_ID,
         feeId,
@@ -3352,7 +3362,7 @@ async function handleGenerateMonthlyFees() {
   try {
     const res = await fetch(`${API_BASE}/admin/fees/generate`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: getAuthHeaders(),
       body: JSON.stringify({ schoolId: CURRENT_SCHOOL_ID, month, classId })
     });
     const data = await res.json();
@@ -3531,7 +3541,7 @@ async function handleSubmitFeePayment(event) {
     const gwUrl = await getWaGatewayBase();
     const res = await fetch(`${API_BASE}/admin/fees/modify-student-fee`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: getAuthHeaders(),
       body: JSON.stringify({
         schoolId: CURRENT_SCHOOL_ID,
         feeId,
@@ -3616,7 +3626,7 @@ async function handleSubmitConcession(event) {
   try {
     const res = await fetch(`${API_BASE}/admin/fees/concession`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: getAuthHeaders(),
       body: JSON.stringify({
         schoolId: CURRENT_SCHOOL_ID,
         studentId,
@@ -3658,7 +3668,7 @@ async function handleDispatchSingleReminder(feeId) {
     const gwUrl = await getWaGatewayBase();
     const res = await fetch(`${API_BASE}/admin/fees/dispatch-reminder`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: getAuthHeaders(),
       body: JSON.stringify({
         schoolId: CURRENT_SCHOOL_ID,
         feeId,
@@ -3703,7 +3713,7 @@ async function handleDispatchBulkReminders() {
     const gwUrl = await getWaGatewayBase();
     const res = await fetch(`${API_BASE}/admin/fees/dispatch-reminder`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: getAuthHeaders(),
       body: JSON.stringify({
         schoolId: CURRENT_SCHOOL_ID,
         month,

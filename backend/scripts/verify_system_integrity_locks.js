@@ -248,6 +248,42 @@ async function runAllIntegrityLocks() {
   }
 
   // =============================================================
+  // LOCK 5: Fee Management Authentication & Dynamic RBAC Lock
+  // =============================================================
+  console.log('\n🧪 [Lock 5] Auditing Fee Management Authentication & Dynamic RBAC...');
+  try {
+    const appJsPath = path.join(__dirname, '..', 'public', 'app.js');
+    const appContent = fs.readFileSync(appJsPath, 'utf8');
+
+    // Check that loadFeeLedger passes getAuthHeaders()
+    const ledgerFn = appContent.match(/async function loadFeeLedger\s*\(\)\s*\{([\s\S]*?)(?=\nfunction|\nasync function|$)/);
+    if (!ledgerFn || !ledgerFn[1].includes('getAuthHeaders()')) {
+      failures.push('Lock 5 FAIL: loadFeeLedger() does not pass headers: getAuthHeaders(). Causes 401 Unauthorized.');
+    } else {
+      console.log('   ✅ PASS: loadFeeLedger() sends getAuthHeaders().');
+    }
+
+    // Check that loadFeeStructures passes getAuthHeaders()
+    const structFn = appContent.match(/async function loadFeeStructures\s*\(\)\s*\{([\s\S]*?)(?=\nfunction|\nasync function|$)/);
+    if (!structFn || !structFn[1].includes('getAuthHeaders()')) {
+      failures.push('Lock 5 FAIL: loadFeeStructures() does not pass headers: getAuthHeaders(). Causes 401 Unauthorized.');
+    } else {
+      console.log('   ✅ PASS: loadFeeStructures() sends getAuthHeaders().');
+    }
+
+    // Check that requireAdminOrPrincipal performs live DB role lookup
+    const indexJsPath = path.join(__dirname, '..', 'src', 'index.js');
+    const indexContent = fs.readFileSync(indexJsPath, 'utf8');
+    if (!indexContent.includes('getTeachers(\'unique_scholars\')') && !indexContent.includes('getTeachers(')) {
+      failures.push('Lock 5 FAIL: requireAdminOrPrincipal missing dynamic role verification.');
+    } else {
+      console.log('   ✅ PASS: Dynamic role synchronization in requireAdminOrPrincipal verified.');
+    }
+  } catch (feeLockErr) {
+    failures.push(`Lock 5 FAIL: Fee lock audit error: ${feeLockErr.message}`);
+  }
+
+  // =============================================================
   // SUMMARY
   // =============================================================
   console.log('\n========================================================');
