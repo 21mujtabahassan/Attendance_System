@@ -8,7 +8,8 @@
     "backend": "cd backend && npm start",
     "mobile": "cd mobile && npx expo start",
     "test:records": "node backend/scripts/verify_attendance_records_lock.js",
-    "test": "npm run test:records"
+    "test:locks": "node backend/scripts/verify_system_integrity_locks.js",
+    "test": "node backend/scripts/verify_system_integrity_locks.js"
   },
   "dependencies": {
     "@whiskeysockets/baileys": "^6.7.12",
