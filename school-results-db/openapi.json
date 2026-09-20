@@ -1,0 +1,887 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "School Results & Examination API",
+    "description": "Complete backend API service for Examination, Marks Management, Lifecycles, and Frozen Report Cards",
+    "version": "1.0.0"
+  },
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT"
+      }
+    },
+    "schemas": {}
+  },
+  "paths": {
+    "/health": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "Default Response"
+          }
+        }
+      }
+    },
+    "/api/auth/dev-token": {
+      "post": {
+        "summary": "Issue a development JWT for testing and API interaction",
+        "tags": [
+          "Authentication"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "userId",
+                  "role"
+                ],
+                "properties": {
+                  "userId": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "role": {
+                    "type": "string",
+                    "enum": [
+                      "teacher",
+                      "exam_controller",
+                      "principal",
+                      "admin",
+                      "student",
+                      "parent",
+                      "system"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "token": {
+                      "type": "string"
+                    },
+                    "user": {
+                      "type": "object",
+                      "properties": {
+                        "userId": {
+                          "type": "string"
+                        },
+                        "role": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "statusCode": {
+                      "type": "number"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/config/exam-types": {
+      "get": {
+        "summary": "Get all active exam types",
+        "tags": [
+          "Configuration"
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response"
+          }
+        }
+      },
+      "post": {
+        "summary": "Create a new exam type (Admin only)",
+        "tags": [
+          "Configuration"
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response"
+          }
+        }
+      }
+    },
+    "/api/config/component-types": {
+      "get": {
+        "summary": "Get all component types",
+        "tags": [
+          "Configuration"
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response"
+          }
+        }
+      },
+      "post": {
+        "summary": "Create a component type (Admin only)",
+        "tags": [
+          "Configuration"
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response"
+          }
+        }
+      }
+    },
+    "/api/config/grading-scales": {
+      "get": {
+        "summary": "Get grading scales with bands",
+        "tags": [
+          "Configuration"
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response"
+          }
+        }
+      },
+      "post": {
+        "summary": "Create a versioned grading scale (Admin only)",
+        "tags": [
+          "Configuration"
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response"
+          }
+        }
+      }
+    },
+    "/api/config/grading-scales/{scaleId}/bands": {
+      "post": {
+        "summary": "Add grade band to grading scale (Admin only)",
+        "tags": [
+          "Configuration"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "in": "path",
+            "name": "scaleId",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response"
+          }
+        }
+      }
+    },
+    "/api/config/exams": {
+      "get": {
+        "summary": "List all exams",
+        "tags": [
+          "Configuration"
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response"
+          }
+        }
+      },
+      "post": {
+        "summary": "Create an exam",
+        "tags": [
+          "Configuration"
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response"
+          }
+        }
+      }
+    },
+    "/api/config/exams/{examId}/classes": {
+      "get": {
+        "summary": "List classes for an exam",
+        "tags": [
+          "Configuration"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "in": "path",
+            "name": "examId",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response"
+          }
+        }
+      },
+      "post": {
+        "summary": "Add class to an exam",
+        "tags": [
+          "Configuration"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "in": "path",
+            "name": "examId",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response"
+          }
+        }
+      }
+    },
+    "/api/config/exam-classes/{examClassId}/subjects": {
+      "get": {
+        "summary": "List subjects and components for an exam_class",
+        "tags": [
+          "Configuration"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "in": "path",
+            "name": "examClassId",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response"
+          }
+        }
+      },
+      "post": {
+        "summary": "Add subject to an exam class",
+        "tags": [
+          "Configuration"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "in": "path",
+            "name": "examClassId",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response"
+          }
+        }
+      }
+    },
+    "/api/config/exam-subjects/{examSubjectId}/components": {
+      "post": {
+        "summary": "Add component to an exam subject",
+        "tags": [
+          "Configuration"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "in": "path",
+            "name": "examSubjectId",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response"
+          }
+        }
+      }
+    },
+    "/api/marks/sheet": {
+      "get": {
+        "summary": "Get marks entry sheet for a class, subject, and section",
+        "tags": [
+          "Marks"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "number"
+            },
+            "in": "query",
+            "name": "examClassId",
+            "required": true
+          },
+          {
+            "schema": {
+              "type": "number"
+            },
+            "in": "query",
+            "name": "classSubjectId",
+            "required": true
+          },
+          {
+            "schema": {
+              "type": "number"
+            },
+            "in": "query",
+            "name": "sectionId",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response"
+          }
+        }
+      }
+    },
+    "/api/marks/bulk": {
+      "put": {
+        "summary": "Bulk save marks for components and enrollments",
+        "tags": [
+          "Marks"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "marks"
+                ],
+                "properties": {
+                  "marks": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "required": [
+                        "componentId",
+                        "enrollmentId",
+                        "status"
+                      ],
+                      "properties": {
+                        "componentId": {
+                          "type": "number"
+                        },
+                        "enrollmentId": {
+                          "type": "number"
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "PRESENT",
+                            "ABSENT",
+                            "EXEMPT",
+                            "MEDICAL_LEAVE",
+                            "WITHHELD",
+                            "NOT_APPLICABLE"
+                          ]
+                        },
+                        "marksObtained": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "graceMarks": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "graceReason": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "remarks": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Default Response"
+          }
+        }
+      }
+    },
+    "/api/marks/missing": {
+      "get": {
+        "summary": "Get all missing marks entries for an exam class",
+        "tags": [
+          "Marks"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "number"
+            },
+            "in": "query",
+            "name": "examClassId",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response"
+          }
+        }
+      }
+    },
+    "/api/exam-classes/{id}/submit": {
+      "post": {
+        "summary": "Submit an exam class (teacher, exam_controller, admin)",
+        "tags": [
+          "Lifecycle"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "in": "path",
+            "name": "id",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response"
+          }
+        }
+      }
+    },
+    "/api/exam-classes/{id}/verify": {
+      "post": {
+        "summary": "Verify exam class marks (exam_controller, principal, admin)",
+        "tags": [
+          "Lifecycle"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "in": "path",
+            "name": "id",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response"
+          }
+        }
+      }
+    },
+    "/api/exam-classes/{id}/send-back": {
+      "post": {
+        "summary": "Send exam class back to DRAFT with a reason",
+        "tags": [
+          "Lifecycle"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "in": "path",
+            "name": "id",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response"
+          }
+        }
+      }
+    },
+    "/api/exam-classes/{id}/publish": {
+      "post": {
+        "summary": "Publish exam class and generate report card snapshots",
+        "tags": [
+          "Lifecycle"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "in": "path",
+            "name": "id",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response"
+          }
+        }
+      }
+    },
+    "/api/exam-classes/{id}/lock": {
+      "post": {
+        "summary": "Lock exam class permanently (principal, admin)",
+        "tags": [
+          "Lifecycle"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "in": "path",
+            "name": "id",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response"
+          }
+        }
+      }
+    },
+    "/api/corrections": {
+      "post": {
+        "summary": "Submit a correction request for an existing mark",
+        "tags": [
+          "Corrections"
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response"
+          }
+        }
+      }
+    },
+    "/api/corrections/{id}/approve": {
+      "post": {
+        "summary": "Approve a correction request (publishes revision N+1)",
+        "tags": [
+          "Corrections"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "in": "path",
+            "name": "id",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response"
+          }
+        }
+      }
+    },
+    "/api/results/class-sheet": {
+      "get": {
+        "summary": "Get class result sheet with ranks",
+        "tags": [
+          "Results & Analytics"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "number"
+            },
+            "in": "query",
+            "name": "examClassId",
+            "required": true
+          },
+          {
+            "schema": {
+              "type": "number"
+            },
+            "in": "query",
+            "name": "sectionId",
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response"
+          }
+        }
+      }
+    },
+    "/api/results/subject-stats": {
+      "get": {
+        "summary": "Get subject statistics from materialized view",
+        "tags": [
+          "Results & Analytics"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "number"
+            },
+            "in": "query",
+            "name": "examClassId",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response"
+          }
+        }
+      }
+    },
+    "/api/results/annual/compute": {
+      "post": {
+        "summary": "Compute cumulative annual results from configured weights",
+        "tags": [
+          "Results & Analytics"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "number"
+            },
+            "in": "query",
+            "name": "configId",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response"
+          }
+        }
+      }
+    },
+    "/api/report-cards": {
+      "get": {
+        "summary": "Get latest report card snapshot for a student",
+        "tags": [
+          "Report Cards"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "in": "query",
+            "name": "admissionNo",
+            "required": true
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "in": "query",
+            "name": "yearLabel",
+            "required": false
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "in": "query",
+            "name": "examName",
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response"
+          }
+        }
+      }
+    },
+    "/api/report-cards/transcript": {
+      "get": {
+        "summary": "Get multi-year academic transcript from snapshots",
+        "tags": [
+          "Report Cards"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "in": "query",
+            "name": "admissionNo",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response"
+          }
+        }
+      }
+    },
+    "/api/report-cards/{snapshotId}/verify": {
+      "get": {
+        "summary": "Verify report card snapshot authenticity and integrity against SHA-256 hash",
+        "tags": [
+          "Report Cards"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "in": "path",
+            "name": "snapshotId",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response"
+          }
+        }
+      }
+    },
+    "/api/import/marks": {
+      "post": {
+        "summary": "Bulk import marks from CSV, XLSX, or JSON with temporary staging validation",
+        "tags": [
+          "Bulk Import"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "number"
+            },
+            "in": "query",
+            "name": "componentId",
+            "required": true
+          },
+          {
+            "schema": {
+              "type": "number"
+            },
+            "in": "query",
+            "name": "sectionId",
+            "required": true
+          },
+          {
+            "schema": {
+              "type": "boolean",
+              "default": false
+            },
+            "in": "query",
+            "name": "partial",
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response"
+          }
+        }
+      }
+    },
+    "/api/audit/marks": {
+      "get": {
+        "summary": "Get immutable audit change log for marks (Admin & Principal only)",
+        "tags": [
+          "Audit History"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "in": "query",
+            "name": "admissionNo",
+            "required": false
+          },
+          {
+            "schema": {
+              "type": "number"
+            },
+            "in": "query",
+            "name": "markId",
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response"
+          }
+        }
+      }
+    }
+  },
+  "servers": [
+    {
+      "url": "http://localhost:3000",
+      "description": "Local Development Server"
+    }
+  ],
+  "security": [
+    {
+      "bearerAuth": []
+    }
+  ]
+}

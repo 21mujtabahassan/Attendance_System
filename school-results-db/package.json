@@ -1,0 +1,41 @@
+{
+  "name": "school-results-backend",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Examination & Results Backend Service for School Management System",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "tsx watch src/index.ts",
+    "migrate": "tsx src/db/migrate.ts",
+    "seed": "tsx src/db/seed.ts",
+    "test:smoke": "vitest run tests/smoke.test.ts",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:e2e": "vitest run tests/e2e.test.ts",
+    "export:openapi": "tsx src/scripts/exportOpenapi.ts"
+  },
+  "dependencies": {
+    "@fastify/cors": "^10.0.2",
+    "@fastify/jwt": "^9.0.4",
+    "@fastify/multipart": "^9.0.3",
+    "@fastify/swagger": "^9.4.2",
+    "@fastify/swagger-ui": "^5.2.2",
+    "csv-parse": "^5.6.0",
+    "dotenv": "^16.4.7",
+    "fastify": "^5.2.1",
+    "fastify-type-provider-zod": "^4.0.2",
+    "pg": "^8.13.3",
+    "xlsx": "^0.18.5",
+    "zod": "^3.24.2"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.9",
+    "@types/pg": "^8.11.11",
+    "embedded-postgres": "^16.14.0-beta.17",
+    "tsx": "^4.19.3",
+    "typescript": "^5.8.2",
+    "vitest": "^3.0.7"
+  }
+}
