@@ -134,7 +134,7 @@ CREATE TABLE IF NOT EXISTS attendance_sessions (
   attendance_date   DATE NOT NULL,
   status            VARCHAR(20) NOT NULL DEFAULT 'finalized', -- 'draft', 'finalized'
   is_locked         BOOLEAN NOT NULL DEFAULT true,
-  locked_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
+  locked_at         TIMESTAMPTZ DEFAULT now(),
   locked_by         VARCHAR(100),
   unlocked_at       TIMESTAMPTZ,
   unlocked_by       VARCHAR(100),

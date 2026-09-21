@@ -68,6 +68,11 @@ async function syncDatabases() {
         // Explicitly query public schema to ensure pooler/search_path compatibility
         const rows = await neonDb(`public.${table}`).select('*');
         if (rows && rows.length > 0) {
+          if (table === 'attendance_sessions') {
+            for (const r of rows) {
+              if (!r.locked_at) r.locked_at = r.created_at || new Date();
+            }
+          }
           for (const chunk of chunkArray(rows, 100)) {
             await localDb(`public.${table}`).insert(chunk).onConflict().ignore();
           }
