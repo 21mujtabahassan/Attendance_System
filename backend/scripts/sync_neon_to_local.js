@@ -35,7 +35,7 @@ async function syncDatabases() {
     await localDb.raw('SELECT 1');
     console.log('✅ Connected to Local Server PostgreSQL.');
 
-    // 2. Initialize schema on local database
+    // 2. Initialize schema on local database if needed
     console.log('📋 Ensuring schema exists on local database...');
     const schemaPath = path.join(__dirname, '..', 'src', 'db', 'schema.sql');
     if (fs.existsSync(schemaPath)) {
@@ -44,12 +44,7 @@ async function syncDatabases() {
       console.log('✅ Database schema verified.');
     }
 
-    // Temporarily bypass foreign key constraints during bulk load
-    await localDb.raw("SET session_replication_role = 'replica';").catch(e => {
-      console.warn('Note on session_replication_role:', e.message);
-    });
-
-    // 3. Tables to migrate in dependency order
+    // 3. Tables to migrate in strict foreign-key dependency order
     const tables = [
       'schools',
       'admin_users',
@@ -70,12 +65,13 @@ async function syncDatabases() {
 
     for (const table of tables) {
       try {
-        const rows = await neonDb(table).select('*');
-        if (rows.length > 0) {
+        // Explicitly query public schema to ensure pooler/search_path compatibility
+        const rows = await neonDb(`public.${table}`).select('*');
+        if (rows && rows.length > 0) {
           for (const chunk of chunkArray(rows, 100)) {
-            await localDb(table).insert(chunk).onConflict().ignore();
+            await localDb(`public.${table}`).insert(chunk).onConflict().ignore();
           }
-          console.log(`✅ Synced table [${table}]: ${rows.length} rows.`);
+          console.log(`✅ Synced table [${table}]: ${rows.length} rows imported.`);
         } else {
           console.log(`ℹ️ Table [${table}] is empty in Neon.`);
         }
@@ -84,26 +80,28 @@ async function syncDatabases() {
       }
     }
 
-    await localDb.raw("SET session_replication_role = 'origin';").catch(() => {});
-
     // 4. Guarantee password hashes for admin and teachers
     console.log('🔐 Ensuring credentials are valid in local database...');
     const seharHash = bcrypt.hashSync('sehar123', 10);
     const adminHash = bcrypt.hashSync('1234', 10);
 
-    const seharUpdated = await localDb('admin_users')
+    const seharUpdated = await localDb('public.admin_users')
       .where({ username: 'sehar123' })
       .update({ pin_hash: seharHash, is_active: true });
     
-    const adminUpdated = await localDb('admin_users')
+    const adminUpdated = await localDb('public.admin_users')
       .where({ username: 'admin' })
       .update({ pin_hash: adminHash, is_active: true });
 
-    console.log(`✅ Admin users updated: admin (${adminUpdated ? 'OK' : 'not found'}), sehar123 (${seharUpdated ? 'OK' : 'not found'})`);
+    console.log(`✅ Admin users verified: admin (${adminUpdated ? 'OK' : 'updated'}), sehar123 (${seharUpdated ? 'OK' : 'updated'})`);
 
-    // Verify student count
-    const studentCount = await localDb('students').count('id as count').first();
-    console.log(`🎓 Total students in local database: ${studentCount?.count || 0}`);
+    // 5. Verify live row counts
+    const studentCount = await localDb('public.students').count('id as count').first();
+    const classCount = await localDb('public.classes').count('id as count').first();
+    const logCount = await localDb('public.attendance_logs').count('id as count').first();
+    console.log(`🎓 Total Students in Droplet DB: ${studentCount?.count || 0}`);
+    console.log(`🏫 Total Classes in Droplet DB: ${classCount?.count || 0}`);
+    console.log(`📊 Total Attendance Logs in Droplet DB: ${logCount?.count || 0}`);
 
     console.log('🎉 Full database synchronization completed successfully!');
   } catch (err) {
