@@ -252,6 +252,34 @@ async function runAllIntegrityLocks() {
       } else {
         console.log('   ✅ PASS: Synchronous message store flush on shutdown verified.');
       }
+
+      // 12. Check WebSocket Retry Preprocessor (CB:receipt hook)
+      if (!waContent.includes('installReceiptRetryHandler') || !waContent.includes("prependListener('CB:receipt'")) {
+        failures.push('Lock 3 FAIL: WebSocket receipt retry preprocessor missing from whatsapp.js.');
+      } else {
+        console.log('   ✅ PASS: WebSocket CB:receipt preprocessor and prependListener verified.');
+      }
+
+      // 13. Check Peer Retry Recipient Injection (fixes jidDecode crash on sender phone)
+      if (!waContent.includes('Multi-Device Peer Retry Lock') || !waContent.includes('attrs.recipient = storedMeta.remoteJid')) {
+        failures.push('Lock 3 FAIL: Peer retry recipient injection missing from whatsapp.js.');
+      } else {
+        console.log('   ✅ PASS: Peer retry recipient injection (fixing jidDecode undefined crash) verified.');
+      }
+
+      // 14. Check Parent Retry Recipient Neutralization (fixes fromMe false evaluation)
+      if (!waContent.includes('Recipient Retry Lock') || !waContent.includes('delete attrs.recipient')) {
+        failures.push('Lock 3 FAIL: Parent retry recipient neutralization missing from whatsapp.js.');
+      } else {
+        console.log('   ✅ PASS: Parent retry recipient neutralization (fixing fromMe false evaluation) verified.');
+      }
+
+      // 15. Check Process Exit Flush Hooks (SIGINT, SIGTERM, exit)
+      if (!waContent.includes("process.on('SIGINT'") || !waContent.includes("process.on('SIGTERM'")) {
+        failures.push('Lock 3 FAIL: SIGINT and SIGTERM store flush hooks missing from whatsapp.js.');
+      } else {
+        console.log('   ✅ PASS: Process exit flush hooks (SIGINT, SIGTERM, exit) verified.');
+      }
     }
   } catch (waErr) {
     failures.push(`Lock 3 FAIL: WhatsApp audit error: ${waErr.message}`);

@@ -1,5 +1,5 @@
 
-let makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion, Browsers, makeCacheableSignalKeyStore, proto;
+let makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion, Browsers, makeCacheableSignalKeyStore, proto, areJidsSameUser;
 if (!process.env.VERCEL) {
   try {
     const baileys = require('@whiskeysockets/baileys');
@@ -10,6 +10,7 @@ if (!process.env.VERCEL) {
     Browsers = baileys.Browsers;
     makeCacheableSignalKeyStore = baileys.makeCacheableSignalKeyStore;
     proto = baileys.proto;
+    areJidsSameUser = baileys.areJidsSameUser;
   } catch (err) {
     console.log('Baileys module skipped on serverless node.');
   }
@@ -97,8 +98,16 @@ function rehydrateBuffers(obj) {
 // MESSAGE STORE & RETRY CACHE (Fixes "Waiting for this message. This may take a while.")
 // -------------------------------------------------------------
 const sentMessagesStore = new Map(); // schoolId -> Map(msgId -> WAMessageContent)
+const sentMessagesMeta = new Map();  // schoolId -> Map(msgId -> { remoteJid, participant, timestamp })
 const retryCounterCaches = new Map(); // schoolId -> Map(key -> retryCount)
 const storePersistTimers = new Map();
+
+function defaultAreJidsSameUser(j1, j2) {
+  if (!j1 || !j2) return false;
+  const u1 = String(j1).split('@')[0].split(':')[0];
+  const u2 = String(j2).split('@')[0].split(':')[0];
+  return u1 === u2;
+}
 
 function getRetryCounterCache(schoolId = 'unique_scholars') {
   if (!retryCounterCaches.has(schoolId)) {
@@ -107,9 +116,17 @@ function getRetryCounterCache(schoolId = 'unique_scholars') {
   return retryCounterCaches.get(schoolId);
 }
 
+function getMetaStore(schoolId = 'unique_scholars') {
+  if (!sentMessagesMeta.has(schoolId)) {
+    sentMessagesMeta.set(schoolId, new Map());
+  }
+  return sentMessagesMeta.get(schoolId);
+}
+
 function getSentStore(schoolId = 'unique_scholars') {
   if (!sentMessagesStore.has(schoolId)) {
     const store = new Map();
+    const metaStore = getMetaStore(schoolId);
     try {
       const storeFile = path.join(getSchoolSessionDir(schoolId), 'message_store.json');
       if (fs.existsSync(storeFile)) {
@@ -129,6 +146,19 @@ function getSentStore(schoolId = 'unique_scholars') {
                 const cleanPart = String(item.participant).replace(/@.*$/, '');
                 store.set(`${cleanPart}:${item.id}`, rehydrated);
               }
+              if (item.remoteJid || item.participant) {
+                const meta = {
+                  remoteJid: item.remoteJid || null,
+                  participant: item.participant || null,
+                  timestamp: item.timestamp || Date.now()
+                };
+                metaStore.set(item.id, meta);
+                if (item.remoteJid) {
+                  metaStore.set(`${item.remoteJid}:${item.id}`, meta);
+                  const cleanJid = String(item.remoteJid).replace(/@.*$/, '');
+                  metaStore.set(`${cleanJid}:${item.id}`, meta);
+                }
+              }
             }
           }
         }
@@ -147,38 +177,67 @@ function flushSentStoreToDisk(schoolId = 'unique_scholars') {
   try {
     const store = sentMessagesStore.get(schoolId);
     if (!store) return;
+    const metaStore = getMetaStore(schoolId);
     const storeFile = path.join(getSchoolSessionDir(schoolId), 'message_store.json');
     const list = [];
     for (const [mid, mcontent] of store.entries()) {
       // Only save bare message IDs to file to keep disk storage efficient
       if (!mid.includes(':')) {
-        list.push({ id: mid, msg: mcontent });
+        const meta = metaStore.get(mid) || {};
+        list.push({
+          id: mid,
+          msg: mcontent,
+          remoteJid: meta.remoteJid || null,
+          participant: meta.participant || null,
+          timestamp: meta.timestamp || Date.now()
+        });
       }
     }
-    fs.writeFileSync(storeFile, JSON.stringify(list.slice(-2000)), 'utf8');
+    fs.writeFileSync(storeFile, JSON.stringify(list.slice(-3000)), 'utf8');
   } catch (e) { }
 }
 
-// Flush stores synchronously when server shuts down so no messages are lost
-process.on('beforeExit', () => {
+function flushAllStores() {
   for (const schoolId of sentMessagesStore.keys()) {
     flushSentStoreToDisk(schoolId);
   }
+}
+
+// Flush stores synchronously when server shuts down so no messages are lost across restarts
+process.on('beforeExit', flushAllStores);
+process.on('exit', flushAllStores);
+process.on('SIGINT', () => {
+  flushAllStores();
+  process.exit(0);
+});
+process.on('SIGTERM', () => {
+  flushAllStores();
+  process.exit(0);
 });
 
 function saveSentMessage(schoolId = 'unique_scholars', id, msgContent, remoteJid = null, participant = null) {
   if (!id || !msgContent) return;
   const store = getSentStore(schoolId);
+  const metaStore = getMetaStore(schoolId);
   const pureMsg = msgContent.message || msgContent;
 
   // 1. Primary index by message ID
   store.set(id, pureMsg);
+
+  const metaObj = {
+    remoteJid: remoteJid || null,
+    participant: participant || null,
+    timestamp: Date.now()
+  };
+  metaStore.set(id, metaObj);
 
   // 2. Secondary index by remoteJid:id
   if (remoteJid) {
     store.set(`${remoteJid}:${id}`, pureMsg);
     const cleanJid = String(remoteJid).replace(/@.*$/, '');
     store.set(`${cleanJid}:${id}`, pureMsg);
+    metaStore.set(`${remoteJid}:${id}`, metaObj);
+    metaStore.set(`${cleanJid}:${id}`, metaObj);
   }
 
   // 3. Tertiary index by participant:id
@@ -189,17 +248,28 @@ function saveSentMessage(schoolId = 'unique_scholars', id, msgContent, remoteJid
   }
 
   // Cap in-memory store to prevent memory leaks
-  if (store.size > 5000) {
+  if (store.size > 6000) {
     const oldestKey = store.keys().next().value;
     store.delete(oldestKey);
+    if (metaStore.has(oldestKey)) metaStore.delete(oldestKey);
   }
 
-  // Debounced persistence to disk
+  // Debounced persistence to disk for batch events
   if (!storePersistTimers.has(schoolId)) {
     storePersistTimers.set(schoolId, setTimeout(() => {
       flushSentStoreToDisk(schoolId);
-    }, 2000));
+    }, 1000));
   }
+}
+
+function getStoredMetadata(schoolId = 'unique_scholars', id) {
+  if (!id) return null;
+  getSentStore(schoolId); // Ensure stores are loaded
+  const metaStore = getMetaStore(schoolId);
+  if (metaStore.has(id)) return metaStore.get(id);
+  const cleanId = String(id).replace(/^.*:/, '');
+  if (metaStore.has(cleanId)) return metaStore.get(cleanId);
+  return null;
 }
 
 async function getStoredMessage(schoolId = 'unique_scholars', key) {
@@ -240,6 +310,66 @@ async function getStoredMessage(schoolId = 'unique_scholars', key) {
   } catch (_) { }
 
   return msgContent;
+}
+
+function installReceiptRetryHandler(schoolId, sock) {
+  if (!sock || !sock.ws || typeof sock.ws.prependListener !== 'function') return;
+
+  sock.ws.prependListener('CB:receipt', (node) => {
+    try {
+      if (!node || !node.attrs || node.attrs.type !== 'retry') return;
+
+      const attrs = node.attrs;
+      const ids = [attrs.id];
+      if (Array.isArray(node.content)) {
+        for (const child of node.content) {
+          if (child && child.tag === 'item' && child.attrs && child.attrs.id) {
+            ids.push(child.attrs.id);
+          }
+        }
+      }
+
+      let storedMeta = null;
+      for (const msgId of ids) {
+        if (msgId) {
+          storedMeta = getStoredMetadata(schoolId, msgId);
+          if (storedMeta) break;
+        }
+      }
+
+      if (!storedMeta) return;
+
+      const sameUserFn = areJidsSameUser || defaultAreJidsSameUser;
+      const myId = sock.authState?.creds?.me?.id;
+      const myLid = sock.authState?.creds?.me?.lid;
+      const receiptFrom = attrs.participant || attrs.from;
+
+      const isFromMe = (myId && sameUserFn(receiptFrom, myId)) ||
+                       (myLid && sameUserFn(receiptFrom, myLid)) ||
+                       (attrs.from && myLid && sameUserFn(attrs.from, myLid)) ||
+                       (attrs.from && myId && sameUserFn(attrs.from, myId));
+
+      if (isFromMe) {
+        // PEER RETRY: The sender's primary phone or companion device is requesting a retry.
+        // WhatsApp peer retry receipts omit the 'recipient' attribute.
+        // Baileys requires 'recipient' so remoteJid doesn't become undefined and crash relayMessage().
+        if (!attrs.recipient && storedMeta.remoteJid) {
+          console.log(`🛡️ [${schoolId}] Multi-Device Peer Retry Lock: Injected missing recipient ${storedMeta.remoteJid} for msg ${attrs.id} (resolving phone sync)`);
+          attrs.recipient = storedMeta.remoteJid;
+        }
+      } else {
+        // RECIPIENT RETRY: The parent's phone is asking for a retry.
+        // WhatsApp puts recipient="our_bot_jid". Baileys evaluates fromMe = false if recipient is present.
+        // Removing attrs.recipient allows Baileys to calculate fromMe = true and trigger sendMessagesAgain!
+        if (attrs.recipient) {
+          console.log(`🛡️ [${schoolId}] Recipient Retry Lock: Neutralized recipient attribute for msg ${attrs.id} to trigger Baileys resend`);
+          delete attrs.recipient;
+        }
+      }
+    } catch (err) {
+      console.warn(`[${schoolId}] Warning in receipt retry handler:`, err.message);
+    }
+  });
 }
 
 function getSessionState(schoolId = 'unique_scholars') {
@@ -440,6 +570,9 @@ async function initWhatsApp(schoolId = 'unique_scholars', io = null, forceClean 
           return undefined;
         }
       });
+
+      // Install crash-proof retry preprocessor on the raw WebSocket
+      installReceiptRetryHandler(schoolId, sess.sock);
 
       sess.sock.ev.on('creds.update', saveCreds);
 
@@ -800,6 +933,7 @@ async function sendWhatsAppMessage(phone, message, schoolId = 'unique_scholars',
 
       if (result && result.key && result.key.id && result.message) {
         saveSentMessage(schoolId, result.key.id, result.message, targetJid, result.key.participant);
+        flushSentStoreToDisk(schoolId);
       }
 
       // 4. Clear typing presence ("paused")
@@ -1072,5 +1206,8 @@ module.exports = {
   formatPhoneToJid,
   initAllSessions,
   getLocalIpAddresses,
-  syncSessionToDb
+  syncSessionToDb,
+  getStoredMetadata,
+  flushSentStoreToDisk,
+  installReceiptRetryHandler
 };

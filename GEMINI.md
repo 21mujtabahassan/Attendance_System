@@ -28,14 +28,17 @@
 - **Retry Handler (`getMessage`)**: In `backend/src/services/whatsapp.js`, `makeWASocket` must ALWAYS configure `getMessage: async (key) => ...`. It must NEVER be omitted or return `undefined` for known messages.
 - **Protobuf Reconstitution**: `getStoredMessage` must reconstruct objects using `proto.Message.fromObject(...)` so Baileys' internal retry engine (`sendMessagesAgain`) can encode and relay the message to primary phones and recipients.
 - **Buffer Rehydration**: When messages are read back from disk storage (`message_store.json`), `rehydrateBuffers()` MUST convert `{ type: 'Buffer', data: [...] }` back into native Node.js `Buffer` instances so binary hashes, media keys, and document attachments are not nullified.
-- **Multi-Key Indexing**: Outgoing and incoming messages MUST be indexed by both bare message ID (`id`) and compound JID (`${remoteJid}:${id}` / `${participant}:${id}`) to ensure multi-device sync receipts find their corresponding messages.
+- **Multi-Key Indexing & Metadata**: Outgoing and incoming messages MUST be indexed by both bare message ID (`id`) and compound JID (`${remoteJid}:${id}` / `${participant}:${id}`). Metadata (`remoteJid`, `participant`, `timestamp`) must be tracked in `sentMessagesMeta` and persisted to disk in `message_store.json`.
+- **WebSocket Receipt Preprocessor (`installReceiptRetryHandler`)**: `sock.ws.prependListener('CB:receipt')` MUST intercept incoming retry receipts:
+  - **Peer Retry**: If the retry originates from the user's primary phone/account (`isFromMe = true`) and lacks `attrs.recipient`, it injects `node.attrs.recipient = storedMeta.remoteJid`, preventing Baileys from evaluating `remoteJid = undefined` and crashing with `TypeError: Cannot destructure property 'user' of 'jidDecode(...)' as it is undefined`.
+  - **Parent Retry**: If the retry originates from a recipient parent (`!isFromMe`), it removes `node.attrs.recipient` so Baileys does not evaluate `fromMe = false` and skips resending.
+- **Immediate & Graceful Shutdown Flush**: `flushSentStoreToDisk` must execute immediately upon `sendWhatsAppMessage` completion, as well as on process `beforeExit`, `exit`, `SIGINT`, and `SIGTERM` so recent messages are never lost during server or IDE restarts.
 - **Socket Teardown Before Init**: `initWhatsApp` must explicitly remove all listeners (`sess.sock.ev.removeAllListeners()`) and terminate existing sockets (`sess.sock.end(undefined)`) before re-initializing to prevent duplicate sockets competing for session files (HTTP 440 conflict).
 - **Process Crash Protection Shield**: `setupProcessCrashGuards()` MUST be installed on process startup. Non-fatal Baileys, WebSocket, EPIPE, ECONNRESET, and Signal decryption errors must be caught and neutralized so they NEVER crash the Node.js server.
 - **Proactive Heartbeat & Zombie Detection**: `startHeartbeat` runs a 45s liveness probe checking WebSocket `readyState`. Stale connections are proactively cycled without session loss.
 - **Transient Send Recovery**: `sendWhatsAppMessage` must catch transient socket closed/stream reset errors and attempt a 1-shot retry after a 1.5s stabilization delay.
 - **Queue Pacing**: Bulk telecasting (results, broadcasts, fee reminders) must always be queued via `addPendingDispatches` and processed with anti-spam human pacing (2.8s – 5.6s per recipient with natural breathing intervals) to prevent Signal pre-key desynchronization.
-- **Shutdown Flush**: `flushSentStoreToDisk` must run on process `beforeExit` to guarantee all sent messages are written to disk.
-- **Verification**: Always run `npm test` before deploying to audit Baileys socket configuration and retry integrity.
+- **Verification**: Always run `npm test` and `node scripts/verify_system_integrity_locks.js` before deploying to audit Baileys socket configuration and retry integrity.
 
 ### 4. Fee Management Authentication & Dynamic RBAC Integrity
 - **Auth Headers Required**: All fee management requests in `backend/public/app.js` MUST include `headers: getAuthHeaders()`. Omitting this triggers 401 Unauthorized errors.

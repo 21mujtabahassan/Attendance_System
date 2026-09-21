@@ -489,65 +489,6 @@
   ],
   "classSubjects": [
     {
-      "id": "SUB-Class-10-TERM-MID-2026",
-      "schoolId": "unique_scholars",
-      "classId": "Class-10",
-      "termId": "TERM-MID-2026",
-      "subjects": [
-        "Mathematics",
-        "English Literature",
-        "Urdu",
-        "Physics",
-        "Chemistry",
-        "Biology"
-      ]
-    },
-    {
-      "id": "SUB-Class-9-TERM-MID-2026-Mathematics",
-      "schoolId": "unique_scholars",
-      "classId": "Class-9",
-      "termId": "TERM-MID-2026",
-      "name": "Mathematics",
-      "totalMarks": 100,
-      "displayOrder": 1
-    },
-    {
-      "id": "SUB-Class-9-TERM-MID-2026-Physics",
-      "schoolId": "unique_scholars",
-      "classId": "Class-9",
-      "termId": "TERM-MID-2026",
-      "name": "Physics",
-      "totalMarks": 100,
-      "displayOrder": 2
-    },
-    {
-      "id": "SUB-Class-9-TERM-MID-2026-Chemistry",
-      "schoolId": "unique_scholars",
-      "classId": "Class-9",
-      "termId": "TERM-MID-2026",
-      "name": "Chemistry",
-      "totalMarks": 100,
-      "displayOrder": 3
-    },
-    {
-      "id": "SUB-Class-9-TERM-MID-2026-English",
-      "schoolId": "unique_scholars",
-      "classId": "Class-9",
-      "termId": "TERM-MID-2026",
-      "name": "English",
-      "totalMarks": 100,
-      "displayOrder": 4
-    },
-    {
-      "id": "SUB-Class-9-TERM-MID-2026-Computer%20Science",
-      "schoolId": "unique_scholars",
-      "classId": "Class-9",
-      "termId": "TERM-MID-2026",
-      "name": "Computer Science",
-      "totalMarks": 100,
-      "displayOrder": 5
-    },
-    {
       "id": "SUB-Class-Play-TERM-MID-2026-English%20Rhymes",
       "schoolId": "unique_scholars",
       "classId": "Class-Play",
@@ -591,6 +532,87 @@
       "name": "Art & Craft",
       "totalMarks": 100,
       "displayOrder": 5
+    },
+    {
+      "id": "SUB-Class-10-TERM-MID-2026-Mathematics",
+      "schoolId": "unique_scholars",
+      "classId": "Class-10",
+      "termId": "TERM-MID-2026",
+      "name": "Mathematics",
+      "totalMarks": 100,
+      "displayOrder": 1
+    },
+    {
+      "id": "SUB-Class-10-TERM-MID-2026-Physics",
+      "schoolId": "unique_scholars",
+      "classId": "Class-10",
+      "termId": "TERM-MID-2026",
+      "name": "Physics",
+      "totalMarks": 75,
+      "displayOrder": 2
+    },
+    {
+      "id": "SUB-Class-10-TERM-MID-2026-Chemistry",
+      "schoolId": "unique_scholars",
+      "classId": "Class-10",
+      "termId": "TERM-MID-2026",
+      "name": "Chemistry",
+      "totalMarks": 75,
+      "displayOrder": 3
+    },
+    {
+      "id": "SUB-Class-10-TERM-MID-2026-Urdu",
+      "schoolId": "unique_scholars",
+      "classId": "Class-10",
+      "termId": "TERM-MID-2026",
+      "name": "Urdu",
+      "totalMarks": 75,
+      "displayOrder": 4
+    },
+    {
+      "id": "SUB-Class-10-TERM-MID-2026-Islamiat",
+      "schoolId": "unique_scholars",
+      "classId": "Class-10",
+      "termId": "TERM-MID-2026",
+      "name": "Islamiat",
+      "totalMarks": 50,
+      "displayOrder": 5
+    },
+    {
+      "id": "SUB-Class-9-TERM-MID-2026-Mathematics",
+      "schoolId": "unique_scholars",
+      "classId": "Class-9",
+      "termId": "TERM-MID-2026",
+      "name": "Mathematics",
+      "totalMarks": 100,
+      "displayOrder": 1
+    },
+    {
+      "id": "SUB-Class-9-TERM-MID-2026-Biology",
+      "schoolId": "unique_scholars",
+      "classId": "Class-9",
+      "termId": "TERM-MID-2026",
+      "name": "Biology",
+      "totalMarks": 75,
+      "displayOrder": 2
+    },
+    {
+      "id": "SUB-Class-9-TERM-MID-2026-English",
+      "schoolId": "unique_scholars",
+      "classId": "Class-9",
+      "termId": "TERM-MID-2026",
+      "name": "English",
+      "totalMarks": 100,
+      "displayOrder": 3
+    },
+    {
+      "id": "SUB-Class-9-TERM-MID-2026-Pakistan%20Studies",
+      "schoolId": "unique_scholars",
+      "classId": "Class-9",
+      "termId": "TERM-MID-2026",
+      "name": "Pakistan Studies",
+      "totalMarks": 50,
+      "displayOrder": 4
     }
   ],
   "studentResults": [

@@ -58,7 +58,7 @@
             <label class="form-label">Teacher ID / Phone Number</label>
             <div class="input-container">
               <i class="fa-solid fa-id-badge input-icon"></i>
-              <input type="text" id="teacherLoginId" class="form-input" placeholder="e.g. 03001234567 or T-01" required autocomplete="username">
+              <input type="text" id="teacherLoginId" class="form-input" placeholder="e.g. sehar123 or phone number" required autocomplete="username">
             </div>
           </div>
 
@@ -95,7 +95,7 @@
         <div class="header-brand">
           <div class="header-avatar" id="headerAvatar">T</div>
           <div class="header-info">
-            <span class="header-greeting" id="headerGreeting">Hello, Teacher</span>
+            <span class="header-greeting" id="headerGreeting">Loading...</span>
             <span class="header-subtext" id="headerDate">Today</span>
           </div>
         </div>
@@ -225,10 +225,13 @@
               <option value="">-- Select Term --</option>
             </select>
           </div>
-          <div class="selector-row">
-            <select id="resultsSubjectSelect" class="custom-select" onchange="loadResultsRoster()">
+          <div class="selector-row" style="display: flex; gap: 8px; align-items: center;">
+            <select id="resultsSubjectSelect" class="custom-select" style="flex: 1;" onchange="loadResultsRoster()">
               <option value="">-- Select Subject --</option>
             </select>
+            <button type="button" class="btn-secondary" onclick="openTeacherSubjectMarksModal()" title="Configure Subject Marks" style="padding: 10px 14px; font-size: 13px; font-weight: 600; white-space: nowrap; border-radius: var(--radius-sm); display: inline-flex; align-items: center; gap: 6px; cursor: pointer;">
+              <i class="fa-solid fa-sliders"></i> Set Marks
+            </button>
           </div>
         </div>
 
@@ -275,8 +278,8 @@
       <main class="view-screen" id="viewProfile">
         <div class="profile-card">
           <div class="profile-avatar-large" id="profileAvatarLarge">T</div>
-          <div class="profile-name" id="profileName">Teacher Name</div>
-          <div class="profile-role-tag" id="profileRole">Classroom Teacher</div>
+          <div class="profile-name" id="profileName">Loading profile...</div>
+          <div class="profile-role-tag" id="profileRole">Teacher</div>
           <div style="font-size: 12px; color: var(--text-muted); margin-top: 4px;" id="profilePhone">-</div>
         </div>
 
@@ -480,6 +483,42 @@
         To reset your teacher account password, please contact the Unique Scholars Academy administration office or principal.
       </p>
       <button type="button" class="btn-primary" onclick="closeModal('forgotModal')">Got It</button>
+    </div>
+  </div>
+
+  <!-- Subject Marks Configuration Modal (Teacher Portal) -->
+  <div class="modal-backdrop" id="teacherSubjectMarksModal" onclick="closeModalOnBackdrop(event, 'teacherSubjectMarksModal')">
+    <div class="modal-bottom-sheet" style="max-height: 85vh; display: flex; flex-direction: column;">
+      <div class="sheet-handle"></div>
+      <div class="sheet-header">
+        <h3 class="sheet-title"><i class="fa-solid fa-sliders"></i> Configure Subjects & Marks</h3>
+        <button type="button" class="sheet-close-btn" onclick="closeModal('teacherSubjectMarksModal')">
+          <i class="fa-solid fa-xmark"></i>
+        </button>
+      </div>
+      <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 12px;" id="teacherSubjectMarksSubtitle">
+        Set maximum marks for each subject in this class
+      </p>
+
+      <div id="teacherSubjectRowsContainer" style="display: flex; flex-direction: column; gap: 8px; overflow-y: auto; max-height: 280px; padding-right: 4px; margin-bottom: 12px;">
+        <!-- Dynamically rendered rows -->
+      </div>
+
+      <button type="button" class="btn-secondary" onclick="addTeacherSubjectRow()" style="margin-bottom: 12px; font-size: 12px; padding: 8px 12px;">
+        <i class="fa-solid fa-plus"></i> Add Another Subject
+      </button>
+
+      <div style="display: flex; justify-content: space-between; align-items: center; background: var(--bg-subtle); padding: 10px 14px; border-radius: var(--radius-sm); border: 1px solid var(--border-color); margin-bottom: 16px;">
+        <span style="font-size: 13px; color: var(--text-muted);">Subjects: <strong id="teacherSubjCount" style="color: var(--text-main);">0</strong></span>
+        <span style="font-size: 14px; font-weight: 800; color: var(--color-primary);">Grand Total: <span id="teacherTotalMaxMarksSum">0</span></span>
+      </div>
+
+      <div style="display: grid; grid-template-columns: 1fr 1.3fr; gap: 10px;">
+        <button type="button" class="btn-secondary" onclick="closeModal('teacherSubjectMarksModal')">Cancel</button>
+        <button type="button" class="btn-primary" id="btnSaveTeacherSubjectMarks" onclick="saveTeacherSubjectMarks()" style="margin-top: 0;">
+          <i class="fa-solid fa-save"></i> Save & Apply
+        </button>
+      </div>
     </div>
   </div>
 

@@ -1442,3 +1442,37 @@ body {
   border: 1px solid var(--status-late-border);
 }
 
+/* RESULTS MARKS INPUT STYLING */
+.marks-input {
+  width: 70px;
+  padding: 8px 10px;
+  text-align: center;
+  font-weight: 700;
+  font-size: 15px;
+  border-radius: var(--radius-sm);
+  border: 1.5px solid var(--border-color);
+  background: var(--bg-surface);
+  color: var(--text-main);
+  transition: all 0.15s ease-in-out;
+}
+
+.marks-input:focus {
+  border-color: var(--color-primary) !important;
+  box-shadow: 0 0 0 3px rgba(2, 132, 199, 0.25) !important;
+  outline: none;
+}
+
+.marks-input.input-exceeded-flash {
+  border-color: var(--status-absent) !important;
+  background: rgba(239, 68, 68, 0.15) !important;
+  box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.35) !important;
+  animation: teacherInputShake 0.35s ease-in-out;
+}
+
+@keyframes teacherInputShake {
+  0%, 100% { transform: translateX(0); }
+  20%, 60% { transform: translateX(-4px); }
+  40%, 80% { transform: translateX(4px); }
+}
+
+

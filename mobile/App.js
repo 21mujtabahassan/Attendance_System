@@ -276,7 +276,7 @@ export default function App() {
 
   const toggleStatus = (studentId) => {
     if (isAttendanceLocked) {
-      Alert.alert('Session Locked 🔒', 'Attendance for today has already been finalized and locked. Modifications are disabled.');
+      Alert.alert('Attendance Locked 🔒', 'Attendance marked successfully and is locked.');
       return;
     }
     setAttendance(prev => {
@@ -304,7 +304,7 @@ export default function App() {
 
   const handleSaveDraft = async () => {
     if (isAttendanceLocked) {
-      Alert.alert('Session Locked 🔒', 'Attendance for today is already finalized and cannot be modified.');
+      Alert.alert('Attendance Locked 🔒', 'Attendance marked successfully and is locked.');
       return;
     }
     if (!selectedClass || students.length === 0) return;
@@ -335,6 +335,8 @@ export default function App() {
     } else {
       if (res.isLocked) {
         setIsAttendanceLocked(true);
+        Alert.alert('Attendance Locked 🔒', 'Attendance marked successfully and is locked.');
+        return;
       }
       Alert.alert('Error', res.error || 'Failed to save draft.');
     }
@@ -342,7 +344,7 @@ export default function App() {
 
   const handleSubmitFinal = async () => {
     if (isAttendanceLocked) {
-      Alert.alert('Session Locked 🔒', 'Attendance for today is already finalized and cannot be modified.');
+      Alert.alert('Attendance Locked 🔒', 'Attendance marked successfully and is locked.');
       return;
     }
     if (!selectedClass || students.length === 0) return;
@@ -388,6 +390,8 @@ export default function App() {
             } else {
               if (res.isLocked) {
                 setIsAttendanceLocked(true);
+                Alert.alert('Attendance Locked 🔒', 'Attendance marked successfully and is locked.');
+                return;
               }
               Alert.alert('Submission Error', res.error || 'Failed to submit attendance.');
             }
@@ -582,8 +586,8 @@ export default function App() {
           {/* SESSION LOCK BANNER */}
           {isAttendanceLocked && (
             <View style={{
-              backgroundColor: 'rgba(239, 68, 68, 0.15)',
-              borderColor: 'rgba(239, 68, 68, 0.4)',
+              backgroundColor: 'rgba(16, 185, 129, 0.15)',
+              borderColor: 'rgba(16, 185, 129, 0.4)',
               borderWidth: 1,
               borderRadius: 12,
               padding: 12,
@@ -592,13 +596,13 @@ export default function App() {
               flexDirection: 'row',
               alignItems: 'center'
             }}>
-              <Text style={{ fontSize: 22, marginRight: 10 }}>🔒</Text>
+              <Text style={{ fontSize: 22, marginRight: 10 }}>✅</Text>
               <View style={{ flex: 1 }}>
                 <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 13, marginBottom: 2 }}>
-                  Attendance Finalized & Locked
+                  Attendance Marked Successfully & Locked
                 </Text>
-                <Text style={{ color: '#fca5a5', fontSize: 12 }}>
-                  Today's attendance for this class has been finalized. Edits and re-dispatches are disabled.
+                <Text style={{ color: '#6ee7b7', fontSize: 12 }}>
+                  Today's attendance for this class has been marked successfully and is locked.
                 </Text>
               </View>
             </View>

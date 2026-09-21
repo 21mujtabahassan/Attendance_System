@@ -58,19 +58,38 @@ document.addEventListener('DOMContentLoaded', async () => {
       currentUser = sessionData.user;
       currentToken = sessionData.token;
 
-      // Validate session with server
-      const isValid = await verifyCurrentSession();
-      if (isValid) {
-        setupTeacherUI();
-        dismissSplash();
-        switchView('viewDashboard');
-        return;
+      // Immediately purge if legacy demo/dummy 'teacher' username or if invalid
+      if (currentUser && (currentUser.username === 'teacher' || currentUser.name === 'teacher' || currentUser.id === 'teacher-demo')) {
+        console.warn('⚠️ Purging legacy demo teacher session from localStorage.');
+        localStorage.removeItem('usa_teacher_session');
+        currentUser = null;
+        currentToken = null;
+      } else {
+        // Validate session with live server
+        const isValid = await verifyCurrentSession();
+        if (isValid) {
+          setupTeacherUI();
+          dismissSplash();
+          switchView('viewDashboard');
+          return;
+        } else {
+          // Stale / unverified session -> purge it cleanly
+          localStorage.removeItem('usa_teacher_session');
+          currentUser = null;
+          currentToken = null;
+        }
       }
     } catch (e) {
       console.warn('Session parse error:', e);
       localStorage.removeItem('usa_teacher_session');
+      currentUser = null;
+      currentToken = null;
     }
   }
+
+  // Ensure clean state if not logged in
+  currentUser = null;
+  currentToken = null;
 
   // Not logged in -> dismiss splash to login screen after animation
   setTimeout(() => {
@@ -384,13 +403,31 @@ async function verifyCurrentSession() {
     const res = await safeFetch(`/auth/me?schoolId=${CURRENT_SCHOOL_ID}`);
     const data = await res.json();
     if (res.ok && data.success && data.user) {
-      if (data.user.role && data.user.role !== 'teacher') return false;
+      if (data.user.role && data.user.role !== 'teacher') {
+        localStorage.removeItem('usa_teacher_session');
+        currentUser = null;
+        currentToken = null;
+        return false;
+      }
       currentUser = data.user;
+      currentToken = data.token || currentToken;
+      localStorage.setItem('usa_teacher_session', JSON.stringify({ token: currentToken, user: currentUser }));
       return true;
     }
+    // Server rejected session (e.g. 401 Unauthorized / inactive teacher) -> purge immediately
+    localStorage.removeItem('usa_teacher_session');
+    currentUser = null;
+    currentToken = null;
     return false;
   } catch (err) {
-    return !navigator.onLine && !!currentUser;
+    // Only allow offline session if the user is truly offline, already verified, and not a dummy teacher
+    if (!navigator.onLine && currentUser && currentUser.id && currentUser.username && currentUser.username !== 'teacher') {
+      return true;
+    }
+    localStorage.removeItem('usa_teacher_session');
+    currentUser = null;
+    currentToken = null;
+    return false;
   }
 }
 
@@ -400,7 +437,7 @@ function handleTeacherLogout() {
   currentUser = null;
   currentToken = null;
   assignedClasses = [];
-  document.getElementById('teacherLoginForm').reset();
+  document.getElementById('teacherLoginForm')?.reset();
   showToast('👋 Signed out successfully.');
   switchView('loginScreen');
 }
@@ -408,11 +445,13 @@ function handleTeacherLogout() {
 function setupTeacherUI() {
   if (!currentUser) return;
 
-  const initials = (currentUser.name || 'T').split(' ').map(w => w[0]).join('').substring(0, 2).toUpperCase();
+  const displayName = currentUser.fullName || currentUser.name || (currentUser.username ? `Teacher ${currentUser.username}` : 'Teacher');
+  const initials = displayName.split(' ').filter(Boolean).map(w => w[0]).join('').substring(0, 2).toUpperCase() || 'T';
+
   const headerAvatar = document.getElementById('headerAvatar');
   const headerGreeting = document.getElementById('headerGreeting');
   if (headerAvatar) headerAvatar.textContent = initials;
-  if (headerGreeting) headerGreeting.textContent = currentUser.name || 'Teacher';
+  if (headerGreeting) headerGreeting.textContent = displayName;
 
   const profileAvatar = document.getElementById('profileAvatarLarge');
   const profileName = document.getElementById('profileName');
@@ -420,9 +459,14 @@ function setupTeacherUI() {
   const profilePhone = document.getElementById('profilePhone');
 
   if (profileAvatar) profileAvatar.textContent = initials;
-  if (profileName) profileName.textContent = currentUser.name || 'Teacher';
-  if (profileRole) profileRole.textContent = currentUser.isIncharge ? 'Class Incharge' : 'Classroom Teacher';
-  if (profilePhone) profilePhone.textContent = currentUser.phone ? `Phone: ${currentUser.phone}` : `ID: ${currentUser.id}`;
+  if (profileName) profileName.textContent = displayName;
+  if (profileRole) profileRole.textContent = currentUser.isIncharge ? 'Class Incharge' : (currentUser.role === 'teacher' ? 'Classroom Teacher' : currentUser.role);
+  if (profilePhone) {
+    const details = [];
+    if (currentUser.username) details.push(`Username: ${currentUser.username}`);
+    if (currentUser.phone) details.push(`Phone: ${currentUser.phone}`);
+    profilePhone.textContent = details.length > 0 ? details.join(' • ') : `ID: ${currentUser.id}`;
+  }
 
   loadTeacherClasses();
 }
@@ -658,8 +702,8 @@ function renderAttendanceRoster() {
     if (draftBtn) { draftBtn.disabled = true; draftBtn.style.opacity = '0.4'; draftBtn.style.cursor = 'not-allowed'; }
     if (submitBtn) {
       submitBtn.disabled = true;
-      submitBtn.innerHTML = '<i class="fa-solid fa-lock"></i> <span>Finalized & Locked</span>';
-      submitBtn.style.opacity = '0.6';
+      submitBtn.innerHTML = '<i class="fa-solid fa-circle-check"></i> <span>Marked & Locked</span>';
+      submitBtn.style.opacity = '0.7';
       submitBtn.style.cursor = 'not-allowed';
     }
     if (btnAllP) { btnAllP.disabled = true; btnAllP.style.opacity = '0.4'; }
@@ -687,11 +731,11 @@ function renderAttendanceRoster() {
   }
 
   const lockedBannerHtml = currentAttendanceSessionLocked ? `
-    <div class="attendance-locked-banner" style="background: rgba(239, 68, 68, 0.14); border: 1px solid rgba(239, 68, 68, 0.35); border-radius: 12px; padding: 12px 16px; margin-bottom: 14px; display: flex; align-items: center; gap: 12px; color: #fca5a5;">
-      <i class="fa-solid fa-lock" style="font-size: 22px; color: #ef4444; flex-shrink: 0;"></i>
+    <div class="attendance-locked-banner" style="background: rgba(16, 185, 129, 0.12); border: 1px solid rgba(16, 185, 129, 0.35); border-radius: 12px; padding: 12px 16px; margin-bottom: 14px; display: flex; align-items: center; gap: 12px; color: #a7f3d0;">
+      <i class="fa-solid fa-circle-check" style="font-size: 22px; color: #10b981; flex-shrink: 0;"></i>
       <div style="font-size: 13px; line-height: 1.4;">
-        <strong style="color: #fff; display: block; font-size: 14px; margin-bottom: 2px;">Attendance Finalized & Locked</strong>
-        Attendance for this date (${date}) has been marked & finalized. Edits and re-submissions are disabled.
+        <strong style="color: #fff; display: block; font-size: 14px; margin-bottom: 2px;">Attendance Marked Successfully & Locked 🔒</strong>
+        Attendance for this date (${date}) has been marked successfully and is locked. Duplicate submissions are disabled.
       </div>
     </div>
   ` : '';
@@ -721,7 +765,7 @@ function renderAttendanceRoster() {
 
 function toggleStudentStatus(studentId) {
   if (currentAttendanceSessionLocked) {
-    showToast('🔒 Attendance is finalized and locked for this date.', 'error');
+    showToast('🔒 Attendance marked successfully and is locked.', 'info');
     return;
   }
   const current = currentAttendanceMap[studentId] || 'present';
@@ -735,7 +779,7 @@ function toggleStudentStatus(studentId) {
 
 function setStudentAttendance(studentId, status) {
   if (currentAttendanceSessionLocked) {
-    showToast('🔒 Attendance is finalized and locked for this date.', 'error');
+    showToast('🔒 Attendance marked successfully and is locked.', 'info');
     return;
   }
   currentAttendanceMap[studentId] = status;
@@ -753,7 +797,7 @@ function setStudentAttendance(studentId, status) {
 
 function markAllPresent() {
   if (currentAttendanceSessionLocked) {
-    showToast('🔒 Attendance is finalized and locked for this date.', 'error');
+    showToast('🔒 Attendance marked successfully and is locked.', 'info');
     return;
   }
   currentAttendanceRoster.forEach(s => {
@@ -772,7 +816,7 @@ function markAllPresent() {
 
 function markAllAbsent() {
   if (currentAttendanceSessionLocked) {
-    showToast('🔒 Attendance is finalized and locked for this date.', 'error');
+    showToast('🔒 Attendance marked successfully and is locked.', 'info');
     return;
   }
   currentAttendanceRoster.forEach(s => {
@@ -809,7 +853,7 @@ function updateAttendanceCounters() {
 
 async function saveAttendanceDraft() {
   if (currentAttendanceSessionLocked) {
-    showToast('🔒 Attendance for this date is already finalized and cannot be modified.', 'error');
+    showToast('✅ Attendance marked successfully and is locked.', 'success');
     return;
   }
 
@@ -855,8 +899,10 @@ async function saveAttendanceDraft() {
       if (res.status === 409 || data.isLocked) {
         currentAttendanceSessionLocked = true;
         renderAttendanceRoster();
+        showToast(`✅ ${data.error || 'Attendance marked successfully and is locked.'}`, 'success');
+        return;
       }
-      showToast(`🔒 ${data.error || 'Attendance for this date is already finalized and cannot be modified.'}`, 'error');
+      showToast(`❌ ${data.error || 'Failed to save draft.'}`, 'error');
       return;
     }
 
@@ -883,7 +929,7 @@ async function saveAttendanceDraft() {
 
 function openAttendanceConfirmModal() {
   if (currentAttendanceSessionLocked) {
-    showToast('🔒 Attendance for this date is already finalized and cannot be modified.', 'error');
+    showToast('✅ Attendance marked successfully and is locked.', 'success');
     return;
   }
 
@@ -914,7 +960,7 @@ async function executeFinalAttendanceSubmit() {
   closeModal('attendanceConfirmModal');
 
   if (currentAttendanceSessionLocked) {
-    showToast('🔒 Attendance for this date is already finalized and cannot be modified.', 'error');
+    showToast('✅ Attendance marked successfully and is locked.', 'success');
     return;
   }
 
@@ -959,8 +1005,10 @@ async function executeFinalAttendanceSubmit() {
       if (res.status === 409 || data.isLocked) {
         currentAttendanceSessionLocked = true;
         renderAttendanceRoster();
+        showToast(`✅ ${data.error || 'Attendance marked successfully and is locked.'}`, 'success');
+        return;
       }
-      showToast(`🔒 ${data.error || 'Attendance for this date is already finalized and cannot be modified.'}`, 'error');
+      showToast(`❌ ${data.error || 'Failed to submit attendance.'}`, 'error');
       return;
     }
 
@@ -1105,6 +1153,179 @@ async function handleResultsClassChange() {
   }
 }
 
+function escapeHtmlTeacher(str) {
+  return String(str || '').replace(/[&<>"']/g, m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m]));
+}
+
+async function openTeacherSubjectMarksModal() {
+  const classId = document.getElementById('resultsClassSelect')?.value;
+  const termId = document.getElementById('resultsTermSelect')?.value;
+
+  if (!classId || !termId) {
+    showToast('Please select Class and Exam Term first.');
+    return;
+  }
+
+  const classText = document.getElementById('resultsClassSelect')?.selectedOptions[0]?.text || classId;
+  const termText = document.getElementById('resultsTermSelect')?.selectedOptions[0]?.text || termId;
+
+  const subtitle = document.getElementById('teacherSubjectMarksSubtitle');
+  if (subtitle) {
+    subtitle.innerHTML = `Configure subjects for <strong>${escapeHtmlTeacher(classText)}</strong> &bull; <strong>${escapeHtmlTeacher(termText)}</strong>`;
+  }
+
+  const container = document.getElementById('teacherSubjectRowsContainer');
+  if (container) {
+    container.innerHTML = '<p class="text-muted" style="text-align: center; padding: 20px;">Loading subjects...</p>';
+  }
+
+  openModal('teacherSubjectMarksModal');
+
+  try {
+    const sUrl = `/classes/${classId}/subjects?schoolId=${CURRENT_SCHOOL_ID}&termId=${termId}`;
+    const sRes = await safeFetch(sUrl);
+    const sData = await sRes.json();
+    const subjects = sData.subjects || [];
+
+    if (container) {
+      container.innerHTML = '';
+      if (subjects.length > 0) {
+        subjects.forEach(s => {
+          const marks = Number(s.totalMarks || s.maxMarks || 100);
+          addTeacherSubjectRow(s.name, marks);
+        });
+      } else {
+        const defaults = [
+          { name: 'Mathematics', marks: 100 },
+          { name: 'English Literature', marks: 100 },
+          { name: 'Urdu', marks: 75 },
+          { name: 'Physics', marks: 75 },
+          { name: 'Chemistry', marks: 75 }
+        ];
+        defaults.forEach(d => addTeacherSubjectRow(d.name, d.marks));
+      }
+      updateTeacherSubjectSummary();
+    }
+  } catch (err) {
+    console.error('Error loading subjects for modal:', err);
+    if (container) {
+      container.innerHTML = '<p class="text-muted" style="text-align: center; padding: 20px; color: var(--status-absent);">Failed to load subjects.</p>';
+    }
+  }
+}
+
+function addTeacherSubjectRow(name = '', marks = 100) {
+  const container = document.getElementById('teacherSubjectRowsContainer');
+  if (!container) return;
+
+  const row = document.createElement('div');
+  row.className = 'teacher-subject-row';
+  row.style.cssText = 'display: flex; align-items: center; gap: 8px; background: var(--bg-subtle); padding: 8px 10px; border-radius: var(--radius-sm); border: 1px solid var(--border-color);';
+
+  row.innerHTML = `
+    <input type="text" class="custom-input teacher-subject-name" value="${escapeHtmlTeacher(name)}" placeholder="Subject Name" style="flex: 2; font-size: 13px; padding: 8px 10px;" oninput="updateTeacherSubjectSummary()">
+    <div style="display: flex; align-items: center; gap: 4px; flex: 1.2;">
+      <span style="font-size: 12px; color: var(--text-muted); white-space: nowrap;">Max:</span>
+      <input type="number" min="1" max="1000" class="custom-input teacher-subject-marks" value="${marks}" style="width: 65px; font-size: 13px; padding: 8px 6px; text-align: center; font-weight: 700; color: var(--color-primary);" oninput="updateTeacherSubjectSummary()">
+    </div>
+    <button type="button" class="btn-secondary" onclick="removeTeacherSubjectRow(this)" style="padding: 8px 10px; color: var(--status-absent);" title="Delete Subject">
+      <i class="fa-solid fa-trash"></i>
+    </button>
+  `;
+
+  container.appendChild(row);
+  updateTeacherSubjectSummary();
+}
+
+function removeTeacherSubjectRow(btn) {
+  const row = btn.closest('.teacher-subject-row');
+  if (row) {
+    row.remove();
+    updateTeacherSubjectSummary();
+  }
+}
+
+function updateTeacherSubjectSummary() {
+  const rows = document.querySelectorAll('#teacherSubjectRowsContainer .teacher-subject-row');
+  let count = 0;
+  let totalMax = 0;
+  rows.forEach(r => {
+    const name = r.querySelector('.teacher-subject-name')?.value.trim();
+    const marks = Number(r.querySelector('.teacher-subject-marks')?.value || 0);
+    if (name) count++;
+    totalMax += marks;
+  });
+
+  const countEl = document.getElementById('teacherSubjCount');
+  if (countEl) countEl.innerText = count;
+  const sumEl = document.getElementById('teacherTotalMaxMarksSum');
+  if (sumEl) sumEl.innerText = totalMax;
+}
+
+async function saveTeacherSubjectMarks() {
+  const classId = document.getElementById('resultsClassSelect')?.value;
+  const termId = document.getElementById('resultsTermSelect')?.value;
+
+  if (!classId || !termId) {
+    showToast('Please select Class and Term first.');
+    return;
+  }
+
+  const rows = document.querySelectorAll('#teacherSubjectRowsContainer .teacher-subject-row');
+  const subjects = [];
+
+  rows.forEach((r, idx) => {
+    const name = (r.querySelector('.teacher-subject-name')?.value || '').trim();
+    const marks = Number(r.querySelector('.teacher-subject-marks')?.value || 100);
+    if (name) {
+      subjects.push({
+        name,
+        totalMarks: !isNaN(marks) && marks > 0 ? marks : 100,
+        displayOrder: idx + 1
+      });
+    }
+  });
+
+  if (subjects.length === 0) {
+    showToast('Please add at least one subject with a valid name.');
+    return;
+  }
+
+  const btn = document.getElementById('btnSaveTeacherSubjectMarks');
+  if (btn) {
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> Saving...';
+  }
+
+  try {
+    const res = await safeFetch('/admin/results/subjects', {
+      method: 'POST',
+      body: JSON.stringify({
+        schoolId: CURRENT_SCHOOL_ID,
+        classId,
+        termId,
+        subjects
+      })
+    });
+    const data = await res.json();
+    if (data.success) {
+      closeModal('teacherSubjectMarksModal');
+      showToast(`Subject marks saved (${subjects.length} subjects)! 🎉`);
+      await handleResultsClassChange();
+    } else {
+      showToast(data.error || 'Failed to save subjects.');
+    }
+  } catch (err) {
+    console.error('Error saving subjects:', err);
+    showToast('Error saving subjects.');
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = '<i class="fa-solid fa-save"></i> Save & Apply';
+    }
+  }
+}
+
 async function loadResultsRoster() {
   const classId = document.getElementById('resultsClassSelect')?.value;
   const termId = document.getElementById('resultsTermSelect')?.value;
@@ -1192,7 +1413,10 @@ function renderResultsRoster(students) {
         <div class="result-marks-input-box">
           <input type="number" class="marks-input" id="marks-${s.id}" value="${marksVal !== '' ? marksVal : ''}"
             min="0" max="${currentSubjectMaxMarks}" placeholder="0"
-            oninput="handleMarkInput('${s.id}', this.value)">
+            data-student-id="${s.id}"
+            onfocus="this.select()"
+            oninput="handleMarkInput('${s.id}', this.value, this)"
+            onkeydown="handleTeacherMarkKeydown(event, this)">
           <span class="marks-max-label">/ ${currentSubjectMaxMarks}</span>
           <span class="grade-badge ${grade.badgeClass}" id="grade-${s.id}">${grade.grade}</span>
         </div>
@@ -1201,8 +1425,24 @@ function renderResultsRoster(students) {
   }).join('');
 }
 
-function handleMarkInput(studentId, val) {
-  const num = val === '' ? '' : Math.min(Math.max(Number(val), 0), currentSubjectMaxMarks);
+function handleMarkInput(studentId, val, inputEl) {
+  let num = val === '' ? '' : Number(val);
+
+  if (num !== '' && !isNaN(num)) {
+    if (num > currentSubjectMaxMarks) {
+      num = currentSubjectMaxMarks;
+      if (inputEl) {
+        inputEl.value = currentSubjectMaxMarks;
+        inputEl.classList.add('input-exceeded-flash');
+        setTimeout(() => inputEl.classList.remove('input-exceeded-flash'), 600);
+      }
+      showToast(`⚠️ Marks cannot exceed total (${currentSubjectMaxMarks})! Clamped to ${currentSubjectMaxMarks}.`, 'error');
+    } else if (num < 0) {
+      num = 0;
+      if (inputEl) inputEl.value = 0;
+    }
+  }
+
   if (currentResultsMap[studentId]) {
     currentResultsMap[studentId].marks = num;
   }
@@ -1212,6 +1452,33 @@ function handleMarkInput(studentId, val) {
     const computed = computeGrade(num, currentSubjectMaxMarks);
     gradeBadge.textContent = computed.grade;
     gradeBadge.className = `grade-badge ${computed.badgeClass}`;
+  }
+}
+
+function handleTeacherMarkKeydown(e, inputEl) {
+  if (e.key === 'Enter' || e.key === 'ArrowDown') {
+    e.preventDefault();
+    const allInputs = Array.from(document.querySelectorAll('#resultsRosterContainer .marks-input'));
+    const currIdx = allInputs.indexOf(inputEl);
+    if (currIdx !== -1) {
+      const nextIdx = (e.shiftKey && e.key === 'Enter') ? currIdx - 1 : currIdx + 1;
+      if (nextIdx >= 0 && nextIdx < allInputs.length) {
+        allInputs[nextIdx].focus();
+        allInputs[nextIdx].select();
+      }
+    }
+    return;
+  }
+
+  if (e.key === 'ArrowUp') {
+    e.preventDefault();
+    const allInputs = Array.from(document.querySelectorAll('#resultsRosterContainer .marks-input'));
+    const currIdx = allInputs.indexOf(inputEl);
+    if (currIdx > 0) {
+      allInputs[currIdx - 1].focus();
+      allInputs[currIdx - 1].select();
+    }
+    return;
   }
 }
 

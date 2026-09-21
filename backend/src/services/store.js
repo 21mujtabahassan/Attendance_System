@@ -922,7 +922,7 @@ async function saveDraftAttendance(schoolId = 'unique_scholars', classId, dateSt
   // Business rule: Enforce locked state check
   const lockStatus = await checkAttendanceSessionLock(schoolId, classId, cleanDateStr);
   if (lockStatus.isLocked) {
-    const err = new Error(`Attendance for ${cleanDateStr} is already finalized and cannot be modified.`);
+    const err = new Error('Attendance marked successfully and is locked.');
     err.code = 'ATTENDANCE_LOCKED';
     err.isLocked = true;
     err.lockedAt = lockStatus.lockedAt;
@@ -1024,7 +1024,7 @@ async function submitFinalAttendance(schoolId = 'unique_scholars', classId, date
   const lockStatus = await checkAttendanceSessionLock(schoolId, classId, cleanDateStr);
   if (lockStatus.isLocked) {
     console.warn(`⛔ [submitFinalAttendance] Rejection: Session for class "${classId}" on ${cleanDateStr} is already finalized.`);
-    const err = new Error(`Attendance for ${cleanDateStr} is already finalized and cannot be modified.`);
+    const err = new Error('Attendance marked successfully and is locked.');
     err.code = 'ATTENDANCE_LOCKED';
     err.isLocked = true;
     err.lockedAt = lockStatus.lockedAt;
@@ -1381,14 +1381,22 @@ async function saveClassSubjects(schoolId = 'unique_scholars', classIdOrPayload,
     subjects = [];
   }
 
-  // Normalize subjects: accept strings (e.g. 'Mathematics') or objects ({ name: 'Math', totalMarks: 100 })
+  // Normalize subjects: accept strings (e.g. 'Mathematics', 'Math: 100', 'Physics (75)') or objects ({ name: 'Math', totalMarks: 100 })
   const normalized = subjects
     .map((sub, idx) => {
       let name = '';
       let maxMarks = 100;
       let order = idx + 1;
       if (typeof sub === 'string') {
-        name = sub.trim();
+        const trimmed = sub.trim();
+        const match = trimmed.match(/^(.+?)\s*(?:[:\(\-–—]\s*(\d+)\s*\)?)$/);
+        if (match && match[1] && match[2]) {
+          name = match[1].trim();
+          const parsed = Number(match[2]);
+          if (!isNaN(parsed) && parsed > 0) maxMarks = parsed;
+        } else {
+          name = trimmed;
+        }
       } else if (typeof sub === 'object' && sub !== null) {
         name = (sub.name || sub.subject_name || '').trim();
         const parsedMarks = Number(sub.totalMarks || sub.max_marks || 100);
@@ -1545,6 +1553,10 @@ async function saveDraftResults(schoolId = 'unique_scholars', payload) {
       if (matched) resolvedClassId = matched.id;
     } catch (e) {}
 
+    const configuredSubjects = await getClassSubjects(schoolId, resolvedClassId, termId);
+    const configuredSubjMap = {};
+    configuredSubjects.forEach(s => { if (s.name) configuredSubjMap[s.name.toLowerCase().trim()] = Number(s.totalMarks || 100); });
+
     await db.transaction(async trx => {
       for (const item of results) {
         if (!item.studentId) continue;
@@ -1565,9 +1577,12 @@ async function saveDraftResults(schoolId = 'unique_scholars', payload) {
           mergedMarks[em.subject_name] = { obtained: Number(em.obtained), total: Number(em.total) };
         }
         for (const [subj, m] of Object.entries(item.marks || {})) {
+          const defaultSubjTotal = configuredSubjMap[subj.toLowerCase().trim()] || 100;
           const obt = typeof m === 'object' && m !== null ? Number(m.obtained ?? 0) : Number(m || 0);
-          const tot = typeof m === 'object' && m !== null ? Number(m.total ?? 100) : 100;
-          mergedMarks[subj] = { obtained: isNaN(obt) ? 0 : obt, total: isNaN(tot) || tot <= 0 ? 100 : tot };
+          const tot = typeof m === 'object' && m !== null ? Number(m.total ?? defaultSubjTotal) : defaultSubjTotal;
+          const finalTot = isNaN(tot) || tot <= 0 ? defaultSubjTotal : tot;
+          const finalObt = Math.min(Math.max(isNaN(obt) ? 0 : obt, 0), finalTot);
+          mergedMarks[subj] = { obtained: finalObt, total: finalTot };
         }
 
         let totalObtained = 0;
@@ -1644,7 +1659,9 @@ async function saveDraftResults(schoolId = 'unique_scholars', payload) {
     for (const [subj, m] of Object.entries(item.marks || {})) {
       const obt = typeof m === 'object' && m !== null ? Number(m.obtained ?? 0) : Number(m || 0);
       const tot = typeof m === 'object' && m !== null ? Number(m.total ?? 100) : 100;
-      mergedMarks[subj] = { obtained: isNaN(obt) ? 0 : obt, total: isNaN(tot) || tot <= 0 ? 100 : tot };
+      const finalTot = isNaN(tot) || tot <= 0 ? 100 : tot;
+      const finalObt = Math.min(Math.max(isNaN(obt) ? 0 : obt, 0), finalTot);
+      mergedMarks[subj] = { obtained: finalObt, total: finalTot };
     }
 
     let totalObtained = 0, totalMax = 0;
@@ -1704,6 +1721,10 @@ async function submitFinalResults(schoolId = 'unique_scholars', payload) {
       if (matched) resolvedClassId = matched.id;
     } catch (e) {}
 
+    const configuredSubjects = await getClassSubjects(schoolId, resolvedClassId, termId);
+    const configuredSubjMap = {};
+    configuredSubjects.forEach(s => { if (s.name) configuredSubjMap[s.name.toLowerCase().trim()] = Number(s.totalMarks || 100); });
+
     // First, calculate merged marks for ranking
     const studentListWithMerged = [];
     for (const item of results) {
@@ -1722,9 +1743,12 @@ async function submitFinalResults(schoolId = 'unique_scholars', payload) {
         mergedMarks[em.subject_name] = { obtained: Number(em.obtained), total: Number(em.total) };
       }
       for (const [subj, m] of Object.entries(item.marks || {})) {
+        const defaultSubjTotal = configuredSubjMap[subj.toLowerCase().trim()] || 100;
         const obt = typeof m === 'object' && m !== null ? Number(m.obtained ?? 0) : Number(m || 0);
-        const tot = typeof m === 'object' && m !== null ? Number(m.total ?? 100) : 100;
-        mergedMarks[subj] = { obtained: isNaN(obt) ? 0 : obt, total: isNaN(tot) || tot <= 0 ? 100 : tot };
+        const tot = typeof m === 'object' && m !== null ? Number(m.total ?? defaultSubjTotal) : defaultSubjTotal;
+        const finalTot = isNaN(tot) || tot <= 0 ? defaultSubjTotal : tot;
+        const finalObt = Math.min(Math.max(isNaN(obt) ? 0 : obt, 0), finalTot);
+        mergedMarks[subj] = { obtained: finalObt, total: finalTot };
       }
 
       let totalObtained = 0;
@@ -1918,6 +1942,7 @@ async function getTeachers(schoolId = 'unique_scholars') {
         id: u.id,
         schoolId: u.school_id,
         fullName: u.full_name,
+        name: u.full_name,
         username: u.username || '',
         phone: u.phone || '',
         email: u.email || '',
@@ -1948,6 +1973,8 @@ async function getTeachers(schoolId = 'unique_scholars') {
     }));
     return {
       ...u,
+      fullName: u.fullName || u.name,
+      name: u.fullName || u.name,
       inchargeClasses,
       assignedClasses,
       assignedClassIds: assignedClasses.map(c => c.id)

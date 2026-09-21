@@ -738,6 +738,31 @@ function loadResultsTabData() {
   loadFinalizedResultsHistory();
 }
 
+function parseSubjectInputString(sub) {
+  if (!sub) return { name: '', totalMarks: 100 };
+  if (typeof sub === 'object' && sub !== null) {
+    const name = (sub.name || sub.subject_name || '').trim();
+    const marks = Number(sub.totalMarks || sub.max_marks || 100);
+    return {
+      name,
+      totalMarks: !isNaN(marks) && marks > 0 ? marks : 100
+    };
+  }
+  const trimmed = String(sub).trim();
+  const match = trimmed.match(/^(.+?)\s*(?:[:\(\-–—]\s*(\d+)\s*\)?)$/);
+  if (match && match[1] && match[2]) {
+    const parsed = Number(match[2]);
+    return {
+      name: match[1].trim(),
+      totalMarks: !isNaN(parsed) && parsed > 0 ? parsed : 100
+    };
+  }
+  return {
+    name: trimmed,
+    totalMarks: 100
+  };
+}
+
 async function loadMarksEntryGrid() {
   const termSelect = document.getElementById('marksTermSelect');
   const classSelect = document.getElementById('marksClassSelect');
@@ -758,34 +783,62 @@ async function loadMarksEntryGrid() {
 
   try {
     // 1. Fetch subjects for class & term
-    const subRes = await fetch(`${API_BASE}/admin/results/subjects?schoolId=${CURRENT_SCHOOL_ID}&classId=${encodeURIComponent(classId)}&termId=${encodeURIComponent(termId)}`);
+    const subRes = await fetch(`${API_BASE}/admin/results/subjects?schoolId=${CURRENT_SCHOOL_ID}&classId=${encodeURIComponent(classId)}&termId=${encodeURIComponent(termId)}`, {
+      headers: getAuthHeaders()
+    });
     const subData = await subRes.json();
     const rawSubjects = subData.subjects || [];
-    const subjects = rawSubjects.length > 0
-      ? rawSubjects.map(s => typeof s === 'string' ? s : (s.name || s.subject_name || '')).filter(Boolean)
-      : ['Mathematics', 'English Literature', 'Urdu', 'Physics', 'Chemistry'];
+
+    // Normalize subjects: [{ name: 'Mathematics', totalMarks: 100 }, ...]
+    let subjects = [];
+    if (rawSubjects.length > 0) {
+      subjects = rawSubjects.map(parseSubjectInputString).filter(s => s && s.name);
+    }
+
+    if (subjects.length === 0) {
+      subjects = [
+        { name: 'Mathematics', totalMarks: 100 },
+        { name: 'English Literature', totalMarks: 100 },
+        { name: 'Urdu', totalMarks: 75 },
+        { name: 'Physics', totalMarks: 75 },
+        { name: 'Chemistry', totalMarks: 75 }
+      ];
+    }
 
     // 2. Fetch students for class
-    const stuRes = await fetch(`${API_BASE}/schools/${CURRENT_SCHOOL_ID}/students?class=${encodeURIComponent(classId)}`);
+    const stuRes = await fetch(`${API_BASE}/schools/${CURRENT_SCHOOL_ID}/students?class=${encodeURIComponent(classId)}`, {
+      headers: getAuthHeaders()
+    });
     const stuData = await stuRes.json();
     const students = stuData.students || [];
 
     if (students.length === 0) {
-      container.innerHTML = `<p class="text-muted text-center">No students found in ${classId}. Please add students first.</p>`;
+      container.innerHTML = `<p class="text-muted text-center">No students found in ${escapeHtml(classId)}. Please add students first.</p>`;
       return;
     }
 
     // 3. Fetch existing draft/finalized results
-    const resRes = await fetch(`${API_BASE}/admin/results/marks?schoolId=${CURRENT_SCHOOL_ID}&termId=${termId}&classId=${classId}`);
+    const resRes = await fetch(`${API_BASE}/admin/results/marks?schoolId=${CURRENT_SCHOOL_ID}&termId=${encodeURIComponent(termId)}&classId=${encodeURIComponent(classId)}`, {
+      headers: getAuthHeaders()
+    });
     const resData = await resRes.json();
     const existingResults = resData.results || [];
 
-    // Build interactive marks grid
+    const grandTotalMax = subjects.reduce((acc, sub) => acc + sub.totalMarks, 0);
+
+    // Build interactive marks grid headers
     let headersHtml = `<th>Roll / ID</th><th>Student Name</th>`;
     subjects.forEach(sub => {
-      headersHtml += `<th style="text-align: center;">${sub} (100)</th>`;
+      headersHtml += `
+        <th style="text-align: center; min-width: 105px;">
+          <div style="font-weight: 700;">${escapeHtml(sub.name)}</div>
+          <span class="badge" onclick="openSubjectMarksModal()" title="Click to adjust marks for ${escapeHtml(sub.name)}" style="background: rgba(56, 189, 248, 0.16); color: #38bdf8; font-size: 10px; font-weight: 600; padding: 2px 6px; border-radius: 4px; display: inline-flex; align-items: center; gap: 4px; margin-top: 3px; cursor: pointer;">
+            Max: ${sub.totalMarks} <i class="fa-solid fa-pen-to-square" style="font-size: 8px;"></i>
+          </span>
+        </th>
+      `;
     });
-    headersHtml += `<th style="text-align: center;">Total (Max ${subjects.length * 100})</th><th style="text-align: center;">%</th><th style="text-align: center;">Grade</th><th style="text-align: center;">Status</th><th>Remarks</th><th style="text-align: center;">Telecast</th>`;
+    headersHtml += `<th style="text-align: center; min-width: 110px;">Total (Max ${grandTotalMax})</th><th style="text-align: center;">%</th><th style="text-align: center;">Grade</th><th style="text-align: center;">Status</th><th>Remarks</th><th style="text-align: center;">Telecast</th>`;
 
     let rowsHtml = '';
     currentMarksGridData = [];
@@ -803,20 +856,28 @@ async function loadMarksEntryGrid() {
       };
 
       let subjectInputsHtml = '';
-      subjects.forEach(sub => {
-        const rawVal = getMatchingSubjectMark(marksMap, sub);
-        const obtVal = rawVal !== '' ? rawVal : '';
+      subjects.forEach((sub, subIdx) => {
+        const rawVal = getMatchingSubjectMark(marksMap, sub.name);
+        let obtVal = rawVal !== '' ? rawVal : '';
+        if (obtVal !== '' && !isNaN(Number(obtVal))) {
+          obtVal = Math.min(Math.max(Number(obtVal), 0), sub.totalMarks);
+        }
         totalObt += Number(obtVal || 0);
-        studentObj.marks[sub] = { obtained: Number(obtVal || 0), total: 100 };
+        studentObj.marks[sub.name] = { obtained: Number(obtVal || 0), total: sub.totalMarks };
 
         subjectInputsHtml += `
           <td style="text-align: center;">
-            <input type="number" min="0" max="100" class="mark-num-input" data-stu-idx="${sIdx}" data-subject="${sub}" value="${obtVal}" oninput="recalculateRowMarks(${sIdx})">
+            <input type="number" min="0" max="${sub.totalMarks}" class="mark-num-input"
+              data-stu-idx="${sIdx}" data-sub-idx="${subIdx}" data-subject="${escapeHtml(sub.name)}"
+              data-max="${sub.totalMarks}" value="${obtVal}" placeholder="0-${sub.totalMarks}"
+              onfocus="this.select()"
+              oninput="handleMarkInputValidate(this, ${sIdx})"
+              onkeydown="handleMarkInputKeydown(event, this, ${sIdx}, ${subIdx})">
           </td>
         `;
       });
 
-      const maxTotal = subjects.length * 100;
+      const maxTotal = grandTotalMax;
       const pct = maxTotal > 0 ? ((totalObt / maxTotal) * 100).toFixed(1) : 0;
       let grade = 'F'; let statusPill = '<span class="fail-pill">FAIL</span>';
       if (pct >= 85) { grade = 'A+'; statusPill = '<span class="pass-pill">PASS</span>'; }
@@ -831,16 +892,16 @@ async function loadMarksEntryGrid() {
         <tr id="marksRow_${sIdx}">
           <td>
             <span class="badge badge-primary" style="font-size:0.8rem; font-weight:700;">#${stu.rollNumber != null ? stu.rollNumber : '-'}</span>
-            <br><small class="text-muted" style="font-size:10px;">${stu.id}</small>
+            <br><small class="text-muted" style="font-size:10px;">${escapeHtml(stu.id)}</small>
           </td>
-          <td>${stu.name} <br><small class="text-muted">📞 ${stu.parentPhone || 'No Phone'}</small></td>
+          <td>${escapeHtml(stu.name)} <br><small class="text-muted">📞 ${escapeHtml(stu.parentPhone || 'No Phone')}</small></td>
           ${subjectInputsHtml}
           <td style="text-align: center; font-weight: bold; color: #38bdf8;" id="rowTotal_${sIdx}">${totalObt} / ${maxTotal}</td>
           <td style="text-align: center; font-weight: bold;" id="rowPct_${sIdx}">${pct}%</td>
           <td style="text-align: center; font-weight: bold;" id="rowGrade_${sIdx}">${grade}</td>
           <td style="text-align: center;" id="rowStatus_${sIdx}">${statusPill}</td>
           <td>
-            <input type="text" style="width: 130px; padding: 4px 8px; font-size: 11px;" id="rowRemarks_${sIdx}" value="${existing.remarks || ''}" placeholder="Teacher remarks...">
+            <input type="text" style="width: 130px; padding: 4px 8px; font-size: 11px;" id="rowRemarks_${sIdx}" value="${escapeHtml(existing.remarks || '')}" placeholder="Teacher remarks...">
           </td>
           <td style="text-align: center;">
             <button type="button" class="btn btn-sm btn-whatsapp" onclick="openResultTelecastFromGrid(${sIdx})" title="Telecast Result via WhatsApp">
@@ -865,17 +926,84 @@ async function loadMarksEntryGrid() {
   }
 }
 
+function handleMarkInputValidate(inputEl, sIdx) {
+  const maxVal = Number(inputEl.getAttribute('data-max') || 100);
+  const subjName = inputEl.getAttribute('data-subject') || 'Subject';
+  let val = Number(inputEl.value);
+
+  if (inputEl.value !== '' && !isNaN(val)) {
+    if (val > maxVal) {
+      inputEl.value = maxVal;
+      inputEl.classList.add('input-exceeded-flash');
+      setTimeout(() => inputEl.classList.remove('input-exceeded-flash'), 600);
+      showToast(`⚠️ ${subjName} marks cannot exceed total (${maxVal})! Clamped to ${maxVal}.`);
+    } else if (val < 0) {
+      inputEl.value = 0;
+    }
+  }
+
+  recalculateRowMarks(sIdx);
+}
+
+function handleMarkInputKeydown(e, inputEl, sIdx, subIdx) {
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    const allInputs = Array.from(document.querySelectorAll('#marksGridContainer .mark-num-input'));
+    const currIdx = allInputs.indexOf(inputEl);
+    if (currIdx !== -1) {
+      const nextIdx = e.shiftKey ? currIdx - 1 : currIdx + 1;
+      if (nextIdx >= 0 && nextIdx < allInputs.length) {
+        allInputs[nextIdx].focus();
+        allInputs[nextIdx].select();
+      }
+    }
+    return;
+  }
+
+  // Vertical navigation with Arrow keys
+  if (e.key === 'ArrowDown') {
+    const nextRow = document.querySelector(`.mark-num-input[data-stu-idx="${sIdx + 1}"][data-sub-idx="${subIdx}"]`);
+    if (nextRow) {
+      e.preventDefault();
+      nextRow.focus();
+      nextRow.select();
+    }
+    return;
+  }
+  if (e.key === 'ArrowUp') {
+    const prevRow = document.querySelector(`.mark-num-input[data-stu-idx="${sIdx - 1}"][data-sub-idx="${subIdx}"]`);
+    if (prevRow) {
+      e.preventDefault();
+      prevRow.focus();
+      prevRow.select();
+    }
+    return;
+  }
+}
+
 function recalculateRowMarks(sIdx) {
   const rowInputs = document.querySelectorAll(`[data-stu-idx="${sIdx}"]`);
   let totalObt = 0;
-  let totalMax = rowInputs.length * 100;
+  let totalMax = 0;
 
   rowInputs.forEach(inp => {
     const sub = inp.getAttribute('data-subject');
-    const val = Number(inp.value || 0);
+    const maxVal = Number(inp.getAttribute('data-max') || 100);
+    let val = Number(inp.value || 0);
+
+    // Defensive clamping
+    if (val > maxVal) {
+      val = maxVal;
+      inp.value = maxVal;
+    } else if (val < 0) {
+      val = 0;
+      inp.value = 0;
+    }
+
     totalObt += val;
+    totalMax += maxVal;
     if (currentMarksGridData[sIdx]) {
-      currentMarksGridData[sIdx].marks[sub] = { obtained: val, total: 100 };
+      currentMarksGridData[sIdx].marks[sub] = { obtained: val, total: maxVal };
     }
   });
 
@@ -1061,7 +1189,7 @@ async function loadTermsAndSubjectsConfig() {
 async function loadClassSubjectsForConfig() {
   const termSelect = document.getElementById('subjectTermSelect');
   const classSelect = document.getElementById('subjectClassSelect');
-  const inp = document.getElementById('subjectListInput');
+  const container = document.getElementById('subjectRowsContainer');
   const pillsContainer = document.getElementById('activeSubjectPills');
 
   const termId = termSelect?.value || (globalTerms[0] ? globalTerms[0].id : '');
@@ -1070,31 +1198,48 @@ async function loadClassSubjectsForConfig() {
   if (termSelect && termId && !termSelect.value) termSelect.value = termId;
   if (classSelect && classId && !classSelect.value) classSelect.value = classId;
 
-  if (!termId || !classId || !inp) return;
+  if (!termId || !classId || !container) return;
 
   try {
-    const res = await fetch(`${API_BASE}/admin/results/subjects?schoolId=${CURRENT_SCHOOL_ID}&classId=${encodeURIComponent(classId)}&termId=${encodeURIComponent(termId)}`);
+    const res = await fetch(`${API_BASE}/admin/results/subjects?schoolId=${CURRENT_SCHOOL_ID}&classId=${encodeURIComponent(classId)}&termId=${encodeURIComponent(termId)}`, {
+      headers: getAuthHeaders()
+    });
     const data = await res.json();
     const rawSubjects = data.subjects || [];
 
-    // Extract clean subject names (avoid [object Object])
-    const subjectNames = rawSubjects
-      .map(s => typeof s === 'string' ? s : (s.name || s.subject_name || ''))
-      .map(s => s.trim())
-      .filter(Boolean);
+    // Parse subjects with totalMarks
+    const subjects = rawSubjects.map(parseSubjectInputString).filter(s => s && s.name);
 
-    inp.value = subjectNames.join(', ');
+    container.innerHTML = '';
+
+    if (subjects.length > 0) {
+      subjects.forEach(sub => {
+        addSubjectConfigRow(sub.name, sub.totalMarks);
+      });
+    } else {
+      // Default initial 5 standard subjects if none configured
+      const defaultSubjects = [
+        { name: 'Mathematics', marks: 100 },
+        { name: 'English Literature', marks: 100 },
+        { name: 'Urdu', marks: 75 },
+        { name: 'Physics', marks: 75 },
+        { name: 'Chemistry', marks: 75 }
+      ];
+      defaultSubjects.forEach(s => addSubjectConfigRow(s.name, s.marks));
+    }
+
+    updateConfigSummary();
 
     // Render active subject chips / pills for immediate visual feedback
     if (pillsContainer) {
-      if (subjectNames.length > 0) {
-        pillsContainer.innerHTML = subjectNames.map(name => `
+      if (subjects.length > 0) {
+        pillsContainer.innerHTML = subjects.map(s => `
           <span style="display: inline-flex; align-items: center; gap: 6px; background: rgba(56, 189, 248, 0.15); color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.3); padding: 5px 12px; border-radius: 16px; font-size: 12px; font-weight: 500;">
-            📖 ${name}
+            📖 ${escapeHtml(s.name)} <strong>(${s.totalMarks} Marks)</strong>
           </span>
         `).join('');
       } else {
-        pillsContainer.innerHTML = '<span style="font-size: 12px; color: #94a3b8; font-style: italic;">No subjects configured yet for this class & term. Type subjects above and hit Save.</span>';
+        pillsContainer.innerHTML = '<span style="font-size: 12px; color: #94a3b8; font-style: italic;">No subjects configured yet for this class & term. Add subjects above and click Save.</span>';
       }
     }
   } catch (e) {
@@ -1102,15 +1247,110 @@ async function loadClassSubjectsForConfig() {
   }
 }
 
+function addSubjectConfigRow(name = '', marks = 100) {
+  const container = document.getElementById('subjectRowsContainer');
+  if (!container) return;
+
+  const row = document.createElement('div');
+  row.className = 'subject-config-row';
+  row.style.cssText = 'display: flex; align-items: center; gap: 8px; background: rgba(15, 23, 42, 0.5); padding: 6px 10px; border-radius: 8px; border: 1px solid rgba(56, 189, 248, 0.15);';
+
+  row.innerHTML = `
+    <span style="color: #64748b; font-size: 14px;"><i class="fa-solid fa-book"></i></span>
+    <input type="text" class="subject-name-input" value="${escapeHtml(name)}" placeholder="Subject Name (e.g. Mathematics)" style="flex: 2; font-size: 13px; padding: 6px 10px; border-radius: 6px; background: #0f172a; border: 1px solid var(--border-color); color: #fff;" oninput="updateConfigSummary()">
+    <div style="display: flex; align-items: center; gap: 4px; flex: 1.2;">
+      <span style="font-size: 11px; color: #94a3b8; white-space: nowrap;">Max:</span>
+      <input type="number" min="1" max="1000" class="subject-marks-input" value="${marks}" style="width: 70px; font-size: 13px; padding: 6px 8px; text-align: center; border-radius: 6px; background: #0f172a; border: 1px solid var(--border-color); color: #38bdf8; font-weight: bold;" oninput="updateConfigSummary()">
+    </div>
+    <div style="display: flex; gap: 3px;">
+      <button type="button" class="btn btn-xs btn-outline-primary" onclick="setSubjectPresetMarks(this, 100)" title="Set to 100 marks">100</button>
+      <button type="button" class="btn btn-xs btn-outline-primary" onclick="setSubjectPresetMarks(this, 75)" title="Set to 75 marks">75</button>
+      <button type="button" class="btn btn-xs btn-outline-primary" onclick="setSubjectPresetMarks(this, 50)" title="Set to 50 marks">50</button>
+    </div>
+    <button type="button" class="btn btn-xs btn-danger" onclick="removeSubjectConfigRow(this)" title="Remove Subject" style="padding: 5px 8px;">
+      <i class="fa-solid fa-trash"></i>
+    </button>
+  `;
+
+  container.appendChild(row);
+  updateConfigSummary();
+}
+
+function removeSubjectConfigRow(btn) {
+  const row = btn.closest('.subject-config-row');
+  if (row) {
+    row.remove();
+    updateConfigSummary();
+  }
+}
+
+function setSubjectPresetMarks(btn, marks) {
+  const row = btn.closest('.subject-config-row');
+  if (row) {
+    const input = row.querySelector('.subject-marks-input');
+    if (input) {
+      input.value = marks;
+      updateConfigSummary();
+    }
+  }
+}
+
+function updateConfigSummary() {
+  const rows = document.querySelectorAll('#subjectRowsContainer .subject-config-row');
+  let count = 0;
+  let totalMax = 0;
+  rows.forEach(r => {
+    const name = r.querySelector('.subject-name-input')?.value.trim();
+    const marks = Number(r.querySelector('.subject-marks-input')?.value || 0);
+    if (name) count++;
+    totalMax += marks;
+  });
+
+  const countEl = document.getElementById('totalSubjCount');
+  if (countEl) countEl.innerText = count;
+  const sumEl = document.getElementById('totalMaxMarksSum');
+  if (sumEl) sumEl.innerText = totalMax;
+}
+
+function toggleBulkSubjectInput() {
+  const section = document.getElementById('bulkSubjectSection');
+  if (section) {
+    section.style.display = section.style.display === 'none' ? 'block' : 'none';
+  }
+}
+
+function applyBulkSubjectText() {
+  const textarea = document.getElementById('bulkSubjectTextarea');
+  const text = (textarea?.value || '').trim();
+  if (!text) return;
+
+  const container = document.getElementById('subjectRowsContainer');
+  if (!container) return;
+
+  // Split by comma or newline
+  const parts = text.split(/[\n,]+/).map(p => p.trim()).filter(Boolean);
+  if (parts.length === 0) return;
+
+  container.innerHTML = '';
+  parts.forEach(part => {
+    const item = parseSubjectInputString(part);
+    if (item && item.name) {
+      addSubjectConfigRow(item.name, item.totalMarks);
+    }
+  });
+
+  textarea.value = '';
+  toggleBulkSubjectInput();
+  updateConfigSummary();
+}
+
 async function handleSaveSubjects(e) {
   e.preventDefault();
   const termSelect = document.getElementById('subjectTermSelect');
   const classSelect = document.getElementById('subjectClassSelect');
-  const inp = document.getElementById('subjectListInput');
 
   const termId = termSelect?.value;
   const classId = classSelect?.value;
-  const rawText = (inp?.value || '').trim();
 
   if (!termId) {
     showToast('Please select an Exam Term first.');
@@ -1121,20 +1361,33 @@ async function handleSaveSubjects(e) {
     return;
   }
 
-  const subjects = rawText
-    .split(',')
-    .map(s => s.trim())
-    .filter(s => s.length > 0);
+  const rows = document.querySelectorAll('#subjectRowsContainer .subject-config-row');
+  const subjects = [];
+
+  rows.forEach((r, idx) => {
+    const name = (r.querySelector('.subject-name-input')?.value || '').trim();
+    const marks = Number(r.querySelector('.subject-marks-input')?.value || 100);
+    if (name) {
+      subjects.push({
+        name,
+        totalMarks: !isNaN(marks) && marks > 0 ? marks : 100,
+        displayOrder: idx + 1
+      });
+    }
+  });
 
   if (subjects.length === 0) {
-    showToast('Please enter at least one subject name (separated by commas).');
+    showToast('Please add at least one subject with a valid name.');
     return;
   }
 
   try {
     const res = await fetch(`${API_BASE}/admin/results/subjects`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        ...getAuthHeaders()
+      },
       body: JSON.stringify({ schoolId: CURRENT_SCHOOL_ID, classId, termId, subjects })
     });
     const data = await res.json();
@@ -1152,6 +1405,259 @@ async function handleSaveSubjects(e) {
     }
   } catch (e) {
     showToast(`Error saving subjects: ${e.message}`);
+  }
+}
+
+async function openSubjectMarksModal() {
+  const marksTerm = document.getElementById('marksTermSelect');
+  const marksClass = document.getElementById('marksClassSelect');
+  let termId = marksTerm?.value;
+  let classId = marksClass?.value;
+
+  if (!termId || !classId) {
+    const cfgTerm = document.getElementById('subjectTermSelect');
+    const cfgClass = document.getElementById('subjectClassSelect');
+    if (cfgTerm?.value && (!termId || termId === '')) {
+      if (marksTerm) marksTerm.value = cfgTerm.value;
+      termId = cfgTerm.value;
+    }
+    if (cfgClass?.value && (!classId || classId === '')) {
+      if (marksClass) marksClass.value = cfgClass.value;
+      classId = cfgClass.value;
+    }
+    if (marksTerm && (!termId || termId === '') && marksTerm.options.length > 0) {
+      for (let i = 0; i < marksTerm.options.length; i++) {
+        if (marksTerm.options[i].value) {
+          marksTerm.value = marksTerm.options[i].value;
+          termId = marksTerm.value;
+          break;
+        }
+      }
+    }
+    if (marksClass && (!classId || classId === '') && marksClass.options.length > 0) {
+      for (let i = 0; i < marksClass.options.length; i++) {
+        if (marksClass.options[i].value) {
+          marksClass.value = marksClass.options[i].value;
+          classId = marksClass.value;
+          break;
+        }
+      }
+    }
+  }
+
+  if (!termId || !classId) {
+    showToast('Please select an Exam Term and Class to configure subject marks.');
+    return;
+  }
+
+  const termName = marksTerm?.selectedOptions[0]?.text || termId;
+  const className = marksClass?.selectedOptions[0]?.text || classId;
+
+  const subtitle = document.getElementById('modalSubjectMarksSubtitle');
+  if (subtitle) {
+    subtitle.innerHTML = `Configuring subjects for <strong>${escapeHtml(className)}</strong> &bull; <strong>${escapeHtml(termName)}</strong>`;
+  }
+
+  const container = document.getElementById('modalSubjectRowsContainer');
+  if (container) {
+    container.innerHTML = '<p class="text-muted text-center" style="padding: 20px;">Loading subjects...</p>';
+  }
+
+  openModal('subjectMarksModal');
+
+  try {
+    const res = await fetch(`${API_BASE}/admin/results/subjects?schoolId=${CURRENT_SCHOOL_ID}&classId=${encodeURIComponent(classId)}&termId=${encodeURIComponent(termId)}`, {
+      headers: getAuthHeaders()
+    });
+    const data = await res.json();
+    const rawSubjects = data.subjects || [];
+
+    const subjects = rawSubjects.map(parseSubjectInputString).filter(s => s && s.name);
+
+    if (container) {
+      container.innerHTML = '';
+      if (subjects.length > 0) {
+        subjects.forEach(sub => addModalSubjectRow(sub.name, sub.totalMarks));
+      } else {
+        const defaultSubjects = [
+          { name: 'Mathematics', marks: 100 },
+          { name: 'English Literature', marks: 100 },
+          { name: 'Urdu', marks: 75 },
+          { name: 'Physics', marks: 75 },
+          { name: 'Chemistry', marks: 75 }
+        ];
+        defaultSubjects.forEach(s => addModalSubjectRow(s.name, s.marks));
+      }
+      updateModalConfigSummary();
+    }
+  } catch (e) {
+    console.error('Error opening subject marks modal:', e);
+    if (container) {
+      container.innerHTML = '<p class="text-danger text-center">Failed to load subjects.</p>';
+    }
+  }
+}
+
+function addModalSubjectRow(name = '', marks = 100) {
+  const container = document.getElementById('modalSubjectRowsContainer');
+  if (!container) return;
+
+  const row = document.createElement('div');
+  row.className = 'modal-subject-config-row';
+  row.style.cssText = 'display: flex; align-items: center; gap: 8px; background: rgba(15, 23, 42, 0.5); padding: 6px 10px; border-radius: 8px; border: 1px solid rgba(56, 189, 248, 0.15);';
+
+  row.innerHTML = `
+    <span style="color: #64748b; font-size: 14px;"><i class="fa-solid fa-book"></i></span>
+    <input type="text" class="modal-subject-name-input" value="${escapeHtml(name)}" placeholder="Subject Name" style="flex: 2; font-size: 13px; padding: 6px 10px; border-radius: 6px; background: #0f172a; border: 1px solid var(--border-color); color: #fff;" oninput="updateModalConfigSummary()">
+    <div style="display: flex; align-items: center; gap: 4px; flex: 1.2;">
+      <span style="font-size: 11px; color: #94a3b8; white-space: nowrap;">Max:</span>
+      <input type="number" min="1" max="1000" class="modal-subject-marks-input" value="${marks}" style="width: 70px; font-size: 13px; padding: 6px 8px; text-align: center; border-radius: 6px; background: #0f172a; border: 1px solid var(--border-color); color: #38bdf8; font-weight: bold;" oninput="updateModalConfigSummary()">
+    </div>
+    <div style="display: flex; gap: 3px;">
+      <button type="button" class="btn btn-xs btn-outline-primary" onclick="setModalSubjectPresetMarks(this, 100)" title="100 marks">100</button>
+      <button type="button" class="btn btn-xs btn-outline-primary" onclick="setModalSubjectPresetMarks(this, 75)" title="75 marks">75</button>
+      <button type="button" class="btn btn-xs btn-outline-primary" onclick="setModalSubjectPresetMarks(this, 50)" title="50 marks">50</button>
+    </div>
+    <button type="button" class="btn btn-xs btn-danger" onclick="removeModalSubjectRow(this)" title="Remove Subject" style="padding: 5px 8px;">
+      <i class="fa-solid fa-trash"></i>
+    </button>
+  `;
+
+  container.appendChild(row);
+  updateModalConfigSummary();
+}
+
+function removeModalSubjectRow(btn) {
+  const row = btn.closest('.modal-subject-config-row');
+  if (row) {
+    row.remove();
+    updateModalConfigSummary();
+  }
+}
+
+function setModalSubjectPresetMarks(btn, marks) {
+  const row = btn.closest('.modal-subject-config-row');
+  if (row) {
+    const input = row.querySelector('.modal-subject-marks-input');
+    if (input) {
+      input.value = marks;
+      updateModalConfigSummary();
+    }
+  }
+}
+
+function updateModalConfigSummary() {
+  const rows = document.querySelectorAll('#modalSubjectRowsContainer .modal-subject-config-row');
+  let count = 0;
+  let totalMax = 0;
+  rows.forEach(r => {
+    const name = r.querySelector('.modal-subject-name-input')?.value.trim();
+    const marks = Number(r.querySelector('.modal-subject-marks-input')?.value || 0);
+    if (name) count++;
+    totalMax += marks;
+  });
+
+  const countEl = document.getElementById('modalSubjCount');
+  if (countEl) countEl.innerText = count;
+  const sumEl = document.getElementById('modalTotalMaxMarksSum');
+  if (sumEl) sumEl.innerText = totalMax;
+}
+
+function toggleModalBulkInput() {
+  const section = document.getElementById('modalBulkSubjectSection');
+  if (section) {
+    section.style.display = section.style.display === 'none' ? 'block' : 'none';
+  }
+}
+
+function applyModalBulkSubjectText() {
+  const textarea = document.getElementById('modalBulkSubjectTextarea');
+  const text = (textarea?.value || '').trim();
+  if (!text) return;
+
+  const container = document.getElementById('modalSubjectRowsContainer');
+  if (!container) return;
+
+  const parts = text.split(/[\n,]+/).map(p => p.trim()).filter(Boolean);
+  if (parts.length === 0) return;
+
+  container.innerHTML = '';
+  parts.forEach(part => {
+    const item = parseSubjectInputString(part);
+    if (item && item.name) {
+      addModalSubjectRow(item.name, item.totalMarks);
+    }
+  });
+
+  textarea.value = '';
+  toggleModalBulkInput();
+  updateModalConfigSummary();
+}
+
+async function handleSaveSubjectMarksFromModal() {
+  const marksTerm = document.getElementById('marksTermSelect');
+  const marksClass = document.getElementById('marksClassSelect');
+  const termId = marksTerm?.value;
+  const classId = marksClass?.value;
+
+  if (!termId || !classId) {
+    showToast('Please select an Exam Term and Class first.');
+    return;
+  }
+
+  const rows = document.querySelectorAll('#modalSubjectRowsContainer .modal-subject-config-row');
+  const subjects = [];
+
+  rows.forEach((r, idx) => {
+    const name = (r.querySelector('.modal-subject-name-input')?.value || '').trim();
+    const marks = Number(r.querySelector('.modal-subject-marks-input')?.value || 100);
+    if (name) {
+      subjects.push({
+        name,
+        totalMarks: !isNaN(marks) && marks > 0 ? marks : 100,
+        displayOrder: idx + 1
+      });
+    }
+  });
+
+  if (subjects.length === 0) {
+    showToast('Please add at least one subject with a valid name.');
+    return;
+  }
+
+  const saveBtn = document.getElementById('btnSaveSubjectMarksModal');
+  if (saveBtn) {
+    saveBtn.disabled = true;
+    saveBtn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> Saving...';
+  }
+
+  try {
+    const res = await fetch(`${API_BASE}/admin/results/subjects`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...getAuthHeaders()
+      },
+      body: JSON.stringify({ schoolId: CURRENT_SCHOOL_ID, classId, termId, subjects })
+    });
+    const data = await res.json();
+    if (data.success) {
+      closeModal('subjectMarksModal');
+      showToast(`Saved ${subjects.length} subjects with updated marks! Grid updated. ✨`);
+      // Immediately reload marks entry grid to update headers, inputs, and max limits
+      await loadMarksEntryGrid();
+      // Also sync the setup tab if it's pointing to the same class/term
+      loadClassSubjectsForConfig();
+    } else {
+      showToast(data.error || 'Failed to save subject marks.');
+    }
+  } catch (e) {
+    showToast(`Error saving subject marks: ${e.message}`);
+  } finally {
+    if (saveBtn) {
+      saveBtn.disabled = false;
+      saveBtn.innerHTML = '<i class="fa-solid fa-save"></i> Save & Apply to Grid';
+    }
   }
 }
 

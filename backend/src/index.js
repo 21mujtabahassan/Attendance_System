@@ -2138,33 +2138,85 @@ app.get('/api/auth/me', async (req, res) => {
     }
     const schoolId = req.query.schoolId || 'unique_scholars';
 
-    // Fetch live profile from DB so role changes (e.g. promoted to admin) reflect immediately
-    let liveRole = user.role;
-    let liveName = user.fullName;
-    try {
+    // Verify Teacher live profile from DB
+    if (user.role === 'teacher') {
       const teachers = await getTeachers(schoolId);
-      const liveTeacher = teachers.find(t => t.id === user.id || t.username === user.username);
-      if (liveTeacher) {
-        if (liveTeacher.role) liveRole = liveTeacher.role;
-        if (liveTeacher.fullName) liveName = liveTeacher.fullName;
-      }
-    } catch (_) { }
+      const liveTeacher = teachers.find(t => 
+        (t.id && user.id && t.id === user.id) || 
+        (t.username && user.username && t.username.toLowerCase() === user.username.toLowerCase())
+      );
 
-    const assignedClasses = await getTeacherAssignedClasses(schoolId, user.id);
-    const inchargeClasses = assignedClasses.filter(c => c.isIncharge);
+      // If teacher does not exist in live DB or is deactivated, reject immediately (purges demo/stale sessions)
+      if (!liveTeacher || liveTeacher.isActive === false) {
+        return res.status(401).json({
+          success: false,
+          error: 'Teacher account not found or inactive. Please log in with your valid teacher credentials.'
+        });
+      }
+
+      const assignedClasses = liveTeacher.assignedClasses || [];
+      const inchargeClasses = assignedClasses.filter(c => c.isIncharge);
+
+      const freshUser = {
+        id: liveTeacher.id,
+        schoolId,
+        fullName: liveTeacher.fullName,
+        name: liveTeacher.fullName,
+        username: liveTeacher.username,
+        phone: liveTeacher.phone || '',
+        email: liveTeacher.email || '',
+        role: liveTeacher.role || 'teacher',
+        isIncharge: inchargeClasses.length > 0,
+        assignedClasses,
+        inchargeClasses,
+        assignedClassIds: assignedClasses.map(c => c.id)
+      };
+
+      const freshToken = generateAuthToken(freshUser);
+      return res.json({
+        success: true,
+        token: freshToken,
+        user: freshUser
+      });
+    }
+
+    // Verify Admin / Principal live profile from DB
+    let liveRole = user.role;
+    let liveName = user.fullName || user.name || 'Administrator';
+    let liveUsername = user.username || 'admin';
+
+    if (isPostgresConfigured() && user.id !== 'admin-master') {
+      const db = getDb();
+      const liveAdmin = await db('admin_users')
+        .where({ school_id: schoolId, is_active: true })
+        .andWhere(function() {
+          this.where('id', user.id)
+            .orWhere('username', user.username || '')
+            .orWhere('role', 'principal')
+            .orWhere('role', 'admin');
+        })
+        .first();
+
+      if (!liveAdmin) {
+        return res.status(401).json({ success: false, error: 'Administrative account not found or inactive.' });
+      }
+      liveRole = liveAdmin.role;
+      liveName = liveAdmin.full_name;
+      liveUsername = liveAdmin.username;
+    }
 
     const freshUser = {
       ...user,
       fullName: liveName,
+      name: liveName,
+      username: liveUsername,
       role: liveRole,
-      assignedClasses,
-      inchargeClasses,
-      assignedClassIds: assignedClasses.map(c => c.id)
+      assignedClasses: [],
+      inchargeClasses: [],
+      assignedClassIds: []
     };
 
-    // Issue refreshed token reflecting live role
     const freshToken = generateAuthToken(freshUser);
-
     return res.json({
       success: true,
       token: freshToken,

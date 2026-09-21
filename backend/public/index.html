@@ -198,35 +198,44 @@
           </div>
 
           <!-- RESULTS CONTROL SUB-NAV -->
-          <div class="subnav-pills">
-            <button class="subnav-btn active" id="btnSubnavMarksEntry" onclick="switchResultsSubTab('marks-entry')">📝 Marks Entry Sheet</button>
-            <button class="subnav-btn admin-only-btn" id="btnSubnavTermsConfig" onclick="switchResultsSubTab('terms-config')">⚙️ Terms & Subjects Setup</button>
-            <button class="subnav-btn" id="btnSubnavResultsHistory" onclick="switchResultsSubTab('results-history')">📜 Finalized Results & Marksheets</button>
+          <div class="subnav-pills" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
+            <div style="display: flex; gap: 8px; flex-wrap: wrap; align-items: center;">
+              <button class="subnav-btn active" id="btnSubnavMarksEntry" onclick="switchResultsSubTab('marks-entry')">📝 Marks Entry Sheet</button>
+              <button class="subnav-btn admin-only-btn" id="btnSubnavTermsConfig" onclick="switchResultsSubTab('terms-config')">⚙️ Terms & Subjects Setup</button>
+              <button class="subnav-btn" id="btnSubnavResultsHistory" onclick="switchResultsSubTab('results-history')">📜 Finalized Results & Marksheets</button>
+              <button type="button" class="btn btn-sm btn-outline-primary" id="btnSetSubjectMarks" onclick="openSubjectMarksModal()" style="border-radius: 20px; font-weight: 700; font-size: 13px; padding: 7px 16px; display: inline-flex; align-items: center; gap: 7px; color: #38bdf8; border-color: rgba(56, 189, 248, 0.45); background: rgba(56, 189, 248, 0.08); cursor: pointer;">
+                <i class="fa-solid fa-sliders"></i> Set Subject Marks
+              </button>
+            </div>
           </div>
         </div>
 
         <!-- SUB-TAB: MARKS ENTRY SHEET -->
         <div class="results-subtab active" id="res-subtab-marks-entry">
           <div class="card">
-            <div class="card-header-flex">
-              <div class="form-row" style="flex: 1; gap: 15px; margin: 0;">
-                <div class="form-group" style="flex: 1; margin: 0;">
-                  <label style="font-weight: 600;">Select Exam Term *</label>
-                  <select id="marksTermSelect" onchange="loadMarksEntryGrid()"></select>
+            <div class="card-header-flex" style="display: flex; justify-content: space-between; align-items: flex-end; flex-wrap: wrap; gap: 16px;">
+              <div style="display: flex; gap: 16px; align-items: flex-end; flex-wrap: wrap; flex: 1 1 480px; min-width: 320px;">
+                <div class="form-group" style="margin: 0; flex: 1 1 240px; min-width: 220px;">
+                  <label style="font-weight: 600; font-size: 13px; color: #e2e8f0; margin-bottom: 6px; display: block; white-space: nowrap;">
+                    <i class="fa-solid fa-calendar-check" style="color: #38bdf8; margin-right: 5px;"></i>Select Exam Term *
+                  </label>
+                  <select id="marksTermSelect" onchange="loadMarksEntryGrid()" style="width: 100%; min-width: 220px; padding: 10px 14px; font-size: 13px; font-weight: 500; border-radius: 8px; background: #0f172a; border: 1px solid var(--border-color); color: #fff;"></select>
                 </div>
-                <div class="form-group" style="flex: 1; margin: 0;">
-                  <label style="font-weight: 600;">Select Class *</label>
-                  <select id="marksClassSelect" onchange="loadMarksEntryGrid()"></select>
+                <div class="form-group" style="margin: 0; flex: 1 1 200px; min-width: 190px;">
+                  <label style="font-weight: 600; font-size: 13px; color: #e2e8f0; margin-bottom: 6px; display: block; white-space: nowrap;">
+                    <i class="fa-solid fa-graduation-cap" style="color: #38bdf8; margin-right: 5px;"></i>Select Class *
+                  </label>
+                  <select id="marksClassSelect" onchange="loadMarksEntryGrid()" style="width: 100%; min-width: 190px; padding: 10px 14px; font-size: 13px; font-weight: 500; border-radius: 8px; background: #0f172a; border: 1px solid var(--border-color); color: #fff;"></select>
                 </div>
               </div>
-              <div style="display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap;">
-                <button class="btn btn-primary" id="btnMarksAddStudent" onclick="openAddStudentForClass()">
+              <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-left: auto;">
+                <button class="btn btn-primary" id="btnMarksAddStudent" onclick="openAddStudentForClass()" style="white-space: nowrap;">
                   <i class="fa-solid fa-user-plus"></i> Add Student to Class
                 </button>
-                <button class="btn btn-secondary" onclick="handleSaveDraftResults()">
+                <button class="btn btn-secondary" onclick="handleSaveDraftResults()" style="white-space: nowrap;">
                   <i class="fa-solid fa-floppy-disk"></i> Save Draft
                 </button>
-                <button class="btn btn-success" onclick="handleSubmitFinalResults()">
+                <button class="btn btn-success" onclick="handleSubmitFinalResults()" style="white-space: nowrap;">
                   <i class="fa-solid fa-paper-plane"></i> Finalize & Dispatch WhatsApp Marksheets
                 </button>
               </div>
@@ -253,10 +262,10 @@
               </div>
             </div>
 
-            <!-- CLASS SUBJECTS CONFIGURATION -->
+            <!-- CLASS SUBJECTS & MARKS CONFIGURATION -->
             <div class="card">
               <div class="card-header">
-                <h3><i class="fa-solid fa-book-open"></i> Subject Set per Class</h3>
+                <h3><i class="fa-solid fa-book-open"></i> Subject Set & Max Marks per Class</h3>
               </div>
               <form id="classSubjectsForm" onsubmit="handleSaveSubjects(event)">
                 <div class="form-row">
@@ -269,19 +278,48 @@
                     <select id="subjectClassSelect" onchange="loadClassSubjectsForConfig()"></select>
                   </div>
                 </div>
-                <div class="form-group">
-                  <label>Subject List (comma-separated)</label>
-                  <textarea id="subjectListInput" rows="3"
-                    placeholder="e.g. Mathematics, English, Urdu, Physics, Chemistry" required></textarea>
-                  <small class="text-muted">Enter subjects separated by commas. Different classes can have different
-                    subjects.</small>
+
+                <!-- DYNAMIC SUBJECTS & MARKS BUILDER -->
+                <div class="form-group" style="margin-top: 10px;">
+                  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                    <label style="font-weight: 600; margin-bottom: 0;">Subjects & Maximum Marks</label>
+                    <div style="display: flex; gap: 8px;">
+                      <button type="button" class="btn btn-xs btn-secondary" onclick="toggleBulkSubjectInput()">
+                        <i class="fa-solid fa-paste"></i> Quick Paste
+                      </button>
+                      <button type="button" class="btn btn-xs btn-primary" onclick="addSubjectConfigRow()">
+                        <i class="fa-solid fa-plus"></i> Add Subject
+                      </button>
+                    </div>
+                  </div>
+
+                  <!-- Quick Bulk Input Section (Collapsible) -->
+                  <div id="bulkSubjectSection" style="display: none; background: rgba(15, 23, 42, 0.7); border: 1px solid rgba(56, 189, 248, 0.3); border-radius: 8px; padding: 12px; margin-bottom: 12px;">
+                    <label style="font-size: 12px; color: #38bdf8; display: block; margin-bottom: 4px;">Paste comma-separated subjects with marks (e.g. <code>Mathematics: 100, Physics: 75, Urdu: 75, Islamiat: 50</code>):</label>
+                    <textarea id="bulkSubjectTextarea" rows="2" style="width: 100%; font-size: 12px; border-radius: 6px; padding: 6px 10px; background: #0f172a; border: 1px solid var(--border-color); color: #fff;" placeholder="Mathematics: 100, English: 100, Urdu: 75, Physics: 75, Islamiat: 50"></textarea>
+                    <div style="display: flex; justify-content: flex-end; gap: 8px; margin-top: 6px;">
+                      <button type="button" class="btn btn-xs btn-secondary" onclick="toggleBulkSubjectInput()">Cancel</button>
+                      <button type="button" class="btn btn-xs btn-accent" onclick="applyBulkSubjectText()">Apply to Rows</button>
+                    </div>
+                  </div>
+
+                  <!-- Subject Rows Container -->
+                  <div id="subjectRowsContainer" style="display: flex; flex-direction: column; gap: 8px; max-height: 280px; overflow-y: auto; padding-right: 4px;">
+                    <!-- Dynamically populated rows -->
+                  </div>
+
+                  <!-- Total Marks Summary -->
+                  <div style="display: flex; justify-content: space-between; align-items: center; background: rgba(30, 41, 59, 0.6); padding: 8px 12px; border-radius: 6px; margin-top: 10px; border: 1px solid var(--border-color);">
+                    <span style="font-size: 12px; color: #94a3b8;">Total Subjects: <strong id="totalSubjCount" style="color: #fff;">0</strong></span>
+                    <span style="font-size: 13px; font-weight: 700; color: #38bdf8;">Total Exam Marks: <span id="totalMaxMarksSum">0</span></span>
+                  </div>
                 </div>
+
                 <div class="form-group" style="margin-top: 10px; margin-bottom: 16px;">
                   <label style="font-size: 12px; color: #94a3b8; display: block; margin-bottom: 6px;">Currently Configured Subjects in Term:</label>
                   <div id="activeSubjectPills" style="display: flex; flex-wrap: wrap; gap: 8px; min-height: 28px; padding: 10px; background: rgba(15, 23, 42, 0.6); border-radius: 8px; border: 1px dashed rgba(56, 189, 248, 0.25);"></div>
                 </div>
-                <button type="submit" class="btn btn-primary"><i class="fa-solid fa-save"></i> Save Subject
-                  Configuration</button>
+                <button type="submit" class="btn btn-primary"><i class="fa-solid fa-save"></i> Save Subject Configuration</button>
               </form>
             </div>
           </div>
@@ -951,6 +989,57 @@
           <button type="submit" class="btn btn-primary">Create Term</button>
         </div>
       </form>
+    </div>
+  </div>
+
+  <!-- MODAL: SET SUBJECT MARKS (ACCESSIBLE FROM MARKS SHEET & HEADER) -->
+  <div class="modal" id="subjectMarksModal">
+    <div class="modal-dialog" style="max-width: 620px;">
+      <div class="modal-header">
+        <div>
+          <h3><i class="fa-solid fa-sliders"></i> Set Subject Marks Configuration</h3>
+          <p style="font-size: 12px; color: #94a3b8; margin: 2px 0 0 0;" id="modalSubjectMarksSubtitle">Configure subjects and total marks</p>
+        </div>
+        <button class="modal-close" onclick="closeModal('subjectMarksModal')">&times;</button>
+      </div>
+      <div style="padding: 16px;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+          <span style="font-size: 13px; font-weight: 600; color: #e2e8f0;">Subjects & Maximum Marks</span>
+          <div style="display: flex; gap: 8px;">
+            <button type="button" class="btn btn-xs btn-secondary" onclick="toggleModalBulkInput()">
+              <i class="fa-solid fa-paste"></i> Quick Paste
+            </button>
+            <button type="button" class="btn btn-xs btn-primary" onclick="addModalSubjectRow()">
+              <i class="fa-solid fa-plus"></i> Add Subject
+            </button>
+          </div>
+        </div>
+
+        <!-- Collapsible Bulk Input in Modal -->
+        <div id="modalBulkSubjectSection" style="display: none; background: rgba(15, 23, 42, 0.7); border: 1px solid rgba(56, 189, 248, 0.3); border-radius: 8px; padding: 10px; margin-bottom: 12px;">
+          <label style="font-size: 11px; color: #38bdf8; display: block; margin-bottom: 4px;">e.g. <code>Mathematics: 100, Physics: 75, Urdu: 75, Islamiat: 50</code></label>
+          <textarea id="modalBulkSubjectTextarea" rows="2" style="width: 100%; font-size: 12px; border-radius: 6px; padding: 6px 10px; background: #0f172a; border: 1px solid var(--border-color); color: #fff;"></textarea>
+          <div style="display: flex; justify-content: flex-end; gap: 6px; margin-top: 6px;">
+            <button type="button" class="btn btn-xs btn-secondary" onclick="toggleModalBulkInput()">Cancel</button>
+            <button type="button" class="btn btn-xs btn-accent" onclick="applyModalBulkSubjectText()">Apply</button>
+          </div>
+        </div>
+
+        <div id="modalSubjectRowsContainer" style="display: flex; flex-direction: column; gap: 8px; max-height: 280px; overflow-y: auto; padding-right: 4px;">
+          <!-- Dynamically populated rows -->
+        </div>
+
+        <div style="display: flex; justify-content: space-between; align-items: center; background: rgba(30, 41, 59, 0.6); padding: 8px 12px; border-radius: 6px; margin-top: 12px; border: 1px solid var(--border-color);">
+          <span style="font-size: 12px; color: #94a3b8;">Total Subjects: <strong id="modalSubjCount" style="color: #fff;">0</strong></span>
+          <span style="font-size: 13px; font-weight: 700; color: #38bdf8;">Grand Total Marks: <span id="modalTotalMaxMarksSum">0</span></span>
+        </div>
+      </div>
+      <div class="modal-actions" style="padding: 12px 16px; border-top: 1px solid var(--border-color); display: flex; justify-content: flex-end; gap: 10px;">
+        <button type="button" class="btn btn-secondary" onclick="closeModal('subjectMarksModal')">Cancel</button>
+        <button type="button" class="btn btn-primary" id="btnSaveSubjectMarksModal" onclick="handleSaveSubjectMarksFromModal()">
+          <i class="fa-solid fa-save"></i> Save & Apply to Grid
+        </button>
+      </div>
     </div>
   </div>
 
