@@ -1,6 +1,7 @@
 import Constants from 'expo-constants';
 
-const VERCEL_API_BASE = 'https://unique-scholars-attendance.vercel.app/api';
+const CLOUD_API_BASE = 'https://uniquescholars.duckdns.org/api';
+const VERCEL_API_BASE = CLOUD_API_BASE;
 const FALLBACK_LOCAL_IP = '10.36.30.40';
 
 
