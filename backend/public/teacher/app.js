@@ -13,7 +13,7 @@
  */
 
 const CURRENT_SCHOOL_ID = 'unique_scholars';
-const VERCEL_API_BASE = 'https://unique-scholars-attendance.vercel.app/api';
+const CLOUD_API_BASE = '/api';
 
 // State
 let currentUser = null;
@@ -167,51 +167,42 @@ async function autoDetectGateway(notify = false) {
   const saved = localStorage.getItem('usa_local_gateway');
   const candidates = [];
 
-  if (saved) candidates.push(saved.trim().replace(/\/+$/, ''));
-
-  const isLocalHost = window.location.hostname === 'localhost' ||
-                      window.location.hostname === '127.0.0.1' ||
-                      window.location.hostname.startsWith('192.168.') ||
-                      window.location.hostname.startsWith('10.');
-  if (isLocalHost) {
+  // 1. If loaded from the web (e.g. uniquescholars.duckdns.org), origin is the primary All-in-One server
+  if (typeof window !== 'undefined' && window.location && window.location.origin && window.location.protocol.startsWith('http')) {
     candidates.push(window.location.origin);
   }
 
-  candidates.push('http://192.168.100.37:3000');
+  if (saved) candidates.push(saved.trim().replace(/\/+$/, ''));
   candidates.push('http://localhost:3000');
+  candidates.push('http://192.168.100.37:3000');
 
   // Probe candidates
   for (const base of [...new Set(candidates)]) {
     try {
-      const res = await fetch(`${base}/api/whatsapp/gateway-info`, {
-        signal: AbortSignal.timeout(1600)
+      const res = await fetch(`${base}/api/whatsapp/gateway-info?schoolId=${CURRENT_SCHOOL_ID}`, {
+        signal: AbortSignal.timeout(2000)
       });
       if (res.ok) {
-        const data = await res.json();
         backendState = {
-          mode: 'local',
+          mode: 'server',
           url: `${base}/api`,
           gatewayUrl: base
         };
         updateBackendUI();
-        if (notify) showToast(`🟢 Connected to Local Gateway: ${base}`, 'success');
+        if (notify) showToast(`🟢 Connected to Server: ${base}`, 'success');
         return `${base}/api`;
       }
     } catch (e) { }
   }
 
-  // Cloud Fallback: If hosted on Vercel use relative '/api', otherwise use full VERCEL_API_BASE
-  const isVercelHost = window.location.hostname.includes('vercel.app');
-  const cloudUrl = isVercelHost ? '/api' : VERCEL_API_BASE;
-
+  // Fallback: Use relative '/api'
   backendState = {
-    mode: 'cloud',
-    url: cloudUrl,
-    gatewayUrl: 'http://192.168.100.37:3000'
+    mode: 'server',
+    url: '/api',
+    gatewayUrl: (typeof window !== 'undefined' && window.location?.origin) || ''
   };
   updateBackendUI();
-  if (notify) showToast('☁️ Connected to Cloud Server (Vercel)', 'info');
-  return cloudUrl;
+  return '/api';
 }
 
 function updateBackendUI() {
@@ -224,15 +215,10 @@ function updateBackendUI() {
     manualInput.value = backendState.gatewayUrl;
   }
 
-  if (backendState.mode === 'local') {
-    if (dot) dot.className = 'backend-dot local';
-    if (text) {
-      const displayUrl = backendState.gatewayUrl.replace(/^https?:\/\//, '');
-      text.textContent = `Local (${displayUrl})`;
-    }
-  } else {
-    if (dot) dot.className = 'backend-dot cloud';
-    if (text) text.textContent = 'Cloud (Vercel)';
+  if (dot) dot.className = 'backend-dot local';
+  if (text) {
+    const isDomain = window.location.hostname.includes('.');
+    text.textContent = isDomain ? 'Server (Online)' : 'Local (Online)';
   }
 }
 
@@ -276,14 +262,10 @@ async function safeFetch(path, options = {}) {
     return res;
   } catch (err) {
     clearTimeout(timer);
-    // If local fails, transparently retry on Cloud
-    if (backendState.mode === 'local') {
-      const isVercelHost = window.location.hostname.includes('vercel.app');
-      const cloudBase = isVercelHost ? '/api' : VERCEL_API_BASE;
-      backendState = { mode: 'cloud', url: cloudBase, gatewayUrl: backendState.gatewayUrl };
-      updateBackendUI();
-      const cloudUrl = `${cloudBase}${cleanPath}`;
-      return await fetch(cloudUrl, { ...options, headers, signal: AbortSignal.timeout(30000) });
+    // Transparent retry with relative /api if not already used
+    if (fullUrl.startsWith('http') && !fullUrl.startsWith(window.location.origin)) {
+      const fallbackUrl = `/api${cleanPath}`;
+      return await fetch(fallbackUrl, { ...options, headers, signal: AbortSignal.timeout(30000) });
     }
     throw err;
   }
@@ -295,16 +277,7 @@ async function safeFetch(path, options = {}) {
 
 async function checkWhatsAppStatus(notify = false) {
   try {
-    let res = null;
-    try {
-      res = await safeFetch('/whatsapp/status', { timeout: 3500 });
-    } catch (e) {
-      // Direct cloud fallback
-      res = await fetch(`${VERCEL_API_BASE}/whatsapp/status?schoolId=${CURRENT_SCHOOL_ID}`, {
-        signal: AbortSignal.timeout(4000)
-      });
-    }
-
+    const res = await safeFetch(`/whatsapp/status?schoolId=${CURRENT_SCHOOL_ID}`, { timeout: 4000 });
     if (!res || !res.ok) {
       throw new Error('Status fetch failed');
     }
@@ -332,16 +305,21 @@ async function checkWhatsAppStatus(notify = false) {
     if (modalText) modalText.textContent = isConnected ? 'WhatsApp Gateway Online 🟢' : 'WhatsApp Gateway Offline 🔴';
     if (modalDesc) {
       modalDesc.textContent = isConnected
-        ? 'School WhatsApp Gateway is active. Parent attendance alerts, broadcast notices, and marksheet report cards will dispatch automatically.'
-        : 'WhatsApp is currently offline. If you are using your phone, ensure your PC is running "npm run dev", or connect to the school Wi-Fi.';
+        ? 'School WhatsApp Gateway is active on server. Parent attendance alerts, broadcast notices, and marksheet report cards will dispatch automatically.'
+        : 'WhatsApp is currently offline. Please open the Admin Portal to pair or reconnect the WhatsApp session.';
     }
-    if (modalUrl) modalUrl.textContent = backendState.gatewayUrl || (backendState.mode === 'local' ? backendState.url : 'Local Gateway: http://192.168.100.37:3000');
+    if (modalUrl) modalUrl.textContent = backendState.gatewayUrl || window.location.origin;
 
     if (notify) {
       showToast(isConnected ? '🟢 WhatsApp Gateway is Active & Online!' : '🔴 WhatsApp Gateway is Offline.', isConnected ? 'success' : 'error');
     }
   } catch (e) {
-    // Ignore network blip
+    const badge = document.getElementById('headerWaBadge');
+    const dot = document.getElementById('waStatusDot');
+    const text = document.getElementById('waStatusText');
+    if (badge) badge.className = 'wa-badge offline';
+    if (dot) dot.className = 'status-dot offline';
+    if (text) text.textContent = 'WA Offline';
   }
 }
 
