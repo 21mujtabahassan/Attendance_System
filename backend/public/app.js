@@ -53,6 +53,7 @@ function getAuthHeaders() {
   const headers = { 'Content-Type': 'application/json' };
   if (authToken) {
     headers['Authorization'] = `Bearer ${authToken}`;
+    headers['x-auth-token'] = authToken;
   }
   return headers;
 }
@@ -1670,7 +1671,7 @@ async function handleCreateTerm(e) {
   try {
     const res = await fetch(`${API_BASE}/admin/results/terms`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: getAuthHeaders(),
       body: JSON.stringify({ schoolId: CURRENT_SCHOOL_ID, name, date, description, status: 'Active' })
     });
     const data = await res.json();
@@ -1690,7 +1691,10 @@ async function handleCreateTerm(e) {
 async function handleDeleteTerm(termId) {
   if (!confirm('Are you sure you want to delete this exam term?')) return;
   try {
-    const res = await fetch(`${API_BASE}/admin/results/terms/${termId}?schoolId=${CURRENT_SCHOOL_ID}`, { method: 'DELETE' });
+    const res = await fetch(`${API_BASE}/admin/results/terms/${termId}?schoolId=${CURRENT_SCHOOL_ID}`, {
+      method: 'DELETE',
+      headers: getAuthHeaders()
+    });
     const data = await res.json();
     if (data.success) {
       showToast('Term deleted.');
@@ -2499,7 +2503,7 @@ async function handleCreateTemplate(e) {
   try {
     const res = await fetch(`${API_BASE}/admin/broadcast/templates`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: getAuthHeaders(),
       body: JSON.stringify({ schoolId: CURRENT_SCHOOL_ID, title, category, body })
     });
     const data = await res.json();
@@ -2580,7 +2584,7 @@ async function handleCreateClass(e) {
   try {
     const res = await fetch(`${API_BASE}/admin/classes`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: getAuthHeaders(),
       body: JSON.stringify({ schoolId: CURRENT_SCHOOL_ID, name, sections })
     });
     const data = await res.json();
@@ -2589,6 +2593,8 @@ async function handleCreateClass(e) {
       closeModal('addClassModal');
       await fetchClasses();
       renderClassesGrid();
+    } else {
+      showToast(data.error || 'Failed to create class.');
     }
   } catch (e) {
     showToast('Error creating class.');
@@ -2636,7 +2642,7 @@ async function handleAddSectionSubmit(e) {
   try {
     const res = await fetch(`${API_BASE}/admin/classes/${classId}/sections`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: getAuthHeaders(),
       body: JSON.stringify({ schoolId: CURRENT_SCHOOL_ID, sectionName })
     });
     const data = await res.json();
@@ -2976,7 +2982,7 @@ async function handleUnlockAttendanceSubmit(event) {
 
     const res = await fetch(`${API_BASE}/admin/attendance/unlock`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: getAuthHeaders(),
       body: JSON.stringify({
         schoolId: CURRENT_SCHOOL_ID,
         classId,
