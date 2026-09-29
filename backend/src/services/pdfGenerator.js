@@ -216,8 +216,8 @@ function getAssets() {
  */
 function generateAcademicResultPdf({
   schoolName = 'UNIQUE SCHOLARS',
-  schoolAddress = 'Main Campus | Phone: 03001234567',
-  schoolPhone = '',
+  schoolAddress = 'Main Campus | Phone: 03124743157',
+  schoolPhone = '03124743157',
   termName = 'Mid Term 2026',
   studentId = 'STU-000055',
   studentName = 'Student Name',
@@ -286,7 +286,7 @@ function generateAcademicResultPdf({
   if (schoolPhone && !fullAddress.includes(schoolPhone)) {
     fullAddress += ` | Phone: ${schoolPhone}`;
   } else if (!fullAddress.includes('Phone:') && !fullAddress.includes('Tel:')) {
-    fullAddress += ' | Phone: 03001234567';
+    fullAddress += ' | Phone: 03124743157';
   }
   doc.text(fullAddress, frameX, headerTopY + 26, { font: 'F1', size: 9.5, color: cMuted, align: 'center', width: frameW });
 

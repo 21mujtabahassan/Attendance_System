@@ -16,7 +16,7 @@ const DATA_DIR = isVercel ? '/tmp/attendance_data' : path.join(__dirname, '..', 
 const DB_FILE = path.join(DATA_DIR, 'unique_scholars_db.json');
 
 const INITIAL_DB = {
-  schools: [{ id: 'unique_scholars', name: 'UNIQUE SCHOLARS', code: 'USA-01', phone: '03334751998', address: 'Main Campus, Lahore' }],
+  schools: [{ id: 'unique_scholars', name: 'UNIQUE SCHOLARS', code: 'USA-01', phone: '03124743157', address: 'Main Campus, Lahore' }],
   classes: [
     { id: 'class-play', schoolId: 'unique_scholars', name: 'Class Play', sections: ['Section A', 'Section B'] },
     { id: 'class-nursery', schoolId: 'unique_scholars', name: 'Class Nursery', sections: ['Section A'] },
@@ -77,11 +77,26 @@ function computeGradeAndStatus(percentage) {
 // -------------------------------------------------------------
 // 1. SCHOOLS
 // -------------------------------------------------------------
+let defaultSchoolPhoneSynced = false;
+async function ensureDefaultSchoolPhoneSync() {
+  if (defaultSchoolPhoneSynced) return;
+  try {
+    if (isPostgresConfigured()) {
+      const db = getDb();
+      if (db) {
+        await db('schools').where({ id: 'unique_scholars' }).update({ phone: '03124743157' });
+        defaultSchoolPhoneSynced = true;
+      }
+    }
+  } catch (_) {}
+}
+
 async function getSchools() {
   if (isPostgresConfigured()) {
+    await ensureDefaultSchoolPhoneSync();
     const db = getDb();
     const rows = await db('schools').where({ is_active: true });
-    return rows.map(r => ({ id: r.id, name: r.name, code: r.code, phone: r.phone, address: r.address }));
+    return rows.map(r => ({ id: r.id, name: r.name, code: r.code, phone: r.phone || '03124743157', address: r.address }));
   }
   return readJsonDb().schools || [];
 }
@@ -2353,7 +2368,7 @@ async function authenticateUser(loginId, password, schoolId = 'unique_scholars')
           schoolId,
           fullName: 'Principal Office',
           username: 'admin',
-          phone: '03334751998',
+          phone: '03124743157',
           role: 'principal',
           inchargeClasses: [],
           assignedClasses: [],

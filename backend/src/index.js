@@ -1456,7 +1456,7 @@ app.get('/api/admin/results/pdf/:resultId', async (req, res) => {
 
   const r = results[0];
   const schools = await getSchools();
-  const school = schools.find(s => s.id === r.schoolId) || { name: 'UNIQUE SCHOLARS', address: 'Main Campus', phone: '03001234567' };
+  const school = schools.find(s => s.id === r.schoolId) || { name: 'UNIQUE SCHOLARS', address: 'Main Campus', phone: '03124743157' };
   const terms = await getResultTerms(r.schoolId);
   const term = terms.find(t => t.id === r.termId) || { name: r.termId };
   const classes = await getClasses(r.schoolId);
@@ -1739,7 +1739,7 @@ app.get('/api/admin/results/pdf/:resultId', async (req, res) => {
           <img class="header-logo" src="/logo.png" onerror="this.src='/admin/logo.png'" alt="School Logo" crossorigin="anonymous" />
           <div class="header-titles">
             <h1 class="school-name">${school.name}</h1>
-            <p class="school-address">${school.address} | Phone: ${school.phone || '0300-1234567'}</p>
+            <p class="school-address">${school.address} | Phone: ${school.phone || '03124743157'}</p>
             <div><span class="badge-statement">Statement of Marks</span></div>
             <p class="term-title">${term.name}</p>
           </div>

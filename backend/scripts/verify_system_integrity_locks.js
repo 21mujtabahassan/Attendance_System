@@ -91,7 +91,7 @@ async function runAllIntegrityLocks() {
 
     const pdfBuf = generateAcademicResultPdf({
       schoolName: 'UNIQUE SCHOLARS',
-      schoolAddress: 'Main Campus | Phone: 03001234567',
+      schoolAddress: 'Main Campus | Phone: 03124743157',
       termName: 'Mid Term 2026',
       studentId: 'STU-000055',
       studentName: 'Kuchu Puchu',
